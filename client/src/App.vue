@@ -58,7 +58,6 @@
 </template>
 
 <script setup>
-
 //import libraries
 import { ref, onMounted, provide } from "vue";
 import yaml from "js-yaml";
@@ -87,7 +86,7 @@ const validateConfig = (config) => {
 
   // 1. Basic Structure Checks
   if (!config.view) throw new Error("Missing 'view' section.");
-  CONFIG_SCHEMA.view.required.forEach(field => {
+  CONFIG_SCHEMA.view.required.forEach((field) => {
     if (config.view[field] === undefined) {
       throw new Error(`view.${field} is required.`);
     }
@@ -100,21 +99,29 @@ const validateConfig = (config) => {
 
   const baseOrders = [];
   config.base_layers.forEach((layer, index) => {
-    const prefix = `base_layers[${index}] (${layer.name || 'unnamed'})`;
-    
+    const prefix = `base_layers[${index}] (${layer.name || "unnamed"})`;
+
     // Check type validity
     if (!CONFIG_SCHEMA.layerTypes[layer.type]) {
-      throw new Error(`${prefix}: Invalid type '${layer.type}'. Allowed: ${Object.keys(CONFIG_SCHEMA.layerTypes).join(", ")}`);
+      throw new Error(
+        `${prefix}: Invalid type '${layer.type}'. Allowed: ${Object.keys(
+          CONFIG_SCHEMA.layerTypes
+        ).join(", ")}`
+      );
     }
 
     // Check specific attributes for that type
     const requiredFields = CONFIG_SCHEMA.layerTypes[layer.type].required;
-    requiredFields.forEach(field => {
-      if (!layer[field]) throw new Error(`${prefix}: Missing required field '${field}' for type '${layer.type}'.`);
+    requiredFields.forEach((field) => {
+      if (!layer[field])
+        throw new Error(
+          `${prefix}: Missing required field '${field}' for type '${layer.type}'.`
+        );
     });
 
     // Check Order Logic
-    if (typeof layer.order !== 'number') throw new Error(`${prefix}: 'order' must be a number.`);
+    if (typeof layer.order !== "number")
+      throw new Error(`${prefix}: 'order' must be a number.`);
     baseOrders.push(layer.order);
   });
 
@@ -126,26 +133,33 @@ const validateConfig = (config) => {
   // 3. Validate Overlay Layers
   if (config.overlay_layers) {
     config.overlay_layers.forEach((layer, index) => {
-      const prefix = `overlay_layers[${index}] (${layer.name || 'unnamed'})`;
-      
+      const prefix = `overlay_layers[${index}] (${layer.name || "unnamed"})`;
+
       if (layer.type !== "geojson") {
-        throw new Error(`${prefix}: Currently only 'geojson' is supported for overlays.`);
+        throw new Error(
+          `${prefix}: Currently only 'geojson' is supported for overlays.`
+        );
       }
 
       const requiredGeoJson = CONFIG_SCHEMA.layerTypes.geojson.required;
-      requiredGeoJson.forEach(field => {
-        if (!layer[field]) throw new Error(`${prefix}: Missing required field '${field}'.`);
+      requiredGeoJson.forEach((field) => {
+        if (!layer[field])
+          throw new Error(`${prefix}: Missing required field '${field}'.`);
       });
     });
   }
 
   // 4. Global Logic: Ensure exactly one visible base layer
-  const visibleBaseLayers = config.base_layers.filter(l => l.visible);
+  const visibleBaseLayers = config.base_layers.filter((l) => l.visible);
   if (visibleBaseLayers.length === 0) {
-    throw new Error("No base layer is set to 'visible: true'. The map will be empty.");
+    throw new Error(
+      "No base layer is set to 'visible: true'. The map will be empty."
+    );
   }
   if (visibleBaseLayers.length > 1) {
-    throw new Error("Multiple base layers are set to 'visible: true'. Please choose only one default.");
+    throw new Error(
+      "Multiple base layers are set to 'visible: true'. Please choose only one default."
+    );
   }
 
   return true;
@@ -153,6 +167,12 @@ const validateConfig = (config) => {
 
 // provide config to the rest of the app
 provide("config", appConfig);
+
+// Shared ref for the layer manager. It's null until MapWidget mounts and
+// creates the manager (it needs the OL map instance first). SideBar and
+// SearchBar inject this and guard on it being non-null before use.
+const layerManagerRef = ref(null);
+provide("layerManager", layerManagerRef);
 
 // settings variables
 const settingsStore = useSettingsStore();
@@ -174,7 +194,9 @@ onMounted(async () => {
     // Prevent parsing if the server sent back index.html as a fallback
     const contentType = res.headers.get("content-type");
     if (contentType && contentType.includes("text/html")) {
-      throw new Error("The server returned HTML instead of YAML. Check if the file name is correct.");
+      throw new Error(
+        "The server returned HTML instead of YAML. Check if the file name is correct."
+      );
     }
 
     // Get text of the response
@@ -194,7 +216,6 @@ onMounted(async () => {
     // Success
     appConfig.value = parsed;
     isConfigLoaded.value = true;
-
   } catch (e) {
     console.error(e);
     configError.value = e.message; // <--- Set the error to show modal
@@ -210,6 +231,10 @@ body {
   padding: 0;
   height: 100%;
   overflow: hidden;
+
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  -webkit-font-smoothing: antialiased; /* Makes text look sharper */
+  -moz-osx-font-smoothing: grayscale;
 }
 #app {
   height: 100%;

@@ -3,17 +3,26 @@
     "metadata": {
       "hasThumbnails": true,
       "thumbnailTemplate": "https://data.pgc.umn.edu/aerial/usgs/tma/photos/thumb/CA{tma_number}/CA{tma_number}32V/{image_id}_thumbnail.jpg",
-      "headerAttribute": "image_id"
+      "headerAttribute": "image_id",
       "hasDownloadLinks": true,
       "downloadLinkTemplate": "https://data.pgc.umn.edu/aerial/usgs/tma/photos/full/CA{tma_number}/CA{tma_number}32V/{image_id}.tif",
       "has3DModels": true,
-      
+      "3DModelTemplate": "https://3d.pgc.umn.edu/models/{image_id}.html"
     },
     "attributes": {
       "attributesFile": "attributes/images.csv",
       "attributesKey": "image_id",
       "attributesDelimiter": ";",
       "ownKey": "image_id"
+    }
+  },
+  "shapes/tma_lines.geojson": {
+    "metadata": {},
+    "attributes": {
+      "attributesFile": "attributes/tma_lines.csv",
+      "attributesKey": "tma_num",
+      "attributesDelimiter": ";",
+      "ownKey": "tma_num"
     }
   }
 }

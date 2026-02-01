@@ -55,18 +55,18 @@ base_layers:
       extent: [-4194304, -4194304, 4194304, 4194304]
       resolutions: [16384, 8192, 4096, 2048, 1024, 512, 256, 128, 64]
 
-  - name: "Sentinel-2 Cloudless 2020"
+  - name: "Sentinel-2"
     type: "wmts"
     url: "https://tiles.maps.eox.at/wmts/1.0.0/"
-    layer: "s2cloudless-2020_3857"
+    layer: "s2cloudless-2020"    # Note: Removed "_3857" suffix
     style: "default"
-    matrixSet: "GoogleMapsCompatible"
+    matrixSet: "WGS84"           # Note: Changed from GoogleMapsCompatible
     format: "image/jpeg"
     visible: false
     order: 4
     attribution: "Sentinel-2 cloudless by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2020)"
 
-  - name: "ESRI World Imagery"
+  - name: "ESRI"
     type: "wms"
     url: "https://services.arcgisonline.com/arcgis/services/World_Imagery/MapServer/WMSServer"
     layers: "0"
@@ -143,3 +143,9 @@ overlay_layers:
     visible: false
     color: "#00ccff"
     search_fields: ["glac_name"]
+  - name: "TMA Flight Lines"
+    type: "geojson"
+    url: "http://localhost:3000/data/tma_lines.geojson"
+    visible: true
+    color: "#33cc33"
+    search_fields: ["tma_num"]

@@ -113,7 +113,7 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { ref, inject } from "vue";
 import { storeToRefs } from "pinia";
 import { useLayerStore } from "../stores/layerStore";
 import { useMapStore } from "../stores/mapStore";
@@ -124,6 +124,7 @@ defineEmits(['open-settings']);
 
 const layerStore = useLayerStore();
 const mapStore = useMapStore();
+const layerManager = inject("layerManager"); // ref — access via .value
 
 const { overlayLayers } = storeToRefs(layerStore);
 const contextMenuRef = ref(null);
@@ -189,7 +190,10 @@ const handleMenuAction = ({ type, layer }) => {
 };
 
 const handleColorChange = ({ color, layer }) => {
+  // 1. Update the stored color value
   layerStore.updateLayerColor(layer._layerId, color);
+  // 2. Re-style the OL features to match (composable owns OL logic)
+  if (layerManager.value) layerManager.value.applyLayerColor(layer._layerId);
 };
 
 const handleRetry = (layerId) => {

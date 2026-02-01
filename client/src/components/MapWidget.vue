@@ -24,6 +24,7 @@ import { Stroke, Style, Fill } from "ol/style";
 
 const configRef = inject("config");
 const config = configRef.value;
+const layerManagerRef = inject("layerManager");
 const mapStore = useMapStore();
 const selectionStore = useSelectionStore();
 const layerStore = useLayerStore();
@@ -86,6 +87,8 @@ onMounted(async () => {
 
   // 4. Initialize Manager and load layers
   layerManager = useLayerManager(map);
+  // Fill the shared ref so SideBar / SearchBar can see the manager
+  layerManagerRef.value = layerManager;
 
   const promises = [];
   if (config.base_layers) {

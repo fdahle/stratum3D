@@ -8,11 +8,11 @@
 
       <div class="panel-content">
         <div
-          v-if="selectedFeature.properties._thumbnail_url"
+          v-if="selectedFeature.properties._thumbnailUrl"
           class="thumbnail-wrapper"
         >
           <img
-            :src="selectedFeature.properties._thumbnail_url"
+            :src="selectedFeature.properties._thumbnailUrl"
             alt="Feature Thumbnail"
             class="feature-thumbnail"
           />
@@ -72,8 +72,6 @@ const { clearSelection } = selectionStore;
 const displayProperties = computed(() => {
   if (!selectedFeature.value?.properties) return {};
 
-  console.log("Selected Feature Properties:", selectedFeature.value.properties);
-
   const props = selectedFeature.value.properties;
 
   return Object.keys(props)
@@ -96,9 +94,10 @@ const featureTitle = computed(() => {
   if (!props?._layerId) return null;
 
   const layer = layerStore.layers.find((l) => l._layerId === props._layerId);
-  console.log("Associated Layer:", layer);
   const metadata = layer?.metadata || {};
   const headerKey = metadata.headerAttribute;
+
+  console.log("Header Key:", metadata);
 
   // Return the value if the key exists in properties, otherwise null
   return headerKey && props[headerKey] ? props[headerKey] : null;

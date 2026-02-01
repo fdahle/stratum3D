@@ -15,13 +15,31 @@ import { createXYZ } from "ol/tilegrid";
 import TileGrid from "ol/tilegrid/TileGrid";
 import WMTS from "ol/source/WMTS";
 import WMTSTileGrid from "ol/tilegrid/WMTS";
-import TileWMS from "ol/source/TileWMS"; // <--- 1. ADD THIS IMPORT
+import TileWMS from "ol/source/TileWMS";
 
 export function useLayerManager(map) {
   const layerStore = useLayerStore();
   const selectionStore = useSelectionStore();
-  const layerRegistry = {}; // Maps feature ID -> OL Feature
   const activeWorkers = new Map();
+
+  // ---------------------------------------------------------------------------
+  // #5 — Search index: layerId → Map<lowerCaseName, OL Feature>
+  // Built once per layer when it finishes loading; SearchBar reads it instead
+  // of scanning every feature on every keystroke.
+  // ---------------------------------------------------------------------------
+  const searchIndex = new Map();
+
+  // ---------------------------------------------------------------------------
+  // #4 — Register the cancel handler so the store can terminate workers.
+  // The store calls this function when cancelLayerLoad() is invoked.
+  // ---------------------------------------------------------------------------
+  layerStore.registerCancelHandler((layerId) => {
+    const worker = activeWorkers.get(layerId);
+    if (worker) {
+      worker.terminate();
+      activeWorkers.delete(layerId);
+    }
+  });
 
   // Watcher to trigger downloads - only watch the specific conditions we care about
   // Using a computed to extract only the relevant data prevents unnecessary re-runs
@@ -119,23 +137,19 @@ export function useLayerManager(map) {
         properties: { name: layerConf.name, id: layerId },
       });
 
-      // Add to store
-      layerStore.addLayer(
+      // #2 — options object
+      layerStore.addLayer({
         layerId,
-        layerConf.name,
-        olLayer,
-        "tile",
+        name: layerConf.name,
+        layerInstance: olLayer,
+        type: "tile",
         category,
-        layerConf.visible,
-        "tile",
-        null, // color, only for vector layers
-        layerConf.order,
-        layerConf.url,
-      );
+        visible: layerConf.visible,
+        url: layerConf.url,
+      });
 
       // ALWAYS add to map immediately (visibility controlled via setVisible)
       map.addLayer(olLayer);
-      // set layer to ready
       layerStore.setLayerStatus(layerId, "ready");
     }
 
@@ -159,21 +173,18 @@ export function useLayerManager(map) {
         properties: { name: layerConf.name, id: layerId },
       });
 
-      layerStore.addLayer(
+      // #2 — options object
+      layerStore.addLayer({
         layerId,
-        layerConf.name,
-        olLayer,
-        "wms",
+        name: layerConf.name,
+        layerInstance: olLayer,
+        type: "wms",
         category,
-        layerConf.visible,
-        "tile",
-        null,
-        layerConf.order,
-        layerConf.url,
-      );
+        visible: layerConf.visible,
+        url: layerConf.url,
+      });
 
       map.addLayer(olLayer);
-      // Mark as ready immediately so the switcher sees it
       layerStore.setLayerStatus(layerId, "ready");
     }
 
@@ -198,41 +209,39 @@ export function useLayerManager(map) {
       const olLayer = new TileLayer({
         source: source,
         visible: layerConf.visible,
-        zIndex: category === "base" ? 0 : 100,
+        zIndex: zIndex,
         properties: { name: layerConf.name, id: layerId },
       });
 
       map.addLayer(olLayer);
-      layerStore.addLayer(
+
+      // #2 — options object
+      layerStore.addLayer({
         layerId,
-        layerConf.name,
-        olLayer,
-        "wmts",
+        name: layerConf.name,
+        layerInstance: olLayer,
+        type: "wmts",
         category,
-        layerConf.visible,
-        "tile",
-        null, // color, only for vector layers
-        layerConf.order,
-        layerConf.url,
-      );
+        visible: layerConf.visible,
+        url: layerConf.url,
+      });
       layerStore.setLayerStatus(layerId, "ready");
     }
 
     // --- GEOJSON LAYERS ---
     if (layerConf.type === "geojson") {
-      // Placeholder for Vector Layer
-      layerStore.addLayer(
+      // #2 — options object (layerInstance is null; status will be "idle" until downloaded)
+      layerStore.addLayer({
         layerId,
-        layerConf.name,
-        null,
-        "geojson",
+        name: layerConf.name,
+        layerInstance: null,
+        type: "geojson",
         category,
-        layerConf.visible,
-        "unknown",
-        layerConf.color,
-        0, // order (only for basemaps)
-        layerConf.url,
-      );
+        visible: layerConf.visible,
+        color: layerConf.color,
+        url: layerConf.url,
+        searchFields: layerConf.search_fields || [],
+      });
     }
   };
 
@@ -262,13 +271,12 @@ export function useLayerManager(map) {
         console.error("Worker Error:", error);
         layerStore.setLayerError(layer._layerId, error);
         worker.terminate();
+        activeWorkers.delete(layer._layerId);
       }
     };
   };
 
   const finalizeGeoJsonLayer = async (geoJsonData, layer, worker) => {
-    const layerStore = useLayerStore();
-
     // Signal that we're now in the processing (parsing) phase
     layerStore.setLayerStatus(layer._layerId, "processing");
     layerStore.setLayerProgress(layer._layerId, 0);
@@ -289,8 +297,10 @@ export function useLayerManager(map) {
 
     // 3. Process features in chunks, yielding to the browser between each batch
     //    so the UI (progress bar, spinner) stays responsive on huge layers.
+    //    Also builds the search index in the same pass — zero extra cost.
     const BATCH_SIZE = 2000;
     const totalFeatures = features.length;
+    const layerSearchIndex = new Map(); // name (lowercase) → feature
 
     for (let i = 0; i < totalFeatures; i += BATCH_SIZE) {
       const end = Math.min(i + BATCH_SIZE, totalFeatures);
@@ -309,7 +319,23 @@ export function useLayerManager(map) {
           feature.setStyle(vectorStyle);
         }
 
-        layerRegistry[fid] = feature;
+        // Index this feature by every field declared in search_fields.
+        // Layers with no searchFields are skipped entirely (no index built).
+        if (layer.searchFields && layer.searchFields.length > 0) {
+          const props = feature.getProperties();
+          for (const field of layer.searchFields) {
+            const value = props[field];
+            if (value != null && String(value) !== "") {
+              // key = lowercase value, value = { feature, displayValue }
+              // displayValue lets SearchBar show the original (un-lowercased) value
+              // without having to re-guess which field it came from.
+              layerSearchIndex.set(
+                String(value).toLowerCase(),
+                { feature, displayValue: String(value) }
+              );
+            }
+          }
+        }
       }
 
       // Update progress and yield to let the browser paint
@@ -317,6 +343,9 @@ export function useLayerManager(map) {
       layerStore.setLayerProgress(layer._layerId, progress);
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
+
+    // Store the search index for this layer
+    searchIndex.set(layer._layerId, layerSearchIndex);
 
     // 4. Create Source and Layer (all features are styled, this is fast)
     const source = new VectorSource({ features });
@@ -356,10 +385,44 @@ export function useLayerManager(map) {
     activeWorkers.delete(layer._layerId);
   };
 
+  // ---------------------------------------------------------------------------
+  // #1 — OL color-mutation logic lives here, not in the store.
+  // Called by SideBar after the store has already updated layer.color.
+  // ---------------------------------------------------------------------------
+  const applyLayerColor = (layerId) => {
+    const layerObj = layerStore.getLayerById(layerId);
+    if (!layerObj || !layerObj.layerInstance) return;
+
+    const newColor = layerObj.color;
+    const olLayer = layerObj.layerInstance;
+    const source = olLayer.getSource();
+    if (!source) return;
+
+    const newVectorStyle = new Style({
+      stroke: new Stroke({ color: newColor, width: 2 }),
+      fill: new Fill({ color: newColor + "80" }),
+    });
+    const newPinStyle = createPinStyle(newColor);
+
+    // Apply style directly to each feature (better performance than a style function)
+    source.getFeatures().forEach((feature) => {
+      const type = feature.getGeometry().getType();
+      if (type === "Point" || type === "MultiPoint") {
+        feature.setStyle(newPinStyle);
+      } else {
+        feature.setStyle(newVectorStyle);
+      }
+    });
+
+    // Clear any layer-level style so per-feature styles take effect
+    olLayer.setStyle(null);
+  };
+
   const cleanup = () => {
     activeWorkers.forEach((w) => w.terminate());
     activeWorkers.clear();
+    searchIndex.clear();
   };
 
-  return { processLayer, cleanup, layerRegistry };
+  return { processLayer, cleanup, applyLayerColor, searchIndex };
 }

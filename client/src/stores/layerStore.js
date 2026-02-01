@@ -1,8 +1,6 @@
 // client/src/stores/layerStore.js
 import { defineStore } from "pinia";
 import { markRaw, ref, computed } from "vue";
-import { createPinStyle } from "../composables/utils"; 
-import { Style, Stroke, Fill } from "ol/style"; 
 
 // Simple debounce implementation
 function debounce(func, wait) {
@@ -24,18 +22,32 @@ export const useLayerStore = defineStore("layers", () => {
   const layerIndex = new Map();
 
   // --- ACTIONS ---
-  const addLayer = (
+
+  /**
+   * @param {object} opts
+   * @param {string}        opts.layerId
+   * @param {string}        opts.name
+   * @param {object|null}   opts.layerInstance   - OL layer (null for deferred geojson)
+   * @param {string}        opts.type            - "tile" | "wms" | "wmts" | "geojson"
+   * @param {string}        opts.category        - "base" | "overlay"
+   * @param {boolean}       opts.visible
+   * @param {string}        [opts.geometryType]  - "point" | "line" | "polygon" | "unknown"
+   * @param {string}        [opts.color]
+   * @param {string|null}   [opts.url]
+   * @param {string[]}      [opts.searchFields]
+   */
+  const addLayer = ({
     layerId,
     name,
     layerInstance,
     type,
     category,
-    isVisible,
-    geometryType,
-    color,
+    visible,
+    geometryType = "unknown",
+    color = "#3388ff",
     url = null,
-    searchFields = null
-  ) => {
+    searchFields = [],
+  }) => {
     if (layers.value.some((l) => l._layerId === layerId)) return;
 
     let initialStatus = "ready";
@@ -44,12 +56,7 @@ export const useLayerStore = defineStore("layers", () => {
     }
 
     // Set z-index based on category
-    let zIndex = 0;
-    if (category === "base") {
-      zIndex = 0; // Base layers at bottom
-    } else if (category === "overlay") {
-      zIndex = 100; // Overlay layers on top
-    }
+    const zIndex = category === "base" ? 0 : 100;
 
     if (layerInstance) {
       layerInstance.setZIndex(zIndex);
@@ -60,16 +67,16 @@ export const useLayerStore = defineStore("layers", () => {
       name,
       type,
       category,
-      active: isVisible,
+      active: visible,
       layerInstance: layerInstance ? markRaw(layerInstance) : null,
-      geometryType: geometryType || "unknown",
-      color: color || "#3388ff",
+      geometryType,
+      color,
       url,
       progress: 0,
       status: initialStatus,
       error: null,
-      zIndex: zIndex,
-      searchFields: searchFields || [],
+      zIndex,
+      searchFields,
     };
     layers.value.push(layerObj);
     // Index must point to the reactive proxy that Vue created, not the raw object.
@@ -133,9 +140,17 @@ export const useLayerStore = defineStore("layers", () => {
     }
   };
 
+  // Callback registered by useLayerManager so the store can reach the worker.
+  // The composable sets this once; the store calls it on cancel.
+  let _onCancelLayer = null;
+  const registerCancelHandler = (handler) => { _onCancelLayer = handler; };
+
   const cancelLayerLoad = (layerId) => {
     const layer = layerIndex.get(layerId);
     if (layer && ['downloading', 'processing', 'loading-details'].includes(layer.status)) {
+      // 1. Terminate the worker (via the composable's handler)
+      if (_onCancelLayer) _onCancelLayer(layerId);
+      // 2. Reset state
       layer.status = 'idle';
       layer.progress = 0;
       layer.active = false;
@@ -182,35 +197,12 @@ export const useLayerStore = defineStore("layers", () => {
     }
   };
 
-  // UPDATED: Color Update Logic for OpenLayers - applies style per feature for performance
+  // Updates the stored color value only.
+  // The composable's applyLayerColor() handles re-styling OL features.
   const updateLayerColor = (layerId, newColor) => {
     const layerObj = layerIndex.get(layerId);
-    if (!layerObj || !layerObj.layerInstance) return;
-
+    if (!layerObj) return;
     layerObj.color = newColor;
-    const olLayer = layerObj.layerInstance;
-    const source = olLayer.getSource();
-    if (!source) return;
-
-    // Create new styles
-    const newVectorStyle = new Style({
-        stroke: new Stroke({ color: newColor, width: 2 }),
-        fill: new Fill({ color: newColor + "80" })
-    });
-    const newPinStyle = createPinStyle(newColor);
-
-    // Apply style directly to each feature (better performance than style function)
-    source.getFeatures().forEach(feature => {
-      const type = feature.getGeometry().getType();
-      if (type === "Point" || type === "MultiPoint") {
-        feature.setStyle(newPinStyle);
-      } else {
-        feature.setStyle(newVectorStyle);
-      }
-    });
-    
-    // Clear layer style function to use per-feature styles
-    olLayer.setStyle(null);
   };
 
   // --- GETTERS ---
@@ -235,5 +227,6 @@ export const useLayerStore = defineStore("layers", () => {
     updateLayerColor,
     retryLayer,
     cancelLayerLoad,
+    registerCancelHandler,
   };
 });

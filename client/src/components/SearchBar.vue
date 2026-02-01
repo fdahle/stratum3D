@@ -37,15 +37,13 @@
 </template>
 
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, inject } from "vue";
 import { useLayerStore } from "../stores/layerStore";
 import { useMapStore } from "../stores/mapStore";
-import { getCenter } from "ol/extent";
-import { Point } from "ol/geom";
-import Feature from "ol/Feature";
 
 const layerStore = useLayerStore();
 const mapStore = useMapStore();
+const layerManager = inject("layerManager"); // ref — access via .value
 
 const query = ref("");
 const results = ref([]);
@@ -72,39 +70,31 @@ const performSearch = () => {
   const searchTerm = query.value.toLowerCase();
   const matches = [];
 
-  // Search only in ACTIVE overlay layers
+  // Search only in ACTIVE overlay layers that have a search index.
+  // Layers without search_fields in config never get indexed, so they
+  // are automatically excluded here.
   layerStore.overlayLayers.forEach((layer) => {
-    if (!layer.active || !layer.layerInstance) return;
+    if (!layer.active || !layerManager.value) return;
 
-    // Safety check for vector layers
-    const source = layer.layerInstance.getSource();
-    if (!source || typeof source.getFeatures !== "function") return;
+    const index = layerManager.value.searchIndex.get(layer._layerId);
+    if (!index) return;
 
-    const features = source.getFeatures();
-    
-    // Limit search to 50 items per layer to prevent lag
-    let count = 0;
-    for (const feature of features) {
-      if (count > 50) break;
+    for (const [key, { feature, displayValue }] of index) {
+      if (matches.length >= 10) break;
 
-      const props = feature.getProperties();
-      // Check common name properties
-      const name = props.name || props.Name || props.NAME || props.label || props.id;
-      
-      if (name && String(name).toLowerCase().includes(searchTerm)) {
+      if (key.includes(searchTerm)) {
         matches.push({
-          uid: feature.ol_uid, // Internal OpenLayers ID
-          name: name,
+          uid: feature.ol_uid,
+          name: displayValue,
           layerName: layer.name,
           feature: feature,
-          geometry: feature.getGeometry()
+          geometry: feature.getGeometry(),
         });
-        count++;
       }
     }
   });
 
-  results.value = matches.slice(0, 10); // Show top 10
+  results.value = matches;
   activeIndex.value = -1;
 };
 
