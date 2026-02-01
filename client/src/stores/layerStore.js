@@ -71,7 +71,9 @@ export const useLayerStore = defineStore("layers", () => {
       zIndex: zIndex,
     };
     layers.value.push(layerObj);
-    layerIndex.set(layerId, layerObj);
+    // Index must point to the reactive proxy that Vue created, not the raw object.
+    // The proxy is the last element after push.
+    layerIndex.set(layerId, layers.value[layers.value.length - 1]);
   };
 
   const reset = () => {

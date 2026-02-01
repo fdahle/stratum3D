@@ -168,8 +168,8 @@ export function useLayerManager(map) {
         layerConf.visible,
         "tile",
         null,
-        layerConf.url,
         layerConf.order,
+        layerConf.url,
       );
 
       map.addLayer(olLayer);
@@ -256,7 +256,6 @@ export function useLayerManager(map) {
       if (type === "PROGRESS")
         layerStore.setLayerProgress(layer._layerId, progress);
       if (type === "SUCCESS") {
-        layerStore.setLayerStatus(layer._layerId, "processing");
         finalizeGeoJsonLayer(data, layer, worker);
       }
       if (type === "ERROR") {
@@ -267,14 +266,20 @@ export function useLayerManager(map) {
     };
   };
 
-  const finalizeGeoJsonLayer = (geoJsonData, layer, worker) => {
-    // 1. Parse GeoJSON
+  const finalizeGeoJsonLayer = async (geoJsonData, layer, worker) => {
+    const layerStore = useLayerStore();
+
+    // Signal that we're now in the processing (parsing) phase
+    layerStore.setLayerStatus(layer._layerId, "processing");
+    layerStore.setLayerProgress(layer._layerId, 0);
+
+    // 1. Parse GeoJSON (unavoidable synchronous OL call, but relatively fast)
     const format = new GeoJSON();
     const features = format.readFeatures(geoJsonData, {
       featureProjection: map.getView().getProjection(),
     });
 
-    // 2. Create cached styles (NOT in style function for performance)
+    // 2. Create cached styles once
     const baseColor = layer.color || "#3388ff";
     const vectorStyle = new Style({
       stroke: new Stroke({ color: baseColor, width: 2 }),
@@ -282,48 +287,68 @@ export function useLayerManager(map) {
     });
     const pinStyle = createPinStyle(baseColor);
 
-    // 3. Pre-assign styles to features for better performance
-    features.forEach((feature) => {
-      const fid = feature.get("id") || generateUUID();
-      feature.setId(fid);
-      feature.set("_layerId", layer._layerId);
-      feature.set("_featureId", fid);
+    // 3. Process features in chunks, yielding to the browser between each batch
+    //    so the UI (progress bar, spinner) stays responsive on huge layers.
+    const BATCH_SIZE = 2000;
+    const totalFeatures = features.length;
 
-      // Pre-assign style based on geometry type
-      const geomType = feature.getGeometry().getType();
-      if (geomType === "Point" || geomType === "MultiPoint") {
-        feature.setStyle(pinStyle);
-      } else {
-        feature.setStyle(vectorStyle);
+    for (let i = 0; i < totalFeatures; i += BATCH_SIZE) {
+      const end = Math.min(i + BATCH_SIZE, totalFeatures);
+
+      for (let j = i; j < end; j++) {
+        const feature = features[j];
+        const fid = feature.get("id") || generateUUID();
+        feature.setId(fid);
+        feature.set("_layerId", layer._layerId);
+        feature.set("_featureId", fid);
+
+        const geomType = feature.getGeometry().getType();
+        if (geomType === "Point" || geomType === "MultiPoint") {
+          feature.setStyle(pinStyle);
+        } else {
+          feature.setStyle(vectorStyle);
+        }
+
+        layerRegistry[fid] = feature;
       }
 
-      layerRegistry[fid] = feature;
-    });
+      // Update progress and yield to let the browser paint
+      const progress = Math.round((end / totalFeatures) * 100);
+      layerStore.setLayerProgress(layer._layerId, progress);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
 
-    // 4. Create Source and Layer
-    const source = new VectorSource({
-      features: features,
-    });
+    // 4. Create Source and Layer (all features are styled, this is fast)
+    const source = new VectorSource({ features });
 
     const olLayer = new VectorLayer({
       source: source,
       visible: layer.active,
       zIndex: 100,
-      // Performance optimizations
       updateWhileAnimating: true,
       updateWhileInteracting: true,
       properties: { id: layer._layerId },
     });
 
-    // 4. Update Store
+    // 5. Detect geometry type from loaded features
+    let detectedGeomType = "polygon";
+    if (features.length > 0) {
+      const firstType = features[0].getGeometry().getType();
+      if (firstType === "Point" || firstType === "MultiPoint") {
+        detectedGeomType = "point";
+      } else if (firstType === "LineString" || firstType === "MultiLineString") {
+        detectedGeomType = "line";
+      }
+    }
+
+    // 6. Update store and add to map
     const storeLayer = layerStore.layers.find(
       (l) => l._layerId === layer._layerId,
     );
     if (storeLayer) {
       storeLayer.layerInstance = olLayer;
+      storeLayer.geometryType = detectedGeomType;
       storeLayer.status = "ready";
-
-      // ALWAYS add to map immediately
       map.addLayer(olLayer);
     }
 
