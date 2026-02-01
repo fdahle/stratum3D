@@ -48,9 +48,9 @@
 </template>
 
 <script setup>
-import { useSettingsStore } from "../../stores/settingsStore"; // Import store
+import { storeToRefs } from "pinia"; // <--- 1. Import storeToRefs
+import { useSettingsStore } from "../../stores/settingsStore";
 
-// 1. Props & Emits
 defineProps({
   isOpen: {
     type: Boolean,
@@ -59,8 +59,13 @@ defineProps({
 
 defineEmits(["close"]);
 
-// Connect to store
 const settingsStore = useSettingsStore();
+
+// 2. Extract State (Must use storeToRefs to keep it reactive!)
+const { showInfoBar } = storeToRefs(settingsStore);
+
+// 3. Extract Actions (Can be destructured directly)
+const { toggleInfoBar } = settingsStore;
 </script>
 
 <style scoped>
@@ -82,8 +87,8 @@ const settingsStore = useSettingsStore();
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: rgba(0, 0, 0, 0.5); /* Dimmed background */
-  backdrop-filter: blur(3px); /* Modern blur effect */
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(3px);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -99,7 +104,7 @@ const settingsStore = useSettingsStore();
     0 10px 10px -5px rgba(0, 0, 0, 0.04);
   display: flex;
   flex-direction: column;
-  max-height: 85vh; /* Prevent overflowing small screens */
+  max-height: 85vh;
   overflow: hidden;
 }
 
@@ -131,7 +136,7 @@ const settingsStore = useSettingsStore();
 }
 
 .close-btn:hover {
-  color: #ef4444; /* Red on hover */
+  color: #ef4444;
 }
 
 /* --- Body --- */
@@ -222,7 +227,7 @@ const settingsStore = useSettingsStore();
 }
 
 input:checked + .slider {
-  background-color: #3b82f6; /* Primary Blue */
+  background-color: #3b82f6;
 }
 
 input:checked + .slider:before {

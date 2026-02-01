@@ -19,6 +19,7 @@
 
       <div class="map-area">
         <MapWidget />
+        <SearchBar />
 
         <div
           class="bottom-left-control"
@@ -67,6 +68,7 @@ import AttributePanel from "./components/AttributePanel.vue";
 import BaseMapSwitcher from "./components/BaseMapSwitcher.vue";
 import InformationBar from "./components/InformationBar.vue";
 import MapWidget from "./components/MapWidget.vue";
+import SearchBar from "./components/SearchBar.vue";
 import SideBar from "./components/SideBar.vue";
 import Settings from "./components/modals/Settings.vue";
 import { useSettingsStore } from "./stores/settingsStore";

@@ -4,12 +4,12 @@
 
 # 1. Map View Settings
 view:
-  center: [-2000000, 1000000]  # [Longitude, Latitude] format - South Pole
+  center: [-2000000, 1000000] # [Longitude, Latitude] format - South Pole
   zoom: 7
-  extent: [-4194304, -4194304, 4194304, 4194304]  # extent for the view
+  extent: [-4194304, -4194304, 4194304, 4194304] # extent for the view
   minZoom: 0
   maxZoom: 16
-  
+
 # 2. Coordinate Reference System
 crs: "EPSG:3031"
 projection_params:
@@ -25,11 +25,23 @@ base_layers:
     visible: true
     order: 0
     tileSize: 512
-    attribution: "© OpenStreetMap contributors"    
+    attribution: "© OpenStreetMap contributors"
     crs_options:
-      extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185]  # projection extent
-      resolutions: [67733.46880027094, 33866.73440013547, 16933.367200067736, 8466.683600033868, 4233.341800016934, 2116.670900008467, 1058.3354500042335, 529.1677250021167, 264.5838625010584, 132.2919312505292]
-      
+      extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185] # projection extent
+      resolutions:
+        [
+          67733.46880027094,
+          33866.73440013547,
+          16933.367200067736,
+          8466.683600033868,
+          4233.341800016934,
+          2116.670900008467,
+          1058.3354500042335,
+          529.1677250021167,
+          264.5838625010584,
+          132.2919312505292,
+        ]
+
   - name: "MODIS"
     type: "wmts"
     url: "https://gibs-{a-c}.earthdata.nasa.gov/wmts/epsg3031/best/wmts.cgi?TIME=2013-12-01"
@@ -42,7 +54,7 @@ base_layers:
     crs_options:
       extent: [-4194304, -4194304, 4194304, 4194304]
       resolutions: [16384, 8192, 4096, 2048, 1024, 512, 256, 128, 64]
-  
+
   - name: "Sentinel-2 Cloudless 2020"
     type: "wmts"
     url: "https://tiles.maps.eox.at/wmts/1.0.0/"
@@ -74,7 +86,19 @@ base_layers:
     attribution: "© GBIF, OpenStreetMap contributors"
     crs_options:
       extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185]
-      resolutions: [67733.46880027094, 33866.73440013547, 16933.367200067736, 8466.683600033868, 4233.341800016934, 2116.670900008467, 1058.3354500042335, 529.1677250021167, 264.5838625010584, 132.2919312505292]
+      resolutions:
+        [
+          67733.46880027094,
+          33866.73440013547,
+          16933.367200067736,
+          8466.683600033868,
+          4233.341800016934,
+          2116.670900008467,
+          1058.3354500042335,
+          529.1677250021167,
+          264.5838625010584,
+          132.2919312505292,
+        ]
 
   - name: "Classic"
     type: "tile"
@@ -85,7 +109,19 @@ base_layers:
     attribution: "© GBIF, OpenStreetMap contributors"
     crs_options:
       extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185]
-      resolutions: [67733.46880027094, 33866.73440013547, 16933.367200067736, 8466.683600033868, 4233.341800016934, 2116.670900008467, 1058.3354500042335, 529.1677250021167, 264.5838625010584, 132.2919312505292]
+      resolutions:
+        [
+          67733.46880027094,
+          33866.73440013547,
+          16933.367200067736,
+          8466.683600033868,
+          4233.341800016934,
+          2116.670900008467,
+          1058.3354500042335,
+          529.1677250021167,
+          264.5838625010584,
+          132.2919312505292,
+        ]
 
 # 4. Overlay Layers
 overlay_layers:
@@ -94,13 +130,16 @@ overlay_layers:
     url: "http://localhost:3000/data/georef_sat.geojson"
     visible: true
     color: "#ff6600"
+    search_fields: ["image_id"]
   - name: "Research Stations"
     type: "geojson"
     url: "http://localhost:3000/data/stations.geojson"
     visible: true
     color: "#0066ff"
+    search_fields: ["id", "station_name"]
   - name: "Glaciers"
     type: "geojson"
     url: "http://localhost:3000/data/glaciers.geojson"
     visible: false
     color: "#00ccff"
+    search_fields: ["glac_name"]
