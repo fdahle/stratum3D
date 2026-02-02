@@ -230,6 +230,7 @@ export function useLayerManager(map) {
 
     // --- GEOJSON LAYERS ---
     if (layerConf.type === "geojson") {
+            
       // #2 — options object (layerInstance is null; status will be "idle" until downloaded)
       layerStore.addLayer({
         layerId,
@@ -241,6 +242,7 @@ export function useLayerManager(map) {
         color: layerConf.color,
         url: layerConf.url,
         searchFields: layerConf.search_fields || [],
+        metadata: layerConf._metadata || {}
       });
     }
   };
@@ -378,6 +380,7 @@ export function useLayerManager(map) {
       storeLayer.layerInstance = olLayer;
       storeLayer.geometryType = detectedGeomType;
       storeLayer.status = "ready";
+      storeLayer.metadata = geoJsonData._metadata || {};
       map.addLayer(olLayer);
     }
 

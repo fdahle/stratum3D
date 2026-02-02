@@ -35,6 +35,7 @@ export const useLayerStore = defineStore("layers", () => {
    * @param {string}        [opts.color]
    * @param {string|null}   [opts.url]
    * @param {string[]}      [opts.searchFields]
+   * @param {dictionary}    [opts.metadata]
    */
   const addLayer = ({
     layerId,
@@ -47,6 +48,7 @@ export const useLayerStore = defineStore("layers", () => {
     color = "#3388ff",
     url = null,
     searchFields = [],
+    metadata = {},
   }) => {
     if (layers.value.some((l) => l._layerId === layerId)) return;
 
@@ -77,6 +79,7 @@ export const useLayerStore = defineStore("layers", () => {
       error: null,
       zIndex,
       searchFields,
+      metadata: metadata,
     };
     layers.value.push(layerObj);
     // Index must point to the reactive proxy that Vue created, not the raw object.
