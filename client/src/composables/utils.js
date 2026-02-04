@@ -38,3 +38,21 @@ export const createPinStyle = (color) => {
     }),
   });
 };
+
+// Get complementary color for a given hex color
+export const getComplementaryColor = (hexColor) => {
+      // Remove # if present
+      const hex = hexColor.replace("#", "");
+      
+      // Convert to RGB
+      const r = parseInt(hex.substr(0, 2), 16);
+      const g = parseInt(hex.substr(2, 2), 16);
+      const b = parseInt(hex.substr(4, 2), 16);
+      
+      // Calculate complementary by inverting RGB values
+      const compR = (255 - r).toString(16).padStart(2, "0");
+      const compG = (255 - g).toString(16).padStart(2, "0");
+      const compB = (255 - b).toString(16).padStart(2, "0");
+      
+      return `#${compR}${compG}${compB}`;
+    };

@@ -2,7 +2,8 @@
 import { watch } from "vue";
 import { useLayerStore } from "../stores/layerStore";
 import { useSelectionStore } from "../stores/selectionStore";
-import { createPinStyle, generateUUID } from "./utils";
+import { useSettingsStore } from "../stores/settingsStore";
+import { createPinStyle, getComplementaryColor, generateUUID } from "./utils";
 
 // OpenLayers Imports
 import TileLayer from "ol/layer/Tile";
@@ -10,17 +11,21 @@ import VectorLayer from "ol/layer/Vector";
 import XYZ from "ol/source/XYZ";
 import VectorSource from "ol/source/Vector";
 import GeoJSON from "ol/format/GeoJSON";
-import { Style, Stroke, Fill } from "ol/style";
+import { Style, Stroke, Fill, Circle } from "ol/style";
 import { createXYZ } from "ol/tilegrid";
 import TileGrid from "ol/tilegrid/TileGrid";
 import WMTS from "ol/source/WMTS";
 import WMTSTileGrid from "ol/tilegrid/WMTS";
 import TileWMS from "ol/source/TileWMS";
+import { Select } from "ol/interaction";
+import { click } from "ol/events/condition";
 
 export function useLayerManager(map) {
   const layerStore = useLayerStore();
   const selectionStore = useSelectionStore();
+  const settingsStore = useSettingsStore();
   const activeWorkers = new Map();
+  let selectInteraction = null;
 
   // ---------------------------------------------------------------------------
   // #5 — Search index: layerId → Map<lowerCaseName, OL Feature>
@@ -230,7 +235,6 @@ export function useLayerManager(map) {
 
     // --- GEOJSON LAYERS ---
     if (layerConf.type === "geojson") {
-            
       // #2 — options object (layerInstance is null; status will be "idle" until downloaded)
       layerStore.addLayer({
         layerId,
@@ -242,7 +246,7 @@ export function useLayerManager(map) {
         color: layerConf.color,
         url: layerConf.url,
         searchFields: layerConf.search_fields || [],
-        metadata: layerConf._metadata || {}
+        metadata: layerConf._metadata || {},
       });
     }
   };
@@ -331,10 +335,10 @@ export function useLayerManager(map) {
               // key = lowercase value, value = { feature, displayValue }
               // displayValue lets SearchBar show the original (un-lowercased) value
               // without having to re-guess which field it came from.
-              layerSearchIndex.set(
-                String(value).toLowerCase(),
-                { feature, displayValue: String(value) }
-              );
+              layerSearchIndex.set(String(value).toLowerCase(), {
+                feature,
+                displayValue: String(value),
+              });
             }
           }
         }
@@ -367,7 +371,10 @@ export function useLayerManager(map) {
       const firstType = features[0].getGeometry().getType();
       if (firstType === "Point" || firstType === "MultiPoint") {
         detectedGeomType = "point";
-      } else if (firstType === "LineString" || firstType === "MultiLineString") {
+      } else if (
+        firstType === "LineString" ||
+        firstType === "MultiLineString"
+      ) {
         detectedGeomType = "line";
       }
     }
@@ -388,10 +395,6 @@ export function useLayerManager(map) {
     activeWorkers.delete(layer._layerId);
   };
 
-  // ---------------------------------------------------------------------------
-  // #1 — OL color-mutation logic lives here, not in the store.
-  // Called by SideBar after the store has already updated layer.color.
-  // ---------------------------------------------------------------------------
   const applyLayerColor = (layerId) => {
     const layerObj = layerStore.getLayerById(layerId);
     if (!layerObj || !layerObj.layerInstance) return;
@@ -407,8 +410,18 @@ export function useLayerManager(map) {
     });
     const newPinStyle = createPinStyle(newColor);
 
+    // Get the currently selected features from the select interaction
+    const selectedFeatures = selectInteraction
+      ? selectInteraction.getFeatures().getArray()
+      : [];
+    const selectedIds = new Set(selectedFeatures.map((f) => f.getId()));
+
     // Apply style directly to each feature (better performance than a style function)
+    // Skip selected features - they keep their selection style
     source.getFeatures().forEach((feature) => {
+      // Don't change the style of selected features
+      if (selectedIds.has(feature.getId())) return;
+
       const type = feature.getGeometry().getType();
       if (type === "Point" || type === "MultiPoint") {
         feature.setStyle(newPinStyle);
@@ -421,11 +434,103 @@ export function useLayerManager(map) {
     olLayer.setStyle(null);
   };
 
+  const setupSelection = () => {
+    // Create selection style dynamically based on the feature's layer color
+    const selectionStyleFunction = (feature) => {
+      const layerId = feature.get("_layerId");
+      const layerObj = layerStore.getLayerById(layerId);
+      
+      // Get the base color from the layer, default to blue if not found
+      const baseColor = layerObj?.color || "#3388ff";
+      const complementaryColor = getComplementaryColor(baseColor);
+      
+      const geomType = feature.getGeometry().getType();
+      
+      // For points/markers, return array with original marker + highlight circle
+      if (geomType === "Point" || geomType === "MultiPoint") {
+        const originalStyle = createPinStyle(baseColor);
+        const highlightCircle = new Style({
+          image: new Circle({
+            radius: 20,
+            stroke: new Stroke({
+              color: complementaryColor,
+              width: 3,
+            }),
+            fill: new Fill({
+              color: "transparent",
+            }),
+          }),
+          zIndex: 998,
+        });
+        
+        return [highlightCircle, originalStyle];
+      }
+      
+      // For polygons/lines, use complementary color outline
+      return new Style({
+        stroke: new Stroke({ 
+          color: complementaryColor,
+          width: 5 
+        }),
+        fill: new Fill({ 
+          color: baseColor + "B3"
+        }),
+        zIndex: 999,
+      });
+    };
+
+    selectInteraction = new Select({
+      condition: click,
+      style: selectionStyleFunction,
+    });
+
+    selectInteraction.on("select", (e) => {
+      const selected = e.selected[0];
+      const deselected = e.deselected[0];
+      
+      // When deselecting a feature, restore its current layer style
+      if (deselected) {
+        const layerId = deselected.get("_layerId");
+        const layerObj = layerStore.getLayerById(layerId);
+        if (layerObj?.color) {
+          const color = layerObj.color;
+          const geomType = deselected.getGeometry().getType();
+          
+          if (geomType === "Point" || geomType === "MultiPoint") {
+            deselected.setStyle(createPinStyle(color));
+          } else {
+            deselected.setStyle(new Style({
+              stroke: new Stroke({ color: color, width: 2 }),
+              fill: new Fill({ color: color + "80" }),
+            }));
+          }
+        }
+      }
+      
+      if (selected) {
+        const properties = selected.getProperties();
+        const { geometry, ...props } = properties;
+
+        selectionStore.selectFeature({
+          properties: props,
+        });
+      } else {
+        selectionStore.clearSelection();
+      }
+    });
+
+    map.addInteraction(selectInteraction);
+  };
+
   const cleanup = () => {
     activeWorkers.forEach((w) => w.terminate());
     activeWorkers.clear();
     searchIndex.clear();
+    if (selectInteraction) {
+      map.removeInteraction(selectInteraction);
+      selectInteraction = null;
+    }
   };
 
-  return { processLayer, cleanup, applyLayerColor, searchIndex };
+  return { processLayer, cleanup, applyLayerColor, searchIndex, setupSelection };
 }

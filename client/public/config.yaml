@@ -136,6 +136,7 @@ overlay_layers:
     url: "http://localhost:3000/data/stations.geojson"
     visible: true
     color: "#0066ff"
+    pointType: "circle"
     search_fields: ["id", "station_name"]
   - name: "Glaciers"
     type: "geojson"

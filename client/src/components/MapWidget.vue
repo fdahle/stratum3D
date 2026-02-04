@@ -1,6 +1,9 @@
 <template>
   <div class="map-container">
-    <div id="map" ref="mapContainer"></div>
+    <div id="map" ref="mapContainer" @contextmenu="handleMapContextMenu"></div>
+    
+    <!-- Map Context Menu -->
+    <ContextMenuMap ref="mapContextMenuRef" />
   </div>
 </template>
 
@@ -12,27 +15,35 @@ import Map from "ol/Map";
 import View from "ol/View";
 import { fromLonLat } from "ol/proj";
 import { defaults as defaultControls } from "ol/control";
-import { Select } from "ol/interaction";
-import { click } from "ol/events/condition";
 
 import { registerCustomProjections } from "../constants/crs";
 import { useMapStore } from "../stores/mapStore";
-import { useSelectionStore } from "../stores/selectionStore";
 import { useLayerStore } from "../stores/layerStore";
 import { useLayerManager } from "../composables/useLayerManager";
-import { Stroke, Style, Fill } from "ol/style";
+import ContextMenuMap from "./contextMenus/contextMenuMap.vue";
 
 const configRef = inject("config");
 const config = configRef.value;
 const layerManagerRef = inject("layerManager");
 const mapStore = useMapStore();
-const selectionStore = useSelectionStore();
 const layerStore = useLayerStore();
 
 const mapContainer = ref(null);
+const mapContextMenuRef = ref(null);
 let map = null;
 let layerManager = null;
-let selectInteraction = null;
+
+const handleMapContextMenu = (event) => {
+  event.preventDefault();
+  
+  if (!map || !mapContextMenuRef.value) return;
+  
+  // Get the coordinate at the click position
+  const pixel = map.getEventPixel(event);
+  const coordinate = map.getCoordinateFromPixel(pixel);
+  
+  mapContextMenuRef.value.open(event, coordinate);
+};
 
 onMounted(async () => {
   if (!mapContainer.value) return;
@@ -105,42 +116,9 @@ onMounted(async () => {
   }
   await Promise.all(promises);
 
-  // 5. Setup Selection Interaction
-  setupSelection();
+  // 5. Setup Selection Interaction (now handled in layerManager)
+  layerManager.setupSelection();
 });
-
-const setupSelection = () => {
-  // Highlight Style
-  const highlightStyle = new Style({
-    stroke: new Stroke({ color: "#FFFF00", width: 4 }),
-    fill: new Fill({ color: "rgba(255, 255, 0, 0.3)" }),
-    zIndex: 999,
-  });
-
-  selectInteraction = new Select({
-    condition: click,
-    style: highlightStyle,
-  });
-
-  selectInteraction.on("select", (e) => {
-    const selected = e.selected[0];
-    if (selected) {
-      const properties = selected.getProperties();
-      const { geometry, ...props } = properties;
-
-      selectionStore.selectFeature({
-        properties: props,
-      });
-    } else {
-      selectionStore.clearSelection();
-    }
-  });
-
-  map.addInteraction(selectInteraction);
-};
-
-// REMOVED: The deep watcher that was causing performance issues
-// Layers are now added to the map immediately and only visibility is toggled
 
 onUnmounted(() => {
   if (layerManager) layerManager.cleanup();

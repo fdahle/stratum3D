@@ -1,20 +1,20 @@
 <template>
   <div id="app">
     <div v-if="isConfigLoaded" class="app-layout">
-      <button class="menu-toggle" @click="isSidebarOpen = !isSidebarOpen">
+      <button class="menu-toggle" @click="isLayerPanelOpen = !isLayerPanelOpen">
         ☰
       </button>
 
-      <SideBar
-        class="main-sidebar"
-        :class="{ open: isSidebarOpen }"
+      <LayerPanel
+        class="main-layerpanel"
+        :class="{ open: isLayerPanelOpen }"
         @open-settings="isSettingsOpen = true"
       />
 
       <div
-        v-if="isSidebarOpen"
-        class="sidebar-overlay"
-        @click="isSidebarOpen = false"
+        v-if="isLayerPanelOpen"
+        class="layerpanel-overlay"
+        @click="isLayerPanelOpen = false"
       ></div>
 
       <div class="map-area">
@@ -68,7 +68,7 @@ import BaseMapSwitcher from "./components/BaseMapSwitcher.vue";
 import InformationBar from "./components/InformationBar.vue";
 import MapWidget from "./components/MapWidget.vue";
 import SearchBar from "./components/SearchBar.vue";
-import SideBar from "./components/SideBar.vue";
+import LayerPanel from "./components/LayerPanel.vue";
 import Settings from "./components/modals/Settings.vue";
 import { useSettingsStore } from "./stores/settingsStore";
 
@@ -169,7 +169,7 @@ const validateConfig = (config) => {
 provide("config", appConfig);
 
 // Shared ref for the layer manager. It's null until MapWidget mounts and
-// creates the manager (it needs the OL map instance first). SideBar and
+// creates the manager (it needs the OL map instance first). LayerPanel and
 // SearchBar inject this and guard on it being non-null before use.
 const layerManagerRef = ref(null);
 provide("layerManager", layerManagerRef);
@@ -178,8 +178,8 @@ provide("layerManager", layerManagerRef);
 const settingsStore = useSettingsStore();
 const isSettingsOpen = ref(false);
 
-// sidebar variables
-const isSidebarOpen = ref(false);
+// layerpanel variables
+const isLayerPanelOpen = ref(false);
 
 // load configuration on mount
 onMounted(async () => {
@@ -249,7 +249,7 @@ body {
 }
 
 /* --- DEFAULT DESKTOP STYLES --- */
-.main-sidebar {
+.main-layerpanel {
   width: 280px;
   flex-shrink: 0;
   z-index: 2000;
@@ -265,7 +265,7 @@ body {
   display: none;
 }
 
-.sidebar-overlay {
+.layerpanel-overlay {
   display: none;
 }
 
@@ -300,7 +300,7 @@ body {
     cursor: pointer;
   }
 
-  .main-sidebar {
+  .main-layerpanel {
     position: absolute;
     top: 0;
     left: -280px;
@@ -309,11 +309,11 @@ body {
     box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
   }
 
-  .main-sidebar.open {
+  .main-layerpanel.open {
     left: 0;
   }
 
-  .sidebar-overlay {
+  .layerpanel-overlay {
     display: block;
     position: absolute;
     top: 0;

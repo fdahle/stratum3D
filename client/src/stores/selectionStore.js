@@ -4,7 +4,7 @@ import { ref } from "vue";
 export const useSelectionStore = defineStore("selection", () => {
   const selectedFeature = ref(null);
 
-  // We save the WHOLE feature so the sidebar can display attributes
+  // We save the WHOLE feature so the layerpanel can display attributes
   function selectFeature(feature) {
     if (
       selectedFeature.value &&
