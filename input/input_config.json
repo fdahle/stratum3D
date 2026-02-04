@@ -7,7 +7,9 @@
       "hasDownloadLinks": true,
       "downloadLinkTemplate": "https://data.pgc.umn.edu/aerial/usgs/tma/photos/high/CA{tma_number}/CA{tma_number}32V/{image_id}.tif",
       "has3DModels": true,
-      "3DModelTemplate": "https://3d.pgc.umn.edu/models/{image_id}.html"
+      "3DModelTemplate": "https://3d.pgc.umn.edu/models/{image_id}.html",
+      "hasPointClouds": false,
+      "pointCloudTemplate": ""
     },
     "attributes": {
       "attributesFile": "attributes/images.csv",
@@ -18,7 +20,9 @@
   },
   "shapes/tma_lines.geojson": {
     "metadata": {
-      "headerAttribute": "tma_num"
+      "headerAttribute": "tma_num",
+      "has3DModels": false,
+      "hasPointClouds": false
     },
     "attributes": {
       "attributesFile": "attributes/tma_lines.csv",

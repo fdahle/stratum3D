@@ -50,10 +50,9 @@
               </svg>
               <span class="btn-text">Download</span>
             </a>
-            <a
+            <button
               v-if="model3dUrl"
-              :href="model3dUrl"
-              target="_blank"
+              @click="handle3DView"
               class="action-btn model-btn"
               title="View 3D Model"
             >
@@ -76,7 +75,7 @@
                 <line x1="12" y1="22.08" x2="12" y2="12"></line>
               </svg>
               <span class="btn-text">3D View</span>
-            </a>
+            </button>
           </div>
 
           <h2 v-if="featureTitle" class="feature-title">
@@ -121,10 +120,12 @@
 <script setup>
 import { computed, ref } from "vue";
 import { storeToRefs } from "pinia";
+import { useRouter } from "vue-router";
 import { useSelectionStore } from "../stores/selectionStore";
 import { useLayerStore } from "../stores/layerStore";
 import { formatKey } from "../composables/utils";
 
+const router = useRouter();
 const selectionStore = useSelectionStore();
 const layerStore = useLayerStore();
 const { selectedFeature } = storeToRefs(selectionStore);
@@ -137,10 +138,77 @@ const showFullImage = ref(false);
 const downloadUrl = computed(
   () => selectedFeature.value?.properties?._downloadUrl
 );
-const model3dUrl = computed(
-  () => selectedFeature.value?.properties?._model3dUrl
-);
-const hasActions = computed(() => downloadUrl.value || model3dUrl.value);
+
+// Support both old single URL and new array format
+const model3dUrls = computed(() => {
+  const props = selectedFeature.value?.properties;
+  if (!props) return [];
+  
+  // New array format
+  if (Array.isArray(props._model3dUrls) && props._model3dUrls.length > 0) {
+    return props._model3dUrls;
+  }
+  
+  // Old single URL format (backward compatibility)
+  if (props._model3dUrl) {
+    return [props._model3dUrl];
+  }
+  
+  return [];
+});
+
+const pointcloudUrls = computed(() => {
+  const props = selectedFeature.value?.properties;
+  if (!props) return [];
+  
+  if (Array.isArray(props._pointcloudUrls) && props._pointcloudUrls.length > 0) {
+    return props._pointcloudUrls;
+  }
+  
+  if (props._pointcloudUrl) {
+    return [props._pointcloudUrl];
+  }
+  
+  return [];
+});
+
+// Check if any 3D data exists
+const has3DData = computed(() => {
+  return model3dUrls.value.length > 0 || pointcloudUrls.value.length > 0;
+});
+
+// Check if first model URL is external
+const isExternal3dModel = computed(() => {
+  if (model3dUrls.value.length === 0) return false;
+  const firstUrl = model3dUrls.value[0];
+  return firstUrl.startsWith('http://') || 
+         firstUrl.startsWith('https://') ||
+         firstUrl.startsWith('//');
+});
+
+const hasActions = computed(() => downloadUrl.value || has3DData.value);
+
+// Handle 3D view navigation
+const handle3DView = () => {
+  if (!model3dUrl.value) return;
+  
+  console.log("TESTING 3D VIEW HANDLER");
+  //if (isExternal3dModel.value) {
+  if(false) {
+  // Open external link in new tab
+    window.open(model3dUrl.value, '_blank');
+  } else {
+    // Open internal 3D viewer in new tab with model path
+    const props = selectedFeature.value.properties;
+    const query = new URLSearchParams({
+      model: model3dUrl.value,
+      name: props.name || 'Model',
+      x: props._x || 0,
+      y: props._y || 0
+    });
+    window.open(`/#/3d?${query.toString()}`, '_blank');
+  }
+};
 
 // Computed property to handle all filtering logic
 const displayProperties = computed(() => {

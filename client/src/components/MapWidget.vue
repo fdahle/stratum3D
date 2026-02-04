@@ -98,7 +98,7 @@ onMounted(async () => {
 
   // 4. Initialize Manager and load layers
   layerManager = useLayerManager(map);
-  // Fill the shared ref so SideBar / SearchBar can see the manager
+  // Fill the shared ref so LayerPanel / SearchBar can see the manager
   layerManagerRef.value = layerManager;
 
   const promises = [];

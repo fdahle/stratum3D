@@ -127,26 +127,26 @@ base_layers:
 overlay_layers:
   - name: "Georef Sat"
     type: "geojson"
-    url: "http://localhost:3000/data/georef_sat.geojson"
+    url: "http://localhost:3000/data/layers/georef_sat.geojson"
     visible: true
     color: "#ff6600"
     search_fields: ["image_id"]
   - name: "Research Stations"
     type: "geojson"
-    url: "http://localhost:3000/data/stations.geojson"
+    url: "http://localhost:3000/data/layers/stations.geojson"
     visible: true
     color: "#0066ff"
     pointType: "circle"
     search_fields: ["id", "station_name"]
   - name: "Glaciers"
     type: "geojson"
-    url: "http://localhost:3000/data/glaciers.geojson"
+    url: "http://localhost:3000/data/layers/glaciers.geojson"
     visible: false
     color: "#00ccff"
     search_fields: ["glac_name"]
   - name: "TMA Flight Lines"
     type: "geojson"
-    url: "http://localhost:3000/data/tma_lines.geojson"
+    url: "http://localhost:3000/data/layers/tma_lines.geojson"
     visible: true
     color: "#33cc33"
     search_fields: ["tma_num"]

@@ -113,13 +113,57 @@ const processShapes = async () => {
           const md = fileConfig.metadata;
           
           if (md.hasThumbnails) {
-            feature.properties._thumbnailUrl = applyTemplate(md.thumbnailTemplate, feature.properties);
+            const url = applyTemplate(md.thumbnailTemplate, feature.properties);
+            if (url && url !== md.thumbnailTemplate) {
+              feature.properties._thumbnailUrl = url;
+            }
           }
           if (md.hasDownloadLinks) {
-            feature.properties._downloadUrl = applyTemplate(md.downloadLinkTemplate, feature.properties);
+            const url = applyTemplate(md.downloadLinkTemplate, feature.properties);
+            if (url && url !== md.downloadLinkTemplate) {
+              feature.properties._downloadUrl = url;
+            }
           }
+          
+          // Handle 3D models - support both single template and array
           if (md.has3DModels) {
-            feature.properties._model3dUrl = applyTemplate(md["3DModelTemplate"], feature.properties);
+            const models = [];
+            
+            // Support array of templates
+            const templates = Array.isArray(md["3DModelTemplate"]) 
+              ? md["3DModelTemplate"] 
+              : [md["3DModelTemplate"]];
+            
+            templates.forEach(template => {
+              const url = applyTemplate(template, feature.properties);
+              if (url && url !== template) {
+                models.push(url);
+              }
+            });
+            
+            if (models.length > 0) {
+              feature.properties._model3dUrls = models;
+            }
+          }
+          
+          // Handle point clouds - support both single template and array
+          if (md.hasPointClouds) {
+            const pointclouds = [];
+            
+            const templates = Array.isArray(md.pointCloudTemplate) 
+              ? md.pointCloudTemplate 
+              : [md.pointCloudTemplate];
+            
+            templates.forEach(template => {
+              const url = applyTemplate(template, feature.properties);
+              if (url && url !== template) {
+                pointclouds.push(url);
+              }
+            });
+            
+            if (pointclouds.length > 0) {
+              feature.properties._pointcloudUrls = pointclouds;
+            }
           }
         }
 

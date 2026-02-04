@@ -9,7 +9,6 @@
     >
       <ul>
         <li @click="handleCopyCoordinates">📋 Copy Coordinates</li>
-        <li @click="handleOpen3DView">🌐 3D View</li>
       </ul>
     </div>
   </div>
@@ -50,17 +49,6 @@ const handleCopyCoordinates = async () => {
   } catch (err) {
     console.error("Failed to copy coordinates:", err);
   }
-  
-  close();
-};
-
-const handleOpen3DView = () => {
-  if (!coordinate.value) return;
-  
-  const [coordX, coordY] = coordinate.value;
-  // Open 3D viewer in new window with coordinates as query params
-  const url = `/viewer3d.html?x=${coordX}&y=${coordY}`;
-  window.open(url, '_blank', 'width=1200,height=800');
   
   close();
 };
