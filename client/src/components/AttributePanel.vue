@@ -23,31 +23,65 @@
             </div>
           </div>
 
-          <h2 v-if="featureTitle" class="feature-title">
-            {{ featureTitle }}
-          </h2>
-
           <div class="feature-actions" v-if="hasActions">
             <a
               v-if="downloadUrl"
               :href="downloadUrl"
               download
               target="_blank"
-              class="action-btn"
+              class="action-btn download-btn"
               title="Download Image"
             >
-              <span class="icon">⬇️</span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="btn-icon"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+              <span class="btn-text">Download</span>
             </a>
             <a
               v-if="model3dUrl"
               :href="model3dUrl"
               target="_blank"
-              class="action-btn"
+              class="action-btn model-btn"
               title="View 3D Model"
             >
-              <span class="icon">📦</span>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="btn-icon"
+              >
+                <path
+                  d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"
+                ></path>
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+              </svg>
+              <span class="btn-text">3D View</span>
             </a>
           </div>
+
+          <h2 v-if="featureTitle" class="feature-title">
+            {{ featureTitle }}
+          </h2>
 
           <table class="attr-table">
             <tbody>
@@ -238,10 +272,15 @@ const featureTitle = computed(() => {
 }
 
 .feature-title {
+  /* Ensure no top margin creates a gap */
   margin-top: 0;
+
   color: #333;
   font-size: 1.2rem;
+
+  /* Keeps the line BELOW the title (separating title from table) */
   border-bottom: 2px solid #eee;
+
   padding-bottom: 10px;
   margin-bottom: 15px;
   text-align: center;
@@ -250,31 +289,67 @@ const featureTitle = computed(() => {
 .feature-actions {
   display: flex;
   justify-content: center;
-  gap: 20px;
-  margin-bottom: 20px;
-  padding-bottom: 15px;
-  border-bottom: 1px solid #eee;
+  gap: 12px;
+
+  /* Removed the border-bottom here */
+  border-bottom: none;
+
+  /* Reduced margin so it sits closer to the title below it */
+  margin-bottom: 10px;
+  padding-bottom: 0;
+
+  flex-wrap: wrap;
 }
 
 .action-btn {
   text-decoration: none;
-  font-size: 1.5rem;
-  transition: transform 0.2s ease;
-  cursor: pointer;
-  display: flex;
+  font-size: 0.9rem;
+  font-weight: 500;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 45px;
-  height: 45px;
-  background: #f8f9fa;
-  border-radius: 50%;
-  border: 1px solid #ddd;
+  padding: 8px 16px; /* Comfortable clickable area */
+  border-radius: 6px; /* Slightly rounded corners */
+  transition: all 0.2s ease;
+  cursor: pointer;
+  color: #333;
+  border: 1px solid #ddd; /* Subtle border */
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
+/* Icon specific spacing */
+.btn-icon {
+  margin-right: 8px;
+  width: 18px;
+  height: 18px;
+}
+
+/* Hover Effects */
 .action-btn:hover {
-  transform: scale(1.1);
-  background: #e9ecef;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+  background: #f8f9fa;
+  border-color: #bbb;
+  transform: translateY(-1px); /* Slight lift */
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.08);
+  color: #000;
+}
+
+.action-btn:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
+
+/* Optional: Distinguish the two buttons slightly */
+.download-btn:hover {
+  border-color: #4dabf7;
+  color: #1971c2;
+  background-color: #e7f5ff;
+}
+
+.model-btn:hover {
+  border-color: #69db7c;
+  color: #2b8a3e;
+  background-color: #ebfbee;
 }
 
 .attr-table {

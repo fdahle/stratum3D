@@ -30,6 +30,14 @@
               @click="emitColor('#e9c46a')"
               style="background: #e9c46a"
             ></button>
+            <!-- custom color -->
+            <label class="custom-color-btn" title="Choose custom color">
+              <input
+                type="color"
+                @change="emitColor($event.target.value)"
+                @click.stop
+              />
+            </label>
           </div>
         </li>
       </ul>
@@ -126,6 +134,7 @@ li:hover {
   display: flex;
   gap: 5px;
   margin-top: 5px;
+  align-items: center;
 }
 
 .colors button {
@@ -134,5 +143,50 @@ li:hover {
   border: 1px solid #ddd;
   border-radius: 50%;
   cursor: pointer;
+}
+
+.colors button:hover {
+  border-color: #999;
+}
+
+/* Wrapper to create the round shape and rainbow background */
+.custom-color-btn {
+  width: 18px;
+  height: 18px;
+  border: 1px solid #ddd;
+  border-radius: 50%;
+  cursor: pointer;
+  position: relative;
+  display: inline-block;
+  margin-left: 5px;
+  background: conic-gradient(
+    red,
+    orange,
+    yellow,
+    green,
+    blue,
+    indigo,
+    violet,
+    red
+  );
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+/* The actual input is invisible but stretches to fill the circle */
+.custom-color-btn input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0; /* Hidden */
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+}
+
+/* Hover effect to match your other buttons */
+.custom-color-btn:hover {
+  border-color: #999;
 }
 </style>
