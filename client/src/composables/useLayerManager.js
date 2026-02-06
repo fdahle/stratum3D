@@ -11,7 +11,7 @@ import VectorLayer from "ol/layer/Vector";
 import XYZ from "ol/source/XYZ";
 import VectorSource from "ol/source/Vector";
 import GeoJSON from "ol/format/GeoJSON";
-import { Style, Stroke, Fill, Circle } from "ol/style";
+import { Style, Stroke, Fill } from "ol/style";
 import { createXYZ } from "ol/tilegrid";
 import TileGrid from "ol/tilegrid/TileGrid";
 import WMTS from "ol/source/WMTS";
@@ -444,36 +444,14 @@ export function useLayerManager(map) {
       const baseColor = layerObj?.color || "#3388ff";
       const complementaryColor = getComplementaryColor(baseColor);
       
-      const geomType = feature.getGeometry().getType();
-      
-      // For points/markers, return array with original marker + highlight circle
-      if (geomType === "Point" || geomType === "MultiPoint") {
-        const originalStyle = createPinStyle(baseColor);
-        const highlightCircle = new Style({
-          image: new Circle({
-            radius: 20,
-            stroke: new Stroke({
-              color: complementaryColor,
-              width: 3,
-            }),
-            fill: new Fill({
-              color: "transparent",
-            }),
-          }),
-          zIndex: 998,
-        });
-        
-        return [highlightCircle, originalStyle];
-      }
-      
-      // For polygons/lines, use complementary color outline
+      // Use complementary color for outline for perfect contrast
       return new Style({
         stroke: new Stroke({ 
-          color: complementaryColor,
+          color: complementaryColor, // Opposite color for maximum contrast
           width: 5 
         }),
         fill: new Fill({ 
-          color: baseColor + "B3"
+          color: baseColor + "B3" // 70% opacity of the original color
         }),
         zIndex: 999,
       });

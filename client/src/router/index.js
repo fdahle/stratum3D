@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+// 1. Fix casing: 3DView -> 3dView (matches your actual filename)
 import ThreeDView from '../views/3DView.vue' 
 import MapView from '../views/MapView.vue'
 

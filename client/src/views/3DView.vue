@@ -5,9 +5,24 @@
     <div class="controls">
       <h3>🌐 3D Viewer</h3>
       <div class="info">
+        <strong>{{ modelName }}</strong>
+      </div>
+      <div class="info">
         <strong>Position:</strong> <span>{{ coordinates }}</span>
       </div>
       
+      <div class="view-controls">
+        <button @click="toggleWireframe" class="toggle-btn">
+          {{ showWireframe ? '🔲 Solid' : '🔳 Wireframe' }}
+        </button>
+        <button @click="toggleBoundingBox" class="toggle-btn">
+          {{ showBoundingBox ? '📦 Hide Box' : '📦 Show Box' }}
+        </button>
+        <button @click="toggleGrid" class="toggle-btn">
+          {{ showGrid ? '⊞ Hide Grid' : '⊞ Show Grid' }}
+        </button>
+      </div>
+
       <div class="file-section">
         <label>Load 3D Model (.obj):</label>
         <input type="file" accept=".obj" @change="handleObjFile" />
@@ -19,7 +34,7 @@
         <small>Requires Giro3D</small>
       </div>
 
-      <button @click="resetCamera">Reset Camera</button>
+      <button @click="resetCamera">🔄 Reset Camera</button>
       <button @click="$router.push('/')">← Back to Map</button>
     </div>
   </div>
@@ -44,8 +59,15 @@ const pointcloudUrls = route.query.pointclouds ? route.query.pointclouds.split('
 const modelName = route.query.name || 'Model';
 const coordinates = ref(`${x.toFixed(2)}, ${y.toFixed(2)}`);
 
+// UI state
+const showWireframe = ref(false);
+const showBoundingBox = ref(true);
+const showGrid = ref(true);
+
 let scene, camera, renderer, controls;
 let loadedModels = [];
+let initialCameraPosition = null;
+let initialCameraTarget = null;
 
 const initViewer = () => {
   // Scene
@@ -57,7 +79,7 @@ const initViewer = () => {
     75,
     viewerRef.value.clientWidth / viewerRef.value.clientHeight,
     0.1,
-    10000
+    1000000  // Increased far plane for large coordinates
   );
   camera.position.set(100, 100, 100);
   camera.lookAt(0, 0, 0);
@@ -81,11 +103,13 @@ const initViewer = () => {
   directionalLight.position.set(100, 100, 50);
   scene.add(directionalLight);
 
-  // Grid and axes
+  // Grid and axes (will be repositioned when model loads)
   const gridHelper = new THREE.GridHelper(200, 20, 0x888888, 0x444444);
+  gridHelper.name = 'gridHelper';
   scene.add(gridHelper);
 
   const axesHelper = new THREE.AxesHelper(50);
+  axesHelper.name = 'axesHelper';
   scene.add(axesHelper);
 
   // Animation loop
@@ -108,10 +132,43 @@ const handleResize = () => {
 };
 
 const resetCamera = () => {
-  camera.position.set(100, 100, 100);
-  camera.lookAt(0, 0, 0);
-  controls.target.set(0, 0, 0);
-  controls.update();
+  if (initialCameraPosition && initialCameraTarget) {
+    camera.position.copy(initialCameraPosition);
+    controls.target.copy(initialCameraTarget);
+    controls.update();
+  } else {
+    camera.position.set(100, 100, 100);
+    camera.lookAt(0, 0, 0);
+    controls.target.set(0, 0, 0);
+    controls.update();
+  }
+};
+
+const toggleWireframe = () => {
+  showWireframe.value = !showWireframe.value;
+  loadedModels.forEach(model => {
+    model.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        child.material.wireframe = showWireframe.value;
+      }
+    });
+  });
+};
+
+const toggleBoundingBox = () => {
+  showBoundingBox.value = !showBoundingBox.value;
+  const boxHelper = scene.getObjectByName('boxHelper');
+  if (boxHelper) {
+    boxHelper.visible = showBoundingBox.value;
+  }
+};
+
+const toggleGrid = () => {
+  showGrid.value = !showGrid.value;
+  const grid = scene.getObjectByName('gridHelper');
+  const axes = scene.getObjectByName('axesHelper');
+  if (grid) grid.visible = showGrid.value;
+  if (axes) axes.visible = showGrid.value;
 };
 
 const loadModelFromUrl = async (url, modelIndex = 0) => {
@@ -130,19 +187,26 @@ const loadObjFromText = (text, modelIndex = 0) => {
     const loader = new OBJLoader();
     const object = loader.parse(text);
 
-    // Center and scale
+    // Get the bounding box to understand the model's original size
     const box = new THREE.Box3().setFromObject(object);
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const scale = 100 / maxDim;
-
-    object.position.sub(center);
-    object.scale.setScalar(scale);
     
-    // Offset multiple models side by side
-    if (modelIndex > 0) {
-      object.position.x += modelIndex * 120;
+    console.log(`Original model size: ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}`);
+    console.log(`Original center: ${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)}`);
+
+    // Center the model at its local origin first
+    object.position.set(-center.x, -center.y, -center.z);
+    
+    // Then position it at the real-world coordinates (x, y from the feature)
+    // Using the feature's coordinates from the map
+    if (modelIndex === 0) {
+      object.position.x += x;
+      object.position.y += y;
+    } else {
+      // Offset additional models side by side
+      object.position.x += x + (modelIndex * (size.x + 1000));
+      object.position.y += y;
     }
 
     // Add materials
@@ -157,7 +221,58 @@ const loadObjFromText = (text, modelIndex = 0) => {
 
     scene.add(object);
     loadedModels.push(object);
-    console.log(`OBJ ${modelIndex + 1} loaded successfully`);
+    
+    // Auto-adjust camera to fit the model
+    if (modelIndex === 0) {
+      const modelBox = new THREE.Box3().setFromObject(object);
+      const modelSize = modelBox.getSize(new THREE.Vector3());
+      const modelCenter = modelBox.getCenter(new THREE.Vector3());
+      const maxModelDim = Math.max(modelSize.x, modelSize.y, modelSize.z);
+      
+      // Reposition and scale grid to match model
+      const grid = scene.getObjectByName('gridHelper');
+      if (grid) {
+        // Scale grid to be larger than the model
+        const gridSize = maxModelDim * 2;
+        grid.scale.setScalar(gridSize / 200); // 200 is default grid size
+        grid.position.set(modelCenter.x, modelCenter.y - modelSize.y / 2, modelCenter.z);
+      }
+      
+      // Reposition and scale axes to match model
+      const axes = scene.getObjectByName('axesHelper');
+      if (axes) {
+        axes.scale.setScalar(maxModelDim / 50); // 50 is default axes size
+        axes.position.copy(modelCenter);
+      }
+      
+      // Add a bounding box helper for the model
+      const boxHelper = new THREE.BoxHelper(object, 0x00ff00);
+      boxHelper.name = 'boxHelper';
+      scene.add(boxHelper);
+      
+      // Position camera to see the whole model at real-world scale
+      const distance = maxModelDim * 2;
+      camera.position.set(
+        modelCenter.x + distance, 
+        modelCenter.y + distance, 
+        modelCenter.z + distance
+      );
+      camera.lookAt(modelCenter);
+      controls.target.copy(modelCenter);
+      controls.update();
+      
+      // Store initial camera position for reset button
+      initialCameraPosition = camera.position.clone();
+      initialCameraTarget = controls.target.clone();
+      
+      console.log(`OBJ ${modelIndex + 1} loaded successfully`);
+      console.log(`Model positioned at: ${object.position.x.toFixed(2)}, ${object.position.y.toFixed(2)}, ${object.position.z.toFixed(2)}`);
+      console.log(`Model size: ${modelSize.x.toFixed(2)} x ${modelSize.y.toFixed(2)} x ${modelSize.z.toFixed(2)}`);
+      console.log(`Camera position: ${camera.position.x.toFixed(2)}, ${camera.position.y.toFixed(2)}, ${camera.position.z.toFixed(2)}`);
+      console.log(`Camera distance from model: ${distance.toFixed(2)}`);
+    } else {
+      console.log(`OBJ ${modelIndex + 1} loaded successfully`);
+    }
   } catch (error) {
     console.error('Error parsing OBJ:', error);
     alert('Error loading OBJ file');
@@ -189,10 +304,10 @@ onMounted(() => {
     // Auto-load all models if provided in query params
     if (modelUrls.length > 0) {
       modelUrls.forEach((url, index) => {
-        if (!url.startsWith('http')) {
-          console.log(`Loading model ${index + 1}/${modelUrls.length}:`, url);
-          loadModelFromUrl(url, index);
-        }
+        // Construct full URL if it's a relative path
+        const fullUrl = url.startsWith('http') ? url : `http://localhost:3000/${url}`;
+        console.log(`Loading model ${index + 1}/${modelUrls.length}:`, fullUrl);
+        loadModelFromUrl(fullUrl, index);
       });
     }
     
@@ -291,5 +406,25 @@ onUnmounted(() => {
   color: #999;
   font-size: 11px;
   margin-top: 3px;
+}
+
+.view-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #ddd;
+}
+
+.view-controls .toggle-btn {
+  margin-top: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  background: #6c757d;
+}
+
+.view-controls .toggle-btn:hover {
+  background: #5a6268;
 }
 </style>

@@ -5,11 +5,7 @@
       "thumbnailTemplate": "https://data.pgc.umn.edu/aerial/usgs/tma/photos/thumb/CA{tma_number}/CA{tma_number}32V/{image_id}_thumbnail.jpg",
       "headerAttribute": "image_id",
       "hasDownloadLinks": true,
-      "downloadLinkTemplate": "https://data.pgc.umn.edu/aerial/usgs/tma/photos/high/CA{tma_number}/CA{tma_number}32V/{image_id}.tif",
-      "has3DModels": true,
-      "3DModelTemplate": "https://3d.pgc.umn.edu/models/{image_id}.html",
-      "hasPointClouds": false,
-      "pointCloudTemplate": ""
+      "downloadLinkTemplate": "https://data.pgc.umn.edu/aerial/usgs/tma/photos/high/CA{tma_number}/CA{tma_number}32V/{image_id}.tif"
     },
     "attributes": {
       "attributesFile": "attributes/images.csv",
@@ -29,6 +25,19 @@
       "attributesKey": "tma_num",
       "attributesDelimiter": ";",
       "ownKey": "tma_num"
+    }
+  },
+  "shapes/glaciers.geojson": {
+    "metadata": {
+      "headerAttribute": "glac_name",
+      "has3DModels": true,
+      "3DModels": [
+        {
+          "linkTemplate": "{glac_name}.obj"
+        }
+      ],
+      "hasPointClouds": true,
+      "pointclouds": []
     }
   }
 }

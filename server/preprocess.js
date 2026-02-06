@@ -5,13 +5,26 @@ import * as shapefile from "shapefile";
 import * as turf from "@turf/turf";
 import { reproject } from "reproject";
 import epsg from "epsg-index/all.json" with { type: "json" };
-import { parse } from "csv-parse/sync";
+import {
+  copyFile,
+  copy3DModelWithDependencies,
+  applyTemplate,
+  loadCsvLookup,
+  detectCrs,
+} from "./utils.js";
 
-// define input/output directories
+// Define input/output directories
 const INPUT_DIR = path.resolve("../input");
-const OUTPUT_DIR = path.resolve("data");
+const SHAPES_INPUT_DIR = path.join(INPUT_DIR, "shapes");
+const MODELS_INPUT_DIR = path.join(INPUT_DIR, "models");
+const POINTCLOUDS_INPUT_DIR = path.join(INPUT_DIR, "pointclouds");
 
-// global config
+const OUTPUT_DIR = path.resolve("data");
+const LAYERS_OUTPUT_DIR = path.join(OUTPUT_DIR, "layers");
+const MODELS_OUTPUT_DIR = path.join(OUTPUT_DIR, "3D");
+const POINTCLOUDS_OUTPUT_DIR = path.join(OUTPUT_DIR, "pointclouds");
+
+// Global config
 const CONFIG = {
   targetCrs: "EPSG:3031",
   simplifyTolerance: 50,
@@ -24,30 +37,26 @@ const MAPPING = fs.existsSync(MAPPING_PATH)
   ? JSON.parse(fs.readFileSync(MAPPING_PATH, "utf-8"))
   : {};
 
-// Helper to apply template strings (e.g. "{id}.jpg" -> "123.jpg")
-const applyTemplate = (template, properties) => {
-  if (!template) return null;
-  let url = template;
-  const placeholders = url.match(/{([^}]+)}/g) || [];
-  placeholders.forEach((p) => {
-    const key = p.replace(/{|}/g, "");
-    url = url.replace(p, properties[key] || "");
-  });
-  return url;
-};
+// Ensure output directories exist
+[LAYERS_OUTPUT_DIR, MODELS_OUTPUT_DIR, POINTCLOUDS_OUTPUT_DIR].forEach((dir) => {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+});
 
 const processShapes = async () => {
-  const shapeDir = path.join(INPUT_DIR, "shapes");
 
+  // Read all shape files from input directory
   const files = fs
-    .readdirSync(shapeDir)
+    .readdirSync(SHAPES_INPUT_DIR)
     .filter(
       (f) =>
         f.endsWith(".json") || f.endsWith(".geojson") || f.endsWith(".shp"),
     );
 
+  // Main processing loop for each shape file
   for (const file of files) {
-    const filePath = path.join(shapeDir, file);
+    const filePath = path.join(SHAPES_INPUT_DIR, file);
     const mappingKey = `shapes/${file}`;
     const fileConfig = MAPPING[mappingKey];
 
@@ -89,6 +98,7 @@ const processShapes = async () => {
           `  - Joining attributes from ${fileConfig.attributes.attributesFile}...`,
         );
         csvLookup = loadCsvLookup(
+          INPUT_DIR,
           fileConfig.attributes.attributesFile,
           fileConfig.attributes.attributesKey,
           fileConfig.attributes.attributesDelimiter,
@@ -111,56 +121,70 @@ const processShapes = async () => {
         // B. Apply URL Templates (Thumbnails, Download, 3D Model)
         if (fileConfig?.metadata) {
           const md = fileConfig.metadata;
-          
+
           if (md.hasThumbnails) {
             const url = applyTemplate(md.thumbnailTemplate, feature.properties);
             if (url && url !== md.thumbnailTemplate) {
               feature.properties._thumbnailUrl = url;
             }
           }
+          
           if (md.hasDownloadLinks) {
             const url = applyTemplate(md.downloadLinkTemplate, feature.properties);
             if (url && url !== md.downloadLinkTemplate) {
               feature.properties._downloadUrl = url;
             }
           }
-          
-          // Handle 3D models - support both single template and array
-          if (md.has3DModels) {
+
+          // Handle 3D models
+          if (md.has3DModels && Array.isArray(md["3DModels"])) {
             const models = [];
-            
-            // Support array of templates
-            const templates = Array.isArray(md["3DModelTemplate"]) 
-              ? md["3DModelTemplate"] 
-              : [md["3DModelTemplate"]];
-            
-            templates.forEach(template => {
-              const url = applyTemplate(template, feature.properties);
-              if (url && url !== template) {
-                models.push(url);
+
+            md["3DModels"].forEach((modelDef) => {
+              const url = applyTemplate(modelDef.linkTemplate, feature.properties);
+              if (url && url !== modelDef.linkTemplate) {
+                const filename = path.basename(url);
+                const copiedFilename = copy3DModelWithDependencies(
+                  filename,
+                  MODELS_INPUT_DIR,
+                  MODELS_OUTPUT_DIR
+                );
+
+                if (copiedFilename) {
+                  // Construct the proper URL path relative to the data server
+                  const modelUrl = `data/3D/${copiedFilename}`;
+                  models.push(modelUrl);
+                }
               }
             });
-            
+
             if (models.length > 0) {
               feature.properties._model3dUrls = models;
             }
           }
-          
-          // Handle point clouds - support both single template and array
-          if (md.hasPointClouds) {
+
+          // Handle point clouds
+          if (md.hasPointClouds && Array.isArray(md.pointclouds)) {
             const pointclouds = [];
-            
-            const templates = Array.isArray(md.pointCloudTemplate) 
-              ? md.pointCloudTemplate 
-              : [md.pointCloudTemplate];
-            
-            templates.forEach(template => {
-              const url = applyTemplate(template, feature.properties);
-              if (url && url !== template) {
-                pointclouds.push(url);
+
+            md.pointclouds.forEach((cloudDef) => {
+              const url = applyTemplate(cloudDef.linkTemplate, feature.properties);
+              if (url && url !== cloudDef.linkTemplate) {
+                const filename = path.basename(url);
+                const copiedFilename = copyFile(
+                  POINTCLOUDS_INPUT_DIR,
+                  filename,
+                  POINTCLOUDS_OUTPUT_DIR
+                );
+
+                if (copiedFilename) {
+                  // Construct the proper URL path relative to the data server
+                  const cloudUrl = `data/pointclouds/${copiedFilename}`;
+                  pointclouds.push(cloudUrl);
+                }
               }
             });
-            
+
             if (pointclouds.length > 0) {
               feature.properties._pointcloudUrls = pointclouds;
             }
@@ -174,7 +198,9 @@ const processShapes = async () => {
             highQuality: true,
             mutate: false,
           });
-        } catch (e) { /* keep original on fail */ }
+        } catch (e) {
+          /* keep original on fail */
+        }
 
         feature.properties._featureId = uuidv4();
         return feature;
@@ -190,6 +216,7 @@ const processShapes = async () => {
       geojson._layerId = uuidv4();
       if (fileConfig?.metadata) geojson._metadata = fileConfig.metadata;
 
+      // Ensure CRS is included and ordered first in the GeoJSON
       if (geojson.crs) delete geojson.crs;
       geojson.crs = {
         type: "name",
@@ -198,11 +225,13 @@ const processShapes = async () => {
         },
       };
 
+      // order to have CRS first (some parsers expect this)
       const orderedGeojson = { crs: geojson.crs, ...geojson };
-
+      
+      // Save output
       const outputName = file.replace(/\.[^/.]+$/, "") + ".geojson";
       fs.writeFileSync(
-        path.join(OUTPUT_DIR, outputName),
+        path.join(LAYERS_OUTPUT_DIR, outputName),
         JSON.stringify(orderedGeojson),
       );
       console.log(`  Successfully saved: ${outputName}`);
@@ -210,33 +239,6 @@ const processShapes = async () => {
       console.warn(`  ! Skipping file due to unsupported format: ${file}`);
     }
   }
-};
-
-const loadCsvLookup = (relativeCsvPath, keyColumn, delimiter = ",") => {
-  const fullPath = path.resolve(INPUT_DIR, relativeCsvPath);
-  if (!fs.existsSync(fullPath)) {
-    console.warn(`  ! CSV file not found: ${fullPath}`);
-    return null;
-  }
-  const rawCsv = fs.readFileSync(fullPath, "utf-8");
-  const records = parse(rawCsv, {
-    columns: true,
-    skip_empty_lines: true,
-    delimiter: delimiter,
-  });
-  const lookup = new Map();
-  records.forEach((row) => lookup.set(String(row[keyColumn]), row));
-  return lookup;
-};
-
-const detectCrs = (geojson) => {
-  if (geojson.crs?.properties?.name) {
-    const name = geojson.crs.properties.name;
-    if (name.includes("CRS84")) return "EPSG:4326";
-    const match = name.match(/EPSG::?(\d+)/);
-    return match ? `EPSG:${match[1]}` : name;
-  }
-  return "EPSG:4326";
 };
 
 processShapes().catch(console.error);

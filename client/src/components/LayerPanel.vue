@@ -70,14 +70,13 @@
             </span>
 
             <div class="action-buttons">
-              <button
+              <span
                 v-if="layer.status === 'error'"
-                class="action-btn retry-btn"
-                title="Retry"
-                @click.stop="handleRetry(layer._layerId)"
+                class="warning-icon"
+                :title="layer.error || 'Failed to load layer'"
               >
-                🔄
-              </button>
+                ⚠️
+              </span>
 
               <button
                 v-if="['downloading', 'processing', 'loading-details'].includes(layer.status)"
@@ -194,10 +193,6 @@ const handleColorChange = ({ color, layer }) => {
   layerStore.updateLayerColor(layer._layerId, color);
   // 2. Re-style the OL features to match (composable owns OL logic)
   if (layerManager.value) layerManager.value.applyLayerColor(layer._layerId);
-};
-
-const handleRetry = (layerId) => {
-  layerStore.retryLayer(layerId);
 };
 
 const handleCancel = (layerId) => {
@@ -352,8 +347,11 @@ label {
   line-height: 1;
 }
 
-.retry-btn:hover {
-  background-color: #e3f2fd;
+.warning-icon {
+  font-size: 16px;
+  line-height: 1;
+  cursor: help;
+  padding: 0 4px;
 }
 
 .cancel-btn:hover {

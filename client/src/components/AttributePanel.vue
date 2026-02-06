@@ -8,6 +8,10 @@
         </div>
 
         <div class="panel-content">
+          <h2 v-if="featureTitle" class="feature-title">
+            {{ featureTitle }}
+          </h2>
+
           <div
             v-if="selectedFeature.properties._thumbnailUrl"
             class="thumbnail-wrapper"
@@ -51,10 +55,12 @@
               <span class="btn-text">Download</span>
             </a>
             <button
-              v-if="model3dUrl"
-              @click="handle3DView"
+              v-if="layerSupports3D"
+              @click="has3DData ? handle3DView() : null"
               class="action-btn model-btn"
-              title="View 3D Model"
+              :class="{ 'disabled': !has3DData }"
+              :title="has3DData ? 'View 3D Model' : 'No 3D data available for this feature'"
+              :disabled="!has3DData"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -77,10 +83,6 @@
               <span class="btn-text">3D View</span>
             </button>
           </div>
-
-          <h2 v-if="featureTitle" class="feature-title">
-            {{ featureTitle }}
-          </h2>
 
           <table class="attr-table">
             <tbody>
@@ -172,9 +174,20 @@ const pointcloudUrls = computed(() => {
   return [];
 });
 
-// Check if any 3D data exists
+// Check if any 3D data exists for this feature
 const has3DData = computed(() => {
   return model3dUrls.value.length > 0 || pointcloudUrls.value.length > 0;
+});
+
+// Check if the layer supports 3D (even if this feature doesn't have data)
+const layerSupports3D = computed(() => {
+  const props = selectedFeature.value?.properties;
+  if (!props?._layerId) return false;
+  
+  const layer = layerStore.layers.find((l) => l._layerId === props._layerId);
+  const metadata = layer?.metadata || {};
+  
+  return metadata.has3DModels === true || metadata.hasPointClouds === true;
 });
 
 // Check if first model URL is external
@@ -186,28 +199,43 @@ const isExternal3dModel = computed(() => {
          firstUrl.startsWith('//');
 });
 
-const hasActions = computed(() => downloadUrl.value || has3DData.value);
+const hasActions = computed(() => downloadUrl.value || has3DData.value || layerSupports3D.value);
 
-// Handle 3D view navigation
+// Handle 3D view navigation - FIXED VERSION
 const handle3DView = () => {
-  if (!model3dUrl.value) return;
+  if (!has3DData.value) return;
   
-  console.log("TESTING 3D VIEW HANDLER");
-  //if (isExternal3dModel.value) {
-  if(false) {
-  // Open external link in new tab
-    window.open(model3dUrl.value, '_blank');
-  } else {
-    // Open internal 3D viewer in new tab with model path
-    const props = selectedFeature.value.properties;
-    const query = new URLSearchParams({
-      model: model3dUrl.value,
-      name: props.name || 'Model',
-      x: props._x || 0,
-      y: props._y || 0
-    });
-    window.open(`/#/3d?${query.toString()}`, '_blank');
+  if (model3dUrls.value.length === 0 && pointcloudUrls.value.length === 0) return;
+  
+  console.log("Opening 3D viewer with:", { models: model3dUrls.value, pointclouds: pointcloudUrls.value });
+  
+  const props = selectedFeature.value.properties;
+  
+  // Build query object
+  const queryObj = {
+    name: props.name || featureTitle.value || 'Model',
+    x: props._x || 0,
+    y: props._y || 0
+  };
+  
+  // Add models as comma-separated string
+  if (model3dUrls.value.length > 0) {
+    queryObj.models = model3dUrls.value.join(',');
   }
+  
+  // Add pointclouds as comma-separated string
+  if (pointcloudUrls.value.length > 0) {
+    queryObj.pointclouds = pointcloudUrls.value.join(',');
+  }
+  
+  // Use router.resolve to get the proper URL
+  const route = router.resolve({
+    name: '3d',
+    query: queryObj
+  });
+  
+  // Open in new tab with the resolved href
+  window.open(route.href, '_blank');
 };
 
 // Computed property to handle all filtering logic
@@ -418,6 +446,23 @@ const featureTitle = computed(() => {
   border-color: #69db7c;
   color: #2b8a3e;
   background-color: #ebfbee;
+}
+
+/* Disabled button state */
+.action-btn.disabled,
+.action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.action-btn.disabled:hover,
+.action-btn:disabled:hover {
+  background: #fff;
+  border-color: #ddd;
+  color: #333;
+  transform: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .attr-table {
