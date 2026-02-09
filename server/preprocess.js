@@ -20,11 +20,13 @@ const INPUT_DIR = path.resolve("../input");
 const SHAPES_INPUT_DIR = path.join(INPUT_DIR, "shapes");
 const MODELS_INPUT_DIR = path.join(INPUT_DIR, "models");
 const POINTCLOUDS_INPUT_DIR = path.join(INPUT_DIR, "pointclouds");
+const GEOTIFFS_INPUT_DIR = path.join(INPUT_DIR, "geotiffs");
 
 const OUTPUT_DIR = path.resolve("data");
 const LAYERS_OUTPUT_DIR = path.join(OUTPUT_DIR, "layers");
 const MODELS_OUTPUT_DIR = path.join(OUTPUT_DIR, "3D");
 const POINTCLOUDS_OUTPUT_DIR = path.join(OUTPUT_DIR, "pointclouds");
+const GEOTIFFS_OUTPUT_DIR = path.join(OUTPUT_DIR, "geotiffs");
 
 // Load preprocessing config
 const PREPROCESS_CONFIG_PATH = path.resolve("preprocess_config.json");
@@ -56,7 +58,7 @@ const MAPPING = fs.existsSync(MAPPING_PATH)
   : {};
 
 // Ensure output directories exist
-[LAYERS_OUTPUT_DIR, MODELS_OUTPUT_DIR, POINTCLOUDS_OUTPUT_DIR].forEach((dir) => {
+[LAYERS_OUTPUT_DIR, MODELS_OUTPUT_DIR, POINTCLOUDS_OUTPUT_DIR, GEOTIFFS_OUTPUT_DIR].forEach((dir) => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -126,6 +128,10 @@ const processShapes = async () => {
       // Feature Processing Loop
       geojson.features = geojson.features.map((feature) => {
         if (!feature.properties) feature.properties = {};
+        
+        // Generate unique feature ID early (used for file naming)
+        const featureId = uuidv4().split('-')[0]; // Use short ID (8 chars)
+        feature.properties._featureId = featureId;
 
         // A. Apply Join
         if (csvLookup && fileConfig.attributes.ownKey) {
@@ -162,10 +168,13 @@ const processShapes = async () => {
               const url = applyTemplate(modelDef.linkTemplate, feature.properties);
               if (url && url !== modelDef.linkTemplate) {
                 const filename = path.basename(url);
+                
+                // Pass featureId to ensure unique filenames
                 const copiedFilename = copy3DModelWithDependencies(
                   filename,
                   MODELS_INPUT_DIR,
-                  MODELS_OUTPUT_DIR
+                  MODELS_OUTPUT_DIR,
+                  featureId  // Add feature ID for unique naming
                 );
 
                 if (copiedFilename) {
@@ -189,10 +198,13 @@ const processShapes = async () => {
               const url = applyTemplate(cloudDef.linkTemplate, feature.properties);
               if (url && url !== cloudDef.linkTemplate) {
                 const filename = path.basename(url);
+                
+                // Pass featureId to ensure unique filenames
                 const copiedFilename = copyFile(
                   POINTCLOUDS_INPUT_DIR,
                   filename,
-                  POINTCLOUDS_OUTPUT_DIR
+                  POINTCLOUDS_OUTPUT_DIR,
+                  featureId  // Add feature ID for unique naming
                 );
 
                 if (copiedFilename) {
@@ -214,7 +226,7 @@ const processShapes = async () => {
           feature = turf.simplify(feature, {
             tolerance: CONFIG.simplifyTolerance,
             highQuality: true,
-            mutate: false,
+        // Feature ID was already set at the beginning of the loop
           });
         } catch (e) {
           /* keep original on fail */
@@ -267,6 +279,142 @@ const processModels = async () => {
 const processPointClouds = async () => {
   console.log("\n=== Processing Point Clouds ===\n");
   await processAllPointClouds(POINTCLOUDS_INPUT_DIR, POINTCLOUDS_OUTPUT_DIR, PREPROCESS_CONFIG);
+};
+
+const processGeoTIFFs = async () => {
+  console.log("\n=== Processing GeoTIFFs ===\n");
+  
+  if (!PREPROCESS_CONFIG.geotiffs?.enabled) {
+    console.log("  GeoTIFF processing is disabled in config. Skipping...");
+    return;
+  }
+
+  if (!fs.existsSync(GEOTIFFS_INPUT_DIR)) {
+    console.log("  No geotiffs/ folder found in input. Skipping...");
+    return;
+  }
+
+  const files = fs
+    .readdirSync(GEOTIFFS_INPUT_DIR)
+    .filter((f`  - GeoTIFFs: ${PREPROCESS_CONFIG.geotiffs?.enabled ? 'Enabled' : 'Disabled'}`);
+  if (PREPROCESS_CONFIG.geotiffs?.enabled && PREPROCESS_CONFIG.geotiffs?.optimization?.createCOG) {
+    console.log(`  - COG Optimization: Enabled`);
+  }
+  console.log("\n");
+  
+  // Process shapes
+  console.log("=== Processing Shapes ===\n");
+  await processShapes();
+  
+  // Process 3D models
+  await processModels();
+  
+  // Process point clouds
+  await processPointClouds();
+  
+  // Process GeoTIFFs
+  await processGeoTIFFh.join(GEOTIFFS_INPUT_DIR, file);
+    const outputName = file.replace(/\.tiff?$/, ".tif");
+    const outputPath = path.join(GEOTIFFS_OUTPUT_DIR, outputName);
+
+    console.log(`\n  Processing: ${file}`);
+
+    const config = PREPROCESS_CONFIG.geotiffs;
+
+    // Check if GDAL is available
+    const { execSync } = await import("child_process");
+    let gdalAvailable = false;
+    try {
+      execSync("gdalinfo --version", { stdio: "ignore" });
+      gdalAvailable = true;
+    } catch (e) {
+      gdalAvailable = false;
+    }
+
+    if (!gdalAvailable) {
+      console.log("  ⚠ GDAL not found. Installing GDAL is recommended for optimization.");
+      console.log("    macOS: brew install gdal");
+      console.log("    Ubuntu: sudo apt-get install gdal-bin");
+      console.log("    Windows: https://gdal.org/download.html");
+      console.log("  → Copying file as-is...");
+      fs.copyFileSync(inputPath, outputPath);
+      console.log(`  ✔ Copied: ${outputName}`);
+      continue;
+    }
+
+    // Build GDAL command for optimization
+    const args = [];
+
+    // Check if already Cloud Optimized
+    let isCOG = false;
+    try {
+      const info = execSync(`gdalinfo "${inputPath}"`, { encoding: "utf-8" });
+      if (info.includes("LAYOUT=COG")) {
+        isCOG = true;
+        console.log("  → Already Cloud Optimized (COG)");
+      }
+    } catch (e) {
+      console.error("  ! Failed to read GeoTIFF info");
+    }
+
+    // If optimization is disabled or already COG, just copy
+    if (!config.optimization?.enabled || (isCOG && !config.targetCrs)) {
+      fs.copyFileSync(inputPath, outputPath);
+      console.log(`  ✔ Copied: ${outputName}`);
+      continue;
+    }
+
+    // Convert to COG with optimization
+    console.log("  → Optimizing GeoTIFF...");
+
+    try {
+      // Base command
+      let cmd = `gdalwarp "${inputPath}" "${outputPath}"`;
+
+      // Add CRS reprojection if specified
+      if (config.targetCrs) {
+        const targetEpsg = config.targetCrs.replace("EPSG:", "");
+        cmd += ` -t_srs EPSG:${targetEpsg}`;
+        console.log(`    - Reprojecting to ${config.targetCrs}`);
+      }
+
+      // Add resampling method
+      if (config.resampling?.method) {
+        cmd += ` -r ${config.resampling.method}`;
+      }
+
+      // Add resolution if specified
+      if (config.resampling?.resolution) {
+        cmd += ` -tr ${config.resampling.resolution} ${config.resampling.resolution}`;
+      }
+
+      // Cloud Optimize
+      if (config.optimization?.createCOG) {
+        cmd += ` -co TILED=YES`;
+        cmd += ` -co COPY_SRC_OVERVIEWS=YES`;
+        cmd += ` -co COMPRESS=${config.optimization.compression || "DEFLATE"}`;
+        console.log(`    - Creating Cloud Optimized GeoTIFF (COG)`);
+      }
+
+      // Add overviews
+      if (config.optimization?.overviews) {
+        cmd += ` -co OVERVIEW_RESAMPLING=BILINEAR`;
+        console.log(`    - Adding internal overviews`);
+      }
+
+      execSync(cmd, { stdio: "inherit" });
+      console.log(`  ✔ Optimized: ${outputName}`);
+    } catch (error) {
+      console.error(`  ✗ Failed to process ${file}:`, error.message);
+      // Fallback: copy original file
+      try {
+        fs.copyFileSync(inputPath, outputPath);
+        console.log(`  ✔ Copied original file as fallback`);
+      } catch (copyError) {
+        console.error(`  ✗ Failed to copy file:`, copyError.message);
+      }
+    }
+  }
 };
 
 const main = async () => {

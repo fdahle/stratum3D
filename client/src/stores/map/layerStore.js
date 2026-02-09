@@ -1,6 +1,14 @@
 // client/src/stores/layerStore.js
 import { defineStore } from "pinia";
 import { markRaw, ref, computed } from "vue";
+import { 
+  LAYER_STATUS, 
+  LAYER_CATEGORY, 
+  GEOMETRY_TYPE, 
+  DEFAULT_COLOR, 
+  Z_INDEX,
+  PROGRESS_UPDATE_DEBOUNCE 
+} from "../../constants/layerConstants";
 
 // Simple debounce implementation
 function debounce(func, wait) {
@@ -44,21 +52,21 @@ export const useLayerStore = defineStore("layers", () => {
     type,
     category,
     visible,
-    geometryType = "unknown",
-    color = "#3388ff",
+    geometryType = GEOMETRY_TYPE.UNKNOWN,
+    color = DEFAULT_COLOR,
     url = null,
     searchFields = [],
     metadata = {},
   }) => {
     if (layers.value.some((l) => l._layerId === layerId)) return;
 
-    let initialStatus = "ready";
+    let initialStatus = LAYER_STATUS.READY;
     if (type === "geojson" && !layerInstance) {
-      initialStatus = "idle";
+      initialStatus = LAYER_STATUS.IDLE;
     }
 
     // Set z-index based on category
-    const zIndex = category === "base" ? 0 : 100;
+    const zIndex = category === LAYER_CATEGORY.BASE ? Z_INDEX.BASE : Z_INDEX.OVERLAY;
 
     if (layerInstance) {
       layerInstance.setZIndex(zIndex);
@@ -112,7 +120,7 @@ export const useLayerStore = defineStore("layers", () => {
         debounce((prog) => {
           const l = layerIndex.get(layerId);
           if (l) l.progress = prog;
-        }, 50)
+        }, PROGRESS_UPDATE_DEBOUNCE)
       );
     }
 
@@ -128,15 +136,15 @@ export const useLayerStore = defineStore("layers", () => {
     const layer = layerIndex.get(layerId);
     if (layer) {
       layer.error = errorMessage;
-      layer.status = "error";
+      layer.status = LAYER_STATUS.ERROR;
       layer.progress = 0;
     }
   };
 
   const retryLayer = (layerId) => {
     const layer = layerIndex.get(layerId);
-    if (layer && layer.status === 'error') {
-      layer.status = 'idle';
+    if (layer && layer.status === LAYER_STATUS.ERROR) {
+      layer.status = LAYER_STATUS.IDLE;
       layer.error = null;
       layer.progress = 0;
       layer.active = true;
@@ -150,11 +158,15 @@ export const useLayerStore = defineStore("layers", () => {
 
   const cancelLayerLoad = (layerId) => {
     const layer = layerIndex.get(layerId);
-    if (layer && ['downloading', 'processing', 'loading-details'].includes(layer.status)) {
+    if (layer && [
+      LAYER_STATUS.DOWNLOADING, 
+      LAYER_STATUS.PROCESSING, 
+      LAYER_STATUS.LOADING_DETAILS
+    ].includes(layer.status)) {
       // 1. Terminate the worker (via the composable's handler)
       if (_onCancelLayer) _onCancelLayer(layerId);
       // 2. Reset state
-      layer.status = 'idle';
+      layer.status = LAYER_STATUS.IDLE;
       layer.progress = 0;
       layer.active = false;
     }
@@ -166,20 +178,20 @@ export const useLayerStore = defineStore("layers", () => {
 
     if (
       !layer ||
-      layer.status === "error" ||
-      layer.status === "downloading" ||
-      layer.status === "processing" ||
-      layer.status === "loading-details"
+      layer.status === LAYER_STATUS.ERROR ||
+      layer.status === LAYER_STATUS.DOWNLOADING ||
+      layer.status === LAYER_STATUS.PROCESSING ||
+      layer.status === LAYER_STATUS.LOADING_DETAILS
     )
       return;
 
     // BASE LAYER LOGIC
-    if (layer.category === "base") {
+    if (layer.category === LAYER_CATEGORY.BASE) {
       if (layer.active) return;
       
       // Disable other base layers
       layers.value.forEach((l) => {
-        if (l.category === "base" && l.active) {
+        if (l.category === LAYER_CATEGORY.BASE && l.active) {
           l.active = false;
           if (l.layerInstance) l.layerInstance.setVisible(false);
         }
@@ -210,10 +222,10 @@ export const useLayerStore = defineStore("layers", () => {
 
   // --- GETTERS ---
   const baseLayers = computed(() =>
-    layers.value.filter((l) => l.category === "base"),
+    layers.value.filter((l) => l.category === LAYER_CATEGORY.BASE),
   );
   const overlayLayers = computed(() =>
-    layers.value.filter((l) => l.category === "overlay"),
+    layers.value.filter((l) => l.category === LAYER_CATEGORY.OVERLAY),
   );
 
   return {

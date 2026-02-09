@@ -2,6 +2,7 @@
 import { defineStore } from "pinia";
 import { ref, markRaw } from "vue";
 import { toLonLat } from "ol/proj"; // Helper to convert Meters -> Lat/Lon
+import { MAP_POINTER_THROTTLE_MS } from "../../constants/layerConstants";
 
 export const useMapStore = defineStore("map", () => {
   // --- STATE ---
@@ -46,13 +47,12 @@ export const useMapStore = defineStore("map", () => {
 
     // 3. Throttled Mouse Movement tracking (reduce CPU during zoom/pan)
     let lastPointerUpdate = 0;
-    const POINTER_THROTTLE_MS = 50; // Update at most every 50ms
     
     map.on("pointermove", (e) => {
       if (e.dragging) return;
       
       const now = Date.now();
-      if (now - lastPointerUpdate < POINTER_THROTTLE_MS) return;
+      if (now - lastPointerUpdate < MAP_POINTER_THROTTLE_MS) return;
       lastPointerUpdate = now;
       
       const coords = e.coordinate;

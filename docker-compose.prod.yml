@@ -1,0 +1,15 @@
+# Production-specific overrides
+version: '3.8'
+
+services:
+  server:
+    restart: always
+    environment:
+      - NODE_ENV=production
+    volumes:
+      # In production, don't mount source code
+      - ./input:/app/input:ro
+      - ./server/data:/app/server/data
+
+  client:
+    restart: always

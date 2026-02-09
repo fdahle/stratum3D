@@ -1,0 +1,238 @@
+// Factory functions for creating different OpenLayers layer types
+import TileLayer from "ol/layer/Tile";
+import WebGLTileLayer from "ol/layer/WebGLTile";
+import XYZ from "ol/source/XYZ";
+import TileGrid from "ol/tilegrid/TileGrid";
+import { createXYZ } from "ol/tilegrid";
+import WMTS from "ol/source/WMTS";
+import WMTSTileGrid from "ol/tilegrid/WMTS";
+import TileWMS from "ol/source/TileWMS";
+import GeoTIFF from "ol/source/GeoTIFF";
+import { DEFAULT_TILE_SIZE } from "../constants/layerConstants";
+
+/**
+ * Create a tile layer configuration object
+ * @param {Object} layerConf - Layer configuration
+ * @param {import('ol/Map').default} map - OpenLayers map instance
+ * @param {number} zIndex - Layer z-index
+ * @param {string} layerId - Unique layer identifier
+ * @returns {Object} Layer configuration object
+ */
+export function createTileLayerConfig(layerConf, map, zIndex, layerId) {
+  const projection = map.getView().getProjection();
+  const isWMTS = layerConf.url.includes("{z}/{y}/{x}");
+
+  const sourceConfig = {
+    attributions: layerConf.attribution,
+    projection: projection,
+    wrapX: false,
+  };
+
+  // Add tile grid if custom resolutions are provided (for polar projections)
+  if (layerConf.crs_options?.resolutions && layerConf.crs_options?.extent) {
+    const extent = layerConf.crs_options.extent;
+    const resolutions = layerConf.crs_options.resolutions;
+    const tileSize = layerConf.tileSize || DEFAULT_TILE_SIZE;
+
+    if (isWMTS) {
+      // WMTS uses TMS-style tiles with origin at top-left
+      sourceConfig.tileGrid = new TileGrid({
+        extent: extent,
+        resolutions: resolutions,
+        tileSize: tileSize,
+        origin: [extent[0], extent[3]], // Top-left corner
+      });
+
+      // Custom tile URL function for WMTS {z}/{y}/{x} pattern
+      sourceConfig.tileUrlFunction = (tileCoord) => {
+        if (!tileCoord) return "";
+        const z = tileCoord[0];
+        const x = tileCoord[1];
+        const y = tileCoord[2];
+
+        return layerConf.url
+          .replace("{z}", z.toString())
+          .replace("{y}", y.toString())
+          .replace("{x}", x.toString());
+      };
+    } else {
+      // Standard XYZ tiles
+      sourceConfig.tileGrid = createXYZ({
+        extent: extent,
+        resolutions: resolutions,
+        tileSize: tileSize,
+      });
+      sourceConfig.url = layerConf.url;
+    }
+  } else {
+    // No custom tile grid - use URL directly
+    sourceConfig.url = layerConf.url;
+  }
+
+  const source = new XYZ(sourceConfig);
+  const olLayer = new TileLayer({
+    source: source,
+    visible: layerConf.visible,
+    zIndex: zIndex,
+    properties: { name: layerConf.name, id: layerId },
+  });
+
+  return {
+    layerId,
+    name: layerConf.name,
+    layerInstance: olLayer,
+    type: "tile",
+    visible: layerConf.visible,
+    url: layerConf.url,
+  };
+}
+
+/**
+ * Create a WMS layer configuration object
+ * @param {Object} layerConf - Layer configuration
+ * @param {import('ol/Map').default} map - OpenLayers map instance
+ * @param {number} zIndex - Layer z-index
+ * @param {string} layerId - Unique layer identifier
+ * @returns {Object} Layer configuration object
+ */
+export function createWMSLayerConfig(layerConf, map, zIndex, layerId) {
+  const source = new TileWMS({
+    url: layerConf.url,
+    params: {
+      LAYERS: layerConf.layers || "0",
+      FORMAT: layerConf.format || "image/jpeg",
+      VERSION: "1.3.0",
+    },
+    projection: map.getView().getProjection(),
+    attributions: layerConf.attribution,
+  });
+
+  const olLayer = new TileLayer({
+    source: source,
+    visible: layerConf.visible,
+    zIndex: zIndex,
+    properties: { name: layerConf.name, id: layerId },
+  });
+
+  return {
+    layerId,
+    name: layerConf.name,
+    layerInstance: olLayer,
+    type: "wms",
+    visible: layerConf.visible,
+    url: layerConf.url,
+  };
+}
+
+/**
+ * Create a WMTS layer configuration object
+ * @param {Object} layerConf - Layer configuration
+ * @param {import('ol/Map').default} map - OpenLayers map instance
+ * @param {number} zIndex - Layer z-index
+ * @param {string} layerId - Unique layer identifier
+ * @returns {Object} Layer configuration object
+ */
+export function createWMTSLayerConfig(layerConf, map, zIndex, layerId) {
+  const source = new WMTS({
+    url: layerConf.url,
+    layer: layerConf.layer,
+    matrixSet: layerConf.matrixSet,
+    format: layerConf.format,
+    projection: map.getView().getProjection(),
+    tileGrid: new WMTSTileGrid({
+      origin: layerConf.origin || [-4194304, 4194304],
+      resolutions: layerConf.resolutions || [8192, 4096, 2048, 1024, 512, 256],
+      matrixIds: layerConf.matrixIds || [0, 1, 2, 3, 4, 5],
+      tileSize: layerConf.tileSize || 512,
+    }),
+  });
+
+  const olLayer = new TileLayer({
+    source: source,
+    visible: layerConf.visible,
+    zIndex: zIndex,
+    properties: { name: layerConf.name, id: layerId },
+  });
+
+  return {
+    layerId,
+    name: layerConf.name,
+    layerInstance: olLayer,
+    type: "wmts",
+    visible: layerConf.visible,
+    url: layerConf.url,
+  };
+}
+
+/**
+ * Create a GeoJSON layer configuration object (deferred loading)
+ * @param {Object} layerConf - Layer configuration
+ * @param {string} layerId - Unique layer identifier
+ * @returns {Object} Layer configuration object
+ */
+export function createGeoJSONLayerConfig(layerConf, layerId) {
+  return {
+    layerId,
+    name: layerConf.name,
+    layerInstance: null, // Will be created after download
+    type: "geojson",
+    visible: layerConf.visible,
+    color: layerConf.color,
+    url: layerConf.url,
+    searchFields: layerConf.search_fields || [],
+    metadata: layerConf._metadata || {},
+  };
+}
+
+/**
+ * Create a GeoTIFF layer configuration object
+ * @param {Object} layerConf - Layer configuration
+ * @param {import('ol/Map').default} map - OpenLayers map instance
+ * @param {number} zIndex - Layer z-index
+ * @param {string} layerId - Unique layer identifier
+ * @returns {Object} Layer configuration object
+ */
+export function createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId) {
+  const sourceConfig = {
+    sources: [
+      {
+        url: layerConf.url,
+        // Support for multi-band GeoTIFFs
+        bands: layerConf.bands || [1], // Default to first band
+      }
+    ],
+    // Optional: Normalize values for better visualization
+    normalize: layerConf.normalize !== undefined ? layerConf.normalize : true,
+  };
+
+  // Add optional overviews for better performance with large GeoTIFFs
+  if (layerConf.overviews) {
+    sourceConfig.sources[0].overviews = layerConf.overviews;
+  }
+
+  const source = new GeoTIFF(sourceConfig);
+
+  // Use WebGLTileLayer for better performance with GeoTIFFs
+  const olLayer = new WebGLTileLayer({
+    source: source,
+    visible: layerConf.visible,
+    zIndex: zIndex,
+    properties: { name: layerConf.name, id: layerId },
+    // Optional: Add custom styling for bands
+    style: layerConf.style || undefined,
+  });
+
+  // Set opacity if specified
+  if (layerConf.opacity !== undefined) {
+    olLayer.setOpacity(layerConf.opacity);
+  }
+
+  return {
+    layerId,
+    name: layerConf.name,
+    layerInstance: olLayer,
+    type: "geotiff",
+    visible: layerConf.visible,
+    url: layerConf.url,
+  };
+}

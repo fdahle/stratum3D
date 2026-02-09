@@ -7,8 +7,25 @@ export const normalizeFilename = (filename) => {
   return filename.toLowerCase().replace(/\s+/g, "_");
 };
 
-// Helper to copy a file from source to destination with normalization
-export const copyFile = (sourceDir, sourceFilename, destDir) => {
+/**
+ * Generate a unique filename by prefixing with feature ID
+ * This prevents name collisions when multiple features reference files with the same name
+ * @param {string} originalFilename - Original filename from template
+ * @param {string} featureId - Unique feature identifier
+ * @returns {string} Unique filename: featureId_originalFilename
+ */
+export const makeUniqueFilename = (originalFilename, featureId) => {
+  const normalized = normalizeFilename(originalFilename);
+  const ext = path.extname(normalized);
+  const baseName = path.basename(normalized, ext);
+  
+  // Create unique filename: featureId_baseName.ext
+  // This ensures files from different features never conflict
+  return `${featureId}_${baseName}${ext}`;
+};
+
+// Helper to copy a file from source to destination with unique naming
+export const copyFile = (sourceDir, sourceFilename, destDir, featureId = null) => {
   const normalizedFilename = normalizeFilename(sourceFilename);
   let sourcePath = path.join(sourceDir, sourceFilename);
   
@@ -20,9 +37,20 @@ export const copyFile = (sourceDir, sourceFilename, destDir) => {
     }
   }
   
-  const destPath = path.join(destDir, normalizedFilename);
+  // Generate unique destination filename if featureId is provided
+  const destFilename = featureId 
+    ? makeUniqueFilename(normalizedFilename, featureId)
+    : normalizedFilename;
+  
+  const destPath = path.join(destDir, destFilename);
+  
+  // Skip if already copied (avoid redundant copies in same preprocessing run)
+  if (fs.existsSync(destPath)) {
+    return destFilename;
+  }
+  
   fs.copyFileSync(sourcePath, destPath);
-  return normalizedFilename;
+  return destFilename;
 };
 
 // Helper to extract texture filenames from MTL file
@@ -40,12 +68,12 @@ export const extractTexturesFromMTL = (mtlPath) => {
 };
 
 // Helper to copy 3D model and its supporting files (OBJ, MTL, textures)
-export const copy3DModelWithDependencies = (modelFilename, modelsInputDir, modelsOutputDir) => {
+export const copy3DModelWithDependencies = (modelFilename, modelsInputDir, modelsOutputDir, featureId = null) => {
   const normalizedFilename = normalizeFilename(modelFilename);
   const ext = path.extname(normalizedFilename).toLowerCase();
 
-  // Copy the main model file
-  const copiedFile = copyFile(modelsInputDir, modelFilename, modelsOutputDir);
+  // Copy the main model file with unique naming
+  const copiedFile = copyFile(modelsInputDir, modelFilename, modelsOutputDir, featureId);
   if (!copiedFile) return null;
 
   const copiedFiles = [copiedFile];
@@ -55,21 +83,70 @@ export const copy3DModelWithDependencies = (modelFilename, modelsInputDir, model
   // Handle OBJ files - copy associated MTL and textures
   if (ext === ".obj") {
     const mtlFilename = originalBaseName + ".mtl";
-    const copiedMtl = copyFile(modelsInputDir, mtlFilename, modelsOutputDir);
+    const copiedMtl = copyFile(modelsInputDir, mtlFilename, modelsOutputDir, featureId);
+    
     if (copiedMtl) {
       copiedFiles.push(copiedMtl);
+      
+      // Update OBJ file to reference the new MTL filename
+      const objPath = path.join(modelsOutputDir, copiedFile);
+      updateObjMtlReference(objPath, copiedMtl);
+      
       // Copy textures referenced in MTL
       const mtlPath = path.join(modelsInputDir, normalizeFilename(mtlFilename));
       const textures = extractTexturesFromMTL(mtlPath);
+      
       textures.forEach((texture) => {
-        const copiedTexture = copyFile(modelsInputDir, texture, modelsOutputDir);
+        const copiedTexture = copyFile(modelsInputDir, texture, modelsOutputDir, featureId);
         if (copiedTexture) copiedFiles.push(copiedTexture);
       });
+      
+      // Update MTL file to reference new texture filenames
+      if (textures.length > 0) {
+        const destMtlPath = path.join(modelsOutputDir, copiedMtl);
+        updateMtlTextureReferences(destMtlPath, textures, featureId);
+      }
     }
   }
 
   console.log(`  - Copied 3D model: ${copiedFiles.join(", ")}`);
   return copiedFile;
+};
+
+// Helper to update OBJ file's MTL reference
+const updateObjMtlReference = (objPath, newMtlFilename) => {
+  try {
+    let content = fs.readFileSync(objPath, 'utf-8');
+    // Replace mtllib line with new filename
+    content = content.replace(/^mtllib\s+.+$/m, `mtllib ${newMtlFilename}`);
+    fs.writeFileSync(objPath, content, 'utf-8');
+  } catch (e) {
+    console.warn(`  ! Could not update MTL reference in ${path.basename(objPath)}`);
+  }
+};
+
+// Helper to update MTL file's texture references
+const updateMtlTextureReferences = (mtlPath, originalTextures, featureId) => {
+  try {
+    let content = fs.readFileSync(mtlPath, 'utf-8');
+    
+    // Replace each texture reference with unique filename
+    originalTextures.forEach(texture => {
+      const normalized = normalizeFilename(texture);
+      const uniqueName = makeUniqueFilename(normalized, featureId);
+      
+      // Replace all texture map references
+      const textureTypes = ['map_Kd', 'map_Ka', 'map_Ks', 'map_Ns', 'map_d', 'map_bump', 'bump'];
+      textureTypes.forEach(type => {
+        const regex = new RegExp(`(${type}\\s+)${texture.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi');
+        content = content.replace(regex, `$1${uniqueName}`);
+      });
+    });
+    
+    fs.writeFileSync(mtlPath, content, 'utf-8');
+  } catch (e) {
+    console.warn(`  ! Could not update texture references in ${path.basename(mtlPath)}`);
+  }
 };
 
 // Helper to apply template strings (e.g. "{id}.jpg" -> "123.jpg")

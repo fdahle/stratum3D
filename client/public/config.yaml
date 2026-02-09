@@ -6,7 +6,7 @@
 # Example: favicon: "/favicon.ico" or "/assets/my-favicon.png"
 website:
   title: "Hist Map"
-  favicon: "/favicon.ico"
+  favicon: "/vite.svg"
   search:
     placeholder: "Search..."
     defaultQuery: ""

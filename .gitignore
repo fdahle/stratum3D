@@ -33,4 +33,27 @@ client/.env.local
 # --- Server Specific ---
 server/data/
 *.laz
+*.las
 *.obj
+*.mtl
+*.ply
+
+# --- Docker ---
+.env
+.env.local
+
+# --- Large Input Files (Optional: Uncomment if files are large) ---
+# input/shapes/*.shp
+# input/shapes/*.dbf
+# input/models/*.obj
+# input/pointclouds/*.las
+# input/pointclouds/*.laz
+# input/geotiffs/*.tif
+# input/geotiffs/*.tiff
+
+# Keep processed data if small, or regenerate
+# Uncomment to ignore processed data:
+# server/data/layers/
+# server/data/3D/
+# server/data/pointclouds/
+# server/data/geotiffs/

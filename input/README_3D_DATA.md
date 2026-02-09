@@ -1,5 +1,9 @@
 # 3D Data Configuration
 
+> **✨ NEW: Automatic Unique File Naming**  
+> Files are now automatically renamed with feature IDs during preprocessing to prevent naming conflicts.  
+> Multiple features can have files with the same name without issues. See [FILE_NAMING.md](../FILE_NAMING.md) for details.
+
 ## Overview
 
 The system supports multiple 3D models and point clouds per feature. Only features that have valid 3D data will show the "View in 3D" button.

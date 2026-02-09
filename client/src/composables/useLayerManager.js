@@ -3,20 +3,32 @@ import { watch } from "vue";
 import { useLayerStore } from "../stores/map/layerStore";
 import { useSelectionStore } from "../stores/map/selectionStore";
 import { useSettingsStore } from "../stores/settingsStore";
-import { createPinStyle, getComplementaryColor, generateUUID } from "./utils";
+import { generateUUID } from "./utils";
+import {
+  createPinStyle,
+  createVectorStyle,
+  createSelectionStyleFunction,
+  applyFeatureStyle,
+} from "./styleFactory";
+import {
+  createTileLayerConfig,
+  createWMSLayerConfig,
+  createWMTSLayerConfig,
+  createGeoJSONLayerConfig,
+  createGeoTIFFLayerConfig,
+} from "./layerFactory";
+import {
+  BATCH_SIZE,
+  Z_INDEX,
+  LAYER_CATEGORY,
+  LAYER_STATUS,
+  GEOMETRY_TYPE,
+} from "../constants/layerConstants";
 
 // OpenLayers Imports
-import TileLayer from "ol/layer/Tile";
 import VectorLayer from "ol/layer/Vector";
-import XYZ from "ol/source/XYZ";
 import VectorSource from "ol/source/Vector";
 import GeoJSON from "ol/format/GeoJSON";
-import { Style, Stroke, Fill } from "ol/style";
-import { createXYZ } from "ol/tilegrid";
-import TileGrid from "ol/tilegrid/TileGrid";
-import WMTS from "ol/source/WMTS";
-import WMTSTileGrid from "ol/tilegrid/WMTS";
-import TileWMS from "ol/source/TileWMS";
 import { Select } from "ol/interaction";
 import { click } from "ol/events/condition";
 
@@ -60,7 +72,7 @@ export function useLayerManager(map) {
       layerStates.forEach((state) => {
         if (
           state.active &&
-          state.status === "idle" &&
+          state.status === LAYER_STATUS.IDLE &&
           state.type === "geojson"
         ) {
           const layer = layerStore.layers.find((l) => l._layerId === state.id);
@@ -72,187 +84,44 @@ export function useLayerManager(map) {
 
   const processLayer = async (layerConf, category) => {
     const layerId = layerConf._layerId || generateUUID();
+    const zIndex = category === LAYER_CATEGORY.BASE ? Z_INDEX.BASE : Z_INDEX.OVERLAY;
 
-    // Set z-index based on category
-    const zIndex = category === "base" ? 0 : 100;
-
-    // --- TILE LAYERS ---
-    if (layerConf.type === "tile") {
-      const projection = map.getView().getProjection();
-
-      // Detect if this is WMTS (like NASA GIBS) or XYZ (like GBIF)
-      const isWMTS = layerConf.url.includes("{z}/{y}/{x}");
-
-      // Create source configuration
-      const sourceConfig = {
-        attributions: layerConf.attribution,
-        projection: projection,
-        wrapX: false, // TODO: Make configurable?
-      };
-
-      // Add tile grid if custom resolutions are provided (for polar projections)
-      if (layerConf.crs_options?.resolutions && layerConf.crs_options?.extent) {
-        const extent = layerConf.crs_options.extent;
-        const resolutions = layerConf.crs_options.resolutions;
-        const tileSize = layerConf.tileSize || 256;
-
-        if (isWMTS) {
-          // WMTS uses TMS-style tiles with origin at top-left
-          // and Y increases downward (standard)
-          sourceConfig.tileGrid = new TileGrid({
-            extent: extent,
-            resolutions: resolutions,
-            tileSize: tileSize,
-            origin: [extent[0], extent[3]], // Top-left corner
-          });
-
-          // Custom tile URL function for WMTS {z}/{y}/{x} pattern
-          sourceConfig.tileUrlFunction = (tileCoord) => {
-            if (!tileCoord) return "";
-            const z = tileCoord[0];
-            const x = tileCoord[1];
-            const y = tileCoord[2];
-
-            // WMTS pattern: {z}/{y}/{x}
-            return layerConf.url
-              .replace("{z}", z.toString())
-              .replace("{y}", y.toString())
-              .replace("{x}", x.toString());
-          };
-        } else {
-          // Standard XYZ tiles (like GBIF)
-          sourceConfig.tileGrid = createXYZ({
-            extent: extent,
-            resolutions: resolutions,
-            tileSize: tileSize,
-          });
-          sourceConfig.url = layerConf.url;
-        }
-      } else {
-        // No custom tile grid - use URL directly
-        sourceConfig.url = layerConf.url;
-      }
-
-      // Create the XYZ source and layer
-      const source = new XYZ(sourceConfig);
-      const olLayer = new TileLayer({
-        source: source,
-        visible: layerConf.visible,
-        zIndex: zIndex,
-        properties: { name: layerConf.name, id: layerId },
-      });
-
-      // #2 — options object
-      layerStore.addLayer({
-        layerId,
-        name: layerConf.name,
-        layerInstance: olLayer,
-        type: "tile",
-        category,
-        visible: layerConf.visible,
-        url: layerConf.url,
-      });
-
-      // ALWAYS add to map immediately (visibility controlled via setVisible)
-      map.addLayer(olLayer);
-      layerStore.setLayerStatus(layerId, "ready");
+    let layerConfig;
+    
+    // Create layer configuration based on type
+    switch (layerConf.type) {
+      case "tile":
+        layerConfig = createTileLayerConfig(layerConf, map, zIndex, layerId);
+        break;
+      case "wms":
+        layerConfig = createWMSLayerConfig(layerConf, map, zIndex, layerId);
+        break;
+      case "wmts":
+        layerConfig = createWMTSLayerConfig(layerConf, map, zIndex, layerId);
+        break;
+      case "geotiff":
+        layerConfig = createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId);
+        break;
+      case "geojson":
+        layerConfig = createGeoJSONLayerConfig(layerConf, layerId);
+        break;
+      default:
+        console.error(`Unknown layer type: ${layerConf.type}`);
+        return;
     }
 
-    // --- WMS LAYERS ---
-    if (layerConf.type === "wms") {
-      const source = new TileWMS({
-        url: layerConf.url,
-        params: {
-          LAYERS: layerConf.layers || "0",
-          FORMAT: layerConf.format || "image/jpeg",
-          VERSION: "1.3.0",
-        },
-        projection: map.getView().getProjection(),
-        attributions: layerConf.attribution,
-      });
+    // Add layer to store with category
+    layerStore.addLayer({ ...layerConfig, category });
 
-      const olLayer = new TileLayer({
-        source: source,
-        visible: layerConf.visible,
-        zIndex: zIndex,
-        properties: { name: layerConf.name, id: layerId },
-      });
-
-      // #2 — options object
-      layerStore.addLayer({
-        layerId,
-        name: layerConf.name,
-        layerInstance: olLayer,
-        type: "wms",
-        category,
-        visible: layerConf.visible,
-        url: layerConf.url,
-      });
-
-      map.addLayer(olLayer);
-      layerStore.setLayerStatus(layerId, "ready");
-    }
-
-    // --- WMTS LAYERS ---
-    if (layerConf.type === "wmts") {
-      const source = new WMTS({
-        url: layerConf.url,
-        layer: layerConf.layer,
-        matrixSet: layerConf.matrixSet,
-        format: layerConf.format,
-        projection: map.getView().getProjection(),
-        tileGrid: new WMTSTileGrid({
-          origin: layerConf.origin || [-4194304, 4194304],
-          resolutions: layerConf.resolutions || [
-            8192, 4096, 2048, 1024, 512, 256,
-          ],
-          matrixIds: layerConf.matrixIds || [0, 1, 2, 3, 4, 5],
-          tileSize: layerConf.tileSize || 512,
-        }),
-      });
-
-      const olLayer = new TileLayer({
-        source: source,
-        visible: layerConf.visible,
-        zIndex: zIndex,
-        properties: { name: layerConf.name, id: layerId },
-      });
-
-      map.addLayer(olLayer);
-
-      // #2 — options object
-      layerStore.addLayer({
-        layerId,
-        name: layerConf.name,
-        layerInstance: olLayer,
-        type: "wmts",
-        category,
-        visible: layerConf.visible,
-        url: layerConf.url,
-      });
-      layerStore.setLayerStatus(layerId, "ready");
-    }
-
-    // --- GEOJSON LAYERS ---
-    if (layerConf.type === "geojson") {
-      // #2 — options object (layerInstance is null; status will be "idle" until downloaded)
-      layerStore.addLayer({
-        layerId,
-        name: layerConf.name,
-        layerInstance: null,
-        type: "geojson",
-        category,
-        visible: layerConf.visible,
-        color: layerConf.color,
-        url: layerConf.url,
-        searchFields: layerConf.search_fields || [],
-        metadata: layerConf._metadata || {},
-      });
+    // For raster layers (tile, wms, wmts), add to map immediately
+    if (layerConfig.layerInstance) {
+      map.addLayer(layerConfig.layerInstance);
+      layerStore.setLayerStatus(layerId, LAYER_STATUS.READY);
     }
   };
 
   const loadGeoJsonLayer = (layer) => {
-    layerStore.setLayerStatus(layer._layerId, "downloading");
+    layerStore.setLayerStatus(layer._layerId, LAYER_STATUS.DOWNLOADING);
 
     const worker = new Worker(
       new URL("../workers/layerWorker.js", import.meta.url),
@@ -284,7 +153,7 @@ export function useLayerManager(map) {
 
   const finalizeGeoJsonLayer = async (geoJsonData, layer, worker) => {
     // Signal that we're now in the processing (parsing) phase
-    layerStore.setLayerStatus(layer._layerId, "processing");
+    layerStore.setLayerStatus(layer._layerId, LAYER_STATUS.PROCESSING);
     layerStore.setLayerProgress(layer._layerId, 0);
 
     // 1. Parse GeoJSON (unavoidable synchronous OL call, but relatively fast)
@@ -294,17 +163,11 @@ export function useLayerManager(map) {
     });
 
     // 2. Create cached styles once
-    const baseColor = layer.color || "#3388ff";
-    const vectorStyle = new Style({
-      stroke: new Stroke({ color: baseColor, width: 2 }),
-      fill: new Fill({ color: baseColor + "80" }),
-    });
+    const baseColor = layer.color;
+    const vectorStyle = createVectorStyle(baseColor);
     const pinStyle = createPinStyle(baseColor);
 
     // 3. Process features in chunks, yielding to the browser between each batch
-    //    so the UI (progress bar, spinner) stays responsive on huge layers.
-    //    Also builds the search index in the same pass — zero extra cost.
-    const BATCH_SIZE = 2000;
     const totalFeatures = features.length;
     const layerSearchIndex = new Map(); // name (lowercase) → feature
 
@@ -318,23 +181,15 @@ export function useLayerManager(map) {
         feature.set("_layerId", layer._layerId);
         feature.set("_featureId", fid);
 
-        const geomType = feature.getGeometry().getType();
-        if (geomType === "Point" || geomType === "MultiPoint") {
-          feature.setStyle(pinStyle);
-        } else {
-          feature.setStyle(vectorStyle);
-        }
+        // Apply appropriate style based on geometry type
+        applyFeatureStyle(feature, baseColor);
 
-        // Index this feature by every field declared in search_fields.
-        // Layers with no searchFields are skipped entirely (no index built).
+        // Index this feature by every field declared in search_fields
         if (layer.searchFields && layer.searchFields.length > 0) {
           const props = feature.getProperties();
           for (const field of layer.searchFields) {
             const value = props[field];
             if (value != null && String(value) !== "") {
-              // key = lowercase value, value = { feature, displayValue }
-              // displayValue lets SearchBar show the original (un-lowercased) value
-              // without having to re-guess which field it came from.
               layerSearchIndex.set(String(value).toLowerCase(), {
                 feature,
                 displayValue: String(value),
@@ -359,23 +214,23 @@ export function useLayerManager(map) {
     const olLayer = new VectorLayer({
       source: source,
       visible: layer.active,
-      zIndex: 100,
+      zIndex: Z_INDEX.OVERLAY,
       updateWhileAnimating: true,
       updateWhileInteracting: true,
       properties: { id: layer._layerId },
     });
 
     // 5. Detect geometry type from loaded features
-    let detectedGeomType = "polygon";
+    let detectedGeomType = GEOMETRY_TYPE.POLYGON;
     if (features.length > 0) {
       const firstType = features[0].getGeometry().getType();
-      if (firstType === "Point" || firstType === "MultiPoint") {
-        detectedGeomType = "point";
+      if (firstType === GEOMETRY_TYPE.POINT || firstType === GEOMETRY_TYPE.MULTI_POINT) {
+        detectedGeomType = GEOMETRY_TYPE.POINT;
       } else if (
-        firstType === "LineString" ||
-        firstType === "MultiLineString"
+        firstType === GEOMETRY_TYPE.LINE_STRING ||
+        firstType === GEOMETRY_TYPE.MULTI_LINE_STRING
       ) {
-        detectedGeomType = "line";
+        detectedGeomType = GEOMETRY_TYPE.LINE;
       }
     }
 
@@ -386,7 +241,7 @@ export function useLayerManager(map) {
     if (storeLayer) {
       storeLayer.layerInstance = olLayer;
       storeLayer.geometryType = detectedGeomType;
-      storeLayer.status = "ready";
+      storeLayer.status = LAYER_STATUS.READY;
       storeLayer.metadata = geoJsonData._metadata || {};
       map.addLayer(olLayer);
     }
@@ -404,12 +259,6 @@ export function useLayerManager(map) {
     const source = olLayer.getSource();
     if (!source) return;
 
-    const newVectorStyle = new Style({
-      stroke: new Stroke({ color: newColor, width: 2 }),
-      fill: new Fill({ color: newColor + "80" }),
-    });
-    const newPinStyle = createPinStyle(newColor);
-
     // Get the currently selected features from the select interaction
     const selectedFeatures = selectInteraction
       ? selectInteraction.getFeatures().getArray()
@@ -422,12 +271,7 @@ export function useLayerManager(map) {
       // Don't change the style of selected features
       if (selectedIds.has(feature.getId())) return;
 
-      const type = feature.getGeometry().getType();
-      if (type === "Point" || type === "MultiPoint") {
-        feature.setStyle(newPinStyle);
-      } else {
-        feature.setStyle(newVectorStyle);
-      }
+      applyFeatureStyle(feature, newColor);
     });
 
     // Clear any layer-level style so per-feature styles take effect
@@ -435,27 +279,10 @@ export function useLayerManager(map) {
   };
 
   const setupSelection = () => {
-    // Create selection style dynamically based on the feature's layer color
-    const selectionStyleFunction = (feature) => {
-      const layerId = feature.get("_layerId");
-      const layerObj = layerStore.getLayerById(layerId);
-      
-      // Get the base color from the layer, default to blue if not found
-      const baseColor = layerObj?.color || "#3388ff";
-      const complementaryColor = getComplementaryColor(baseColor);
-      
-      // Use complementary color for outline for perfect contrast
-      return new Style({
-        stroke: new Stroke({ 
-          color: complementaryColor, // Opposite color for maximum contrast
-          width: 5 
-        }),
-        fill: new Fill({ 
-          color: baseColor + "B3" // 70% opacity of the original color
-        }),
-        zIndex: 999,
-      });
-    };
+    // Create selection style function using the factory
+    const selectionStyleFunction = createSelectionStyleFunction(
+      layerStore.getLayerById
+    );
 
     selectInteraction = new Select({
       condition: click,
@@ -471,17 +298,7 @@ export function useLayerManager(map) {
         const layerId = deselected.get("_layerId");
         const layerObj = layerStore.getLayerById(layerId);
         if (layerObj?.color) {
-          const color = layerObj.color;
-          const geomType = deselected.getGeometry().getType();
-          
-          if (geomType === "Point" || geomType === "MultiPoint") {
-            deselected.setStyle(createPinStyle(color));
-          } else {
-            deselected.setStyle(new Style({
-              stroke: new Stroke({ color: color, width: 2 }),
-              fill: new Fill({ color: color + "80" }),
-            }));
-          }
+          applyFeatureStyle(deselected, layerObj.color);
         }
       }
       

@@ -6,21 +6,22 @@
 
     <div v-else-if="configError" class="error-screen">
       <div class="error-modal">
-        <div class="error-icon">⚠️</div>
-        <h2>Configuration Error</h2>
+        <div class="error-icon">{{ STRINGS.errors.warning || '⚠️' }}</div>
+        <h2>{{ STRINGS.config.error }}</h2>
         <div class="error-details">{{ configError }}</div>
-        <button class="retry-btn" @click="reloadApp">Reload App</button>
+        <button class="retry-btn" @click="reloadApp">{{ STRINGS.config.reloadApp }}</button>
       </div>
     </div>
 
-    <div v-else class="loading">Loading Configuration...</div>
+    <div v-else class="loading">{{ STRINGS.config.loading }}</div>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted, provide } from "vue";
 import yaml from "js-yaml";
-import { CONFIG_SCHEMA } from "./constants/configSchema";
+import { validateConfig } from "./constants/configValidation";
+import { STRINGS } from "./constants/strings";
 
 const appConfig = ref(null);
 const isConfigLoaded = ref(false);
@@ -33,91 +34,6 @@ provide("layerManager", layerManagerRef);
 
 provide("config", appConfig);
 
-// function to validate the config
-const validateConfig = (config) => {
-  if (!config) throw new Error("Configuration file is empty.");
-
-  // 1. Basic Structure Checks
-  if (!config.view) throw new Error("Missing 'view' section.");
-  CONFIG_SCHEMA.view.required.forEach((field) => {
-    if (config.view[field] === undefined) {
-      throw new Error(`view.${field} is required.`);
-    }
-  });
-
-  // 2. Validate Base Layers
-  if (!Array.isArray(config.base_layers) || config.base_layers.length === 0) {
-    throw new Error("You must define at least one base layer.");
-  }
-
-  const baseOrders = [];
-  config.base_layers.forEach((layer, index) => {
-    const prefix = `base_layers[${index}] (${layer.name || "unnamed"})`;
-
-    // Check type validity
-    if (!CONFIG_SCHEMA.layerTypes[layer.type]) {
-      throw new Error(
-        `${prefix}: Invalid type '${layer.type}'. Allowed: ${Object.keys(
-          CONFIG_SCHEMA.layerTypes
-        ).join(", ")}`
-      );
-    }
-
-    // Check specific attributes for that type
-    const requiredFields = CONFIG_SCHEMA.layerTypes[layer.type].required;
-    requiredFields.forEach((field) => {
-      if (!layer[field])
-        throw new Error(
-          `${prefix}: Missing required field '${field}' for type '${layer.type}'.`
-        );
-    });
-
-    // Check Order Logic
-    if (typeof layer.order !== "number")
-      throw new Error(`${prefix}: 'order' must be a number.`);
-    baseOrders.push(layer.order);
-  });
-
-  // Check for duplicate orders in base layers
-  if (new Set(baseOrders).size !== baseOrders.length) {
-    throw new Error("Base layers must have unique 'order' values.");
-  }
-
-  // 3. Validate Overlay Layers
-  if (config.overlay_layers) {
-    config.overlay_layers.forEach((layer, index) => {
-      const prefix = `overlay_layers[${index}] (${layer.name || "unnamed"})`;
-
-      if (layer.type !== "geojson") {
-        throw new Error(
-          `${prefix}: Currently only 'geojson' is supported for overlays.`
-        );
-      }
-
-      const requiredGeoJson = CONFIG_SCHEMA.layerTypes.geojson.required;
-      requiredGeoJson.forEach((field) => {
-        if (!layer[field])
-          throw new Error(`${prefix}: Missing required field '${field}'.`);
-      });
-    });
-  }
-
-  // 4. Global Logic: Ensure exactly one visible base layer
-  const visibleBaseLayers = config.base_layers.filter((l) => l.visible);
-  if (visibleBaseLayers.length === 0) {
-    throw new Error(
-      "No base layer is set to 'visible: true'. The map will be empty."
-    );
-  }
-  if (visibleBaseLayers.length > 1) {
-    throw new Error(
-      "Multiple base layers are set to 'visible: true'. Please choose only one default."
-    );
-  }
-
-  return true;
-};
-
 onMounted(async () => {
   try {
     const res = await fetch("/config.yaml");
@@ -125,10 +41,12 @@ onMounted(async () => {
     const txt = await res.text();
     const parsed = yaml.load(txt);
 
-    // validateConfig(parsed); // Uncomment if you have the function
+    // Validate configuration
+    validateConfig(parsed);
 
     appConfig.value = parsed;
     isConfigLoaded.value = true;
+    
     // Apply website settings (title and favicon) if provided
     try {
       const site = parsed.website || {};

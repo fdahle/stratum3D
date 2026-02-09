@@ -45,16 +45,8 @@
               v-else
               class="geom-icon"
               :style="{ color: layer.status === 'error' ? '#ccc' : layer.color || '#666' }"
+              v-html="getGeometryIconSVG(layer.geometryType)"
             >
-              <svg v-if="getIconType(layer.geometryType) === 'point'" viewBox="0 0 24 24" width="16" height="16">
-                <circle cx="12" cy="12" r="6" fill="currentColor" />
-              </svg>
-              <svg v-else-if="getIconType(layer.geometryType) === 'line'" viewBox="0 0 24 24" width="16" height="16">
-                <path d="M3 17 L9 7 L15 17 L21 7" stroke="currentColor" stroke-width="2.5" fill="none" />
-              </svg>
-              <svg v-else viewBox="0 0 24 24" width="16" height="16">
-                <rect x="4" y="4" width="16" height="16" rx="2" fill="currentColor" opacity="0.5" />
-              </svg>
             </span>
           </span>
 
@@ -64,27 +56,27 @@
               :style="{ color: layer.status === 'error' ? '#888' : 'inherit' }"
             >
               {{ layer.name }}
-              <small v-if="layer.status === 'downloading'" class="loading-text">(DL {{ layer.progress }}%)</small>
-              <small v-else-if="layer.status === 'processing'" class="loading-text">(Proc {{ layer.progress }}%)</small>
-              <small v-else-if="layer.status === 'loading-details'" class="loading-text">(Load {{ layer.progress }}%)</small>
+              <small v-if="layer.status === 'downloading'" class="loading-text">({{ STRINGS.layer.dl }} {{ layer.progress }}%)</small>
+              <small v-else-if="layer.status === 'processing'" class="loading-text">({{ STRINGS.layer.proc }} {{ layer.progress }}%)</small>
+              <small v-else-if="layer.status === 'loading-details'" class="loading-text">({{ STRINGS.layer.load }} {{ layer.progress }}%)</small>
             </span>
 
             <div class="action-buttons">
               <span
                 v-if="layer.status === 'error'"
                 class="warning-icon"
-                :title="layer.error || 'Failed to load layer'"
+                :title="layer.error || STRINGS.layer.error"
               >
-                ⚠️
+                {{ EMOJI_ICONS.WARNING }}
               </span>
 
               <button
                 v-if="['downloading', 'processing', 'loading-details'].includes(layer.status)"
                 class="action-btn cancel-btn"
-                title="Cancel"
+                :title="STRINGS.cancel"
                 @click.stop="handleCancel(layer._layerId)"
               >
-                ✕
+                {{ EMOJI_ICONS.CLOSE }}
               </button>
             </div>
           </div>
@@ -92,14 +84,14 @@
       </div>
 
       <div v-if="overlayLayers.length === 0" class="empty-state">
-        No overlay layers loaded.
+        {{ STRINGS.map.noLayers }}
       </div>
     </div>
 
     <div class="layerpanel-footer">
       <button class="settings-btn" @click="$emit('open-settings')">
-        <span class="icon">⚙️</span>
-        <span class="text">Settings</span>
+        <span class="icon">{{ EMOJI_ICONS.SETTINGS }}</span>
+        <span class="text">{{ STRINGS.settings.title }}</span>
       </button>
     </div>
 
@@ -118,6 +110,8 @@ import { useLayerStore } from "../../stores/map/layerStore";
 import { useMapStore } from "../../stores/map/mapStore";
 import ContextMenu from "../contextMenus/ContextMenuLayers.vue";
 import GeoJSON from "ol/format/GeoJSON"; // Import OL GeoJSON Format
+import { ICON_POINT, ICON_LINE, ICON_POLYGON, EMOJI_ICONS, getGeometryIcon } from "../../constants/icons";
+import { STRINGS } from "../../constants/strings";
 
 defineEmits(['open-settings']);
 
@@ -129,10 +123,19 @@ const { overlayLayers } = storeToRefs(layerStore);
 const contextMenuRef = ref(null);
 
 const getIconType = (layerType) => {
-  const type = layerType?.toLowerCase() || "unknown";
-  if (type.includes("point")) return "point";
-  if (type.includes("line")) return "line";
-  return "unknown";
+  return getGeometryIcon(layerType);
+};
+
+const getGeometryIconSVG = (layerType) => {
+  const iconType = getIconType(layerType);
+  switch (iconType) {
+    case 'point':
+      return ICON_POINT;
+    case 'line':
+      return ICON_LINE;
+    default:
+      return ICON_POLYGON;
+  }
 };
 
 const handleRightClick = (event, layer) => {

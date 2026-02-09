@@ -31,28 +31,29 @@
     </ul>
     
     <div v-if="query && results.length === 0 && isFocused" class="no-results">
-        No matches found
+        {{ STRINGS.search.noResults }}
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, inject, watch, onMounted } from "vue";
+import { ref, computed, inject, onMounted } from "vue";
 import { useLayerStore } from "../../stores/map/layerStore";
 import { useMapStore } from "../../stores/map/mapStore";
+import { SEARCH_MIN_LENGTH, SEARCH_DEBOUNCE_MS } from "../../constants/layerConstants";
+import { STRINGS } from "../../constants/strings";
 
 const layerStore = useLayerStore();
 const mapStore = useMapStore();
 const layerManager = inject("layerManager");
 const appConfig = inject("config");
 
-// Placeholder text from config
-const defaultPlaceholder = "Search places, stations...";
+// Placeholder text from config or default from strings
 const placeholderText = computed(() => {
   try {
-    return appConfig?.value?.website?.search?.placeholder || defaultPlaceholder;
+    return appConfig?.value?.website?.search?.placeholder || STRINGS.search.placeholder;
   } catch (e) {
-    return defaultPlaceholder;
+    return STRINGS.search.placeholder;
   }
 });
 
@@ -62,7 +63,7 @@ const query = ref("");
 onMounted(() => {
   if (appConfig?.value?.website?.search?.defaultQuery) {
     query.value = appConfig.value.website.search.defaultQuery;
-    if (query.value.length >= 2) {
+    if (query.value.length >= SEARCH_MIN_LENGTH) {
       performSearch();
     }
   }
@@ -79,11 +80,11 @@ const showResults = computed(() => {
 // --- Search Logic ---
 const handleInput = () => {
   if (debounceTimeout) clearTimeout(debounceTimeout);
-  debounceTimeout = setTimeout(performSearch, 300);
+  debounceTimeout = setTimeout(performSearch, SEARCH_DEBOUNCE_MS);
 };
 
 const performSearch = () => {
-  if (!query.value || query.value.length < 2) {
+  if (!query.value || query.value.length < SEARCH_MIN_LENGTH) {
     results.value = [];
     return;
   }

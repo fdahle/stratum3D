@@ -249,9 +249,8 @@ const loadObjFromText = async (text, modelIndex = 0) => {
       adjustCameraToModel(object, size, center);
     }
     
-    return object;
-    
     console.log(`OBJ ${modelIndex + 1} loaded successfully`);
+    return object;
   } catch (error) {
     console.error('Error parsing OBJ:', error);
     emit('loading-error', { error: error.message });

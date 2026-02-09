@@ -21,6 +21,9 @@ export const CONFIG_SCHEMA = {
     },
     geojson: {
       required: ["url", "color"],
+    },
+    geotiff: {
+      required: ["url"],
     }
   }
 };

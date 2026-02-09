@@ -1,0 +1,11 @@
+# Development-specific overrides
+version: '3.8'
+
+services:
+  server:
+    volumes:
+      # Mount source code for development
+      - ./server:/app/server
+      - /app/server/node_modules
+    environment:
+      - NODE_ENV=development
