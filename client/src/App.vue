@@ -129,6 +129,26 @@ onMounted(async () => {
 
     appConfig.value = parsed;
     isConfigLoaded.value = true;
+    // Apply website settings (title and favicon) if provided
+    try {
+      const site = parsed.website || {};
+      if (site.title) {
+        document.title = site.title;
+      }
+
+      if (site.favicon) {
+        // Update existing <link rel="icon"> or create one
+        let link = document.querySelector("link[rel~='icon']");
+        if (!link) {
+          link = document.createElement('link');
+          link.rel = 'icon';
+          document.getElementsByTagName('head')[0].appendChild(link);
+        }
+        link.href = site.favicon;
+      }
+    } catch (e) {
+      console.warn('Failed to apply website settings:', e);
+    }
   } catch (e) {
     console.error(e);
     configError.value = e.message;

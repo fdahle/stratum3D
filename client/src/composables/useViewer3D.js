@@ -134,11 +134,38 @@ export const useViewer3D = () => {
 
   // Cleanup
   const cleanup = () => {
-    clearModels();
+    // Dispose models properly
+    loadedModels.value.forEach(model => {
+      model.traverse((child) => {
+        if (child.isMesh) {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) {
+              child.material.forEach(mat => mat.dispose());
+            } else {
+              child.material.dispose();
+            }
+          }
+        }
+      });
+      if (scene.value) {
+        scene.value.remove(model);
+      }
+    });
+    loadedModels.value = [];
+    
     clearMeasurements();
+    
+    // Dispose renderer
     if (renderer.value) {
       renderer.value.dispose();
+      renderer.value = null;
     }
+    
+    // Clear references
+    scene.value = null;
+    camera.value = null;
+    controls.value = null;
   };
 
   return {

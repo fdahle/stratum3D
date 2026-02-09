@@ -2,6 +2,15 @@
 # ANTARCTICA CORRECTED CONFIGURATION
 # ==========================================
 
+# Website settings (title and favicon). Place favicon file in the `public/` folder
+# Example: favicon: "/favicon.ico" or "/assets/my-favicon.png"
+website:
+  title: "Hist Map"
+  favicon: "/favicon.ico"
+  search:
+    placeholder: "Search..."
+    defaultQuery: ""
+
 # 1. Map View Settings
 view:
   center: [-2000000, 1000000] # [Longitude, Latitude] format - South Pole

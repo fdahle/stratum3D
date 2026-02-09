@@ -12,6 +12,8 @@ import {
   loadCsvLookup,
   detectCrs,
 } from "./utils.js";
+import { processAllModels } from "./processors/modelProcessor.js";
+import { processAllPointClouds } from "./processors/pointcloudProcessor.js";
 
 // Define input/output directories
 const INPUT_DIR = path.resolve("../input");
@@ -24,12 +26,28 @@ const LAYERS_OUTPUT_DIR = path.join(OUTPUT_DIR, "layers");
 const MODELS_OUTPUT_DIR = path.join(OUTPUT_DIR, "3D");
 const POINTCLOUDS_OUTPUT_DIR = path.join(OUTPUT_DIR, "pointclouds");
 
-// Global config
-const CONFIG = {
-  targetCrs: "EPSG:3031",
-  simplifyTolerance: 50,
-  coordinatePrecision: 0,
-};
+// Load preprocessing config
+const PREPROCESS_CONFIG_PATH = path.resolve("preprocess_config.json");
+const PREPROCESS_CONFIG = fs.existsSync(PREPROCESS_CONFIG_PATH)
+  ? JSON.parse(fs.readFileSync(PREPROCESS_CONFIG_PATH, "utf-8"))
+  : {
+      shapes: {
+        targetCrs: "EPSG:3031",
+        simplifyTolerance: 50,
+        coordinatePrecision: 0,
+      },
+      models3D: {
+        enabled: true,
+        decimation: {
+          enabled: true,
+          targetVertices: 1000000,
+          targetFileSize: 100,
+        },
+      },
+    };
+
+// Legacy config for backward compatibility
+const CONFIG = PREPROCESS_CONFIG.shapes;
 
 // Load the mapping config
 const MAPPING_PATH = path.join(INPUT_DIR, "input_config.json");
@@ -241,4 +259,46 @@ const processShapes = async () => {
   }
 };
 
-processShapes().catch(console.error);
+const processModels = async () => {
+  console.log("\n=== Processing 3D Models ===\n");
+  await processAllModels(MODELS_INPUT_DIR, MODELS_OUTPUT_DIR, PREPROCESS_CONFIG);
+};
+
+const processPointClouds = async () => {
+  console.log("\n=== Processing Point Clouds ===\n");
+  await processAllPointClouds(POINTCLOUDS_INPUT_DIR, POINTCLOUDS_OUTPUT_DIR, PREPROCESS_CONFIG);
+};
+
+const main = async () => {
+  console.log("\n========================================");
+  console.log("   PREPROCESSING PIPELINE");
+  console.log("========================================\n");
+  
+  console.log("Configuration:");
+  console.log(`  - Shapes CRS: ${CONFIG.targetCrs}`);
+  console.log(`  - 3D Models: ${PREPROCESS_CONFIG.models3D.enabled ? 'Enabled' : 'Disabled'}`);
+  if (PREPROCESS_CONFIG.models3D.enabled && PREPROCESS_CONFIG.models3D.decimation.enabled) {
+    console.log(`  - Decimation: Target ${PREPROCESS_CONFIG.models3D.decimation.targetVertices.toLocaleString()} vertices`);
+  }
+  console.log(`  - Point Clouds: ${PREPROCESS_CONFIG.pointclouds.enabled ? 'Enabled' : 'Disabled'}`);
+  if (PREPROCESS_CONFIG.pointclouds.enabled && PREPROCESS_CONFIG.pointclouds.thinning.enabled) {
+    console.log(`  - Thinning: Max ${PREPROCESS_CONFIG.pointclouds.thinning.maxPoints.toLocaleString()} points`);
+  }
+  console.log("\n");
+  
+  // Process shapes
+  console.log("=== Processing Shapes ===\n");
+  await processShapes();
+  
+  // Process 3D models
+  await processModels();
+  
+  // Process point clouds
+  await processPointClouds();
+  
+  console.log("\n========================================");
+  console.log("   PREPROCESSING COMPLETE");
+  console.log("========================================\n");
+};
+
+main().catch(console.error);

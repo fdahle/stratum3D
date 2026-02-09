@@ -24,27 +24,6 @@
       </button>
     </div>
 
-    <div class="file-section">
-      <label>Load 3D Model (.obj):</label>
-      <input 
-        type="file" 
-        accept=".obj" 
-        @change="handleObjFile"
-        ref="objFileInput"
-      />
-    </div>
-
-    <div class="file-section">
-      <label>Load Point Cloud (.copc.laz):</label>
-      <input 
-        type="file" 
-        accept=".laz,.las" 
-        @change="handleCopcFile"
-        ref="copcFileInput"
-      />
-      <small>Requires Giro3D (coming soon)</small>
-    </div>
-
     <div class="action-buttons">
       <button @click="handleResetCamera" class="primary-btn">
         🔄 Reset Camera
@@ -57,8 +36,8 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue';
-import { useViewer3D } from '@/composables/viewer3D/useViewer3D';
+import { computed } from 'vue';
+import { useViewer3D } from '@/composables/useViewer3D.js';
 
 const props = defineProps({
   modelName: {
@@ -76,9 +55,7 @@ const emit = defineEmits([
   'toggle-bounding-box', 
   'toggle-grid',
   'reset-camera',
-  'back-to-map',
-  'load-obj-file',
-  'load-copc-file'
+  'back-to-map'
 ]);
 
 const { 
@@ -90,9 +67,6 @@ const {
   toggleGrid,
   resetCamera
 } = useViewer3D();
-
-const objFileInput = ref(null);
-const copcFileInput = ref(null);
 
 const coordinatesText = computed(() => {
   return `${props.coordinates.x.toFixed(2)}, ${props.coordinates.y.toFixed(2)}`;
@@ -121,34 +95,12 @@ const handleResetCamera = () => {
 const handleBackToMap = () => {
   emit('back-to-map');
 };
-
-const handleObjFile = (event) => {
-  const file = event.target.files[0];
-  if (file) {
-    emit('load-obj-file', file);
-    // Reset file input
-    if (objFileInput.value) {
-      objFileInput.value.value = '';
-    }
-  }
-};
-
-const handleCopcFile = (event) => {
-  const file = event.target.files[0];
-  if (file) {
-    emit('load-copc-file', file);
-    // Reset file input
-    if (copcFileInput.value) {
-      copcFileInput.value.value = '';
-    }
-  }
-};
 </script>
 
 <style scoped>
 .controls-panel {
   position: absolute;
-  top: 20px;
+  top: 80px;
   left: 20px;
   background: rgba(255, 255, 255, 0.95);
   padding: 20px;
@@ -156,7 +108,7 @@ const handleCopcFile = (event) => {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   font-size: 13px;
   max-width: 320px;
-  z-index: 1000;
+  z-index: 800;
   backdrop-filter: blur(10px);
 }
 

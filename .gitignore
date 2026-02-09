@@ -32,3 +32,5 @@ client/.env.local
 
 # --- Server Specific ---
 server/data/
+*.laz
+*.obj

@@ -64,7 +64,7 @@
 
 <script setup>
 import { computed } from 'vue';
-import { useViewer3D } from '@/composables/viewer3D/useViewer3D';
+import { useViewer3D } from '@/composables/useViewer3D.js';
 
 const emit = defineEmits(['measurement-started', 'measurement-complete', 'measurement-cancelled']);
 
@@ -248,16 +248,16 @@ const calculateArea = (points) => {
 <style scoped>
 .measurement-tools {
   position: absolute;
-  top: 20px;
+  top: 80px;
   right: 20px;
   background: rgba(255, 255, 255, 0.95);
   padding: 20px;
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   font-size: 13px;
-  min-width: 280px;
   max-width: 320px;
-  z-index: 1000;
+  min-width: 280px;
+  z-index: 800;
   backdrop-filter: blur(10px);
 }
 

@@ -5,7 +5,7 @@
       <input
         type="text"
         v-model="query"
-        placeholder="Search places, stations..."
+        :placeholder="placeholderText"
         @input="handleInput"
         @focus="isFocused = true"
         @keydown.down.prevent="navigateResults(1)"
@@ -37,15 +37,36 @@
 </template>
 
 <script setup>
-import { ref, computed, inject } from "vue";
+import { ref, computed, inject, watch, onMounted } from "vue";
 import { useLayerStore } from "../../stores/map/layerStore";
 import { useMapStore } from "../../stores/map/mapStore";
 
 const layerStore = useLayerStore();
 const mapStore = useMapStore();
-const layerManager = inject("layerManager"); // ref — access via .value
+const layerManager = inject("layerManager");
+const appConfig = inject("config");
+
+// Placeholder text from config
+const defaultPlaceholder = "Search places, stations...";
+const placeholderText = computed(() => {
+  try {
+    return appConfig?.value?.website?.search?.placeholder || defaultPlaceholder;
+  } catch (e) {
+    return defaultPlaceholder;
+  }
+});
 
 const query = ref("");
+
+// Initialize query from config when available
+onMounted(() => {
+  if (appConfig?.value?.website?.search?.defaultQuery) {
+    query.value = appConfig.value.website.search.defaultQuery;
+    if (query.value.length >= 2) {
+      performSearch();
+    }
+  }
+});
 const results = ref([]);
 const isFocused = ref(false);
 const activeIndex = ref(-1);
