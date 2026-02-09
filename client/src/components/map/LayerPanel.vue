@@ -114,9 +114,9 @@
 <script setup>
 import { ref, inject } from "vue";
 import { storeToRefs } from "pinia";
-import { useLayerStore } from "../stores/layerStore";
-import { useMapStore } from "../stores/mapStore";
-import ContextMenu from "./contextMenus/ContextMenuLayers.vue";
+import { useLayerStore } from "../../stores/map/layerStore";
+import { useMapStore } from "../../stores/map/mapStore";
+import ContextMenu from "../contextMenus/ContextMenuLayers.vue";
 import GeoJSON from "ol/format/GeoJSON"; // Import OL GeoJSON Format
 
 defineEmits(['open-settings']);

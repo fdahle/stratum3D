@@ -38,8 +38,8 @@
 
 <script setup>
 import { ref, computed, inject } from "vue";
-import { useLayerStore } from "../stores/layerStore";
-import { useMapStore } from "../stores/mapStore";
+import { useLayerStore } from "../../stores/map/layerStore";
+import { useMapStore } from "../../stores/map/mapStore";
 
 const layerStore = useLayerStore();
 const mapStore = useMapStore();

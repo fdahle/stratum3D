@@ -1,7 +1,7 @@
 // client/src/composables/useLayerManager.js
 import { watch } from "vue";
-import { useLayerStore } from "../stores/layerStore";
-import { useSelectionStore } from "../stores/selectionStore";
+import { useLayerStore } from "../stores/map/layerStore";
+import { useSelectionStore } from "../stores/map/selectionStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { createPinStyle, getComplementaryColor, generateUUID } from "./utils";
 

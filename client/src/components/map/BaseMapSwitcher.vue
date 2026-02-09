@@ -27,8 +27,8 @@
 <script setup>
 import { ref, computed, watch, onUnmounted } from "vue";
 import { storeToRefs } from "pinia";
-import { useLayerStore } from "../stores/layerStore";
-import { useMapStore } from "../stores/mapStore";
+import { useLayerStore } from "../../stores/map/layerStore";
+import { useMapStore } from "../../stores/map/mapStore";
 
 // --- STATE & STORES ---
 const layerStore = useLayerStore();

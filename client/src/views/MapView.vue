@@ -35,12 +35,12 @@
 
 <script setup>
 import { ref, inject } from "vue";
-import AttributePanel from "../components/AttributePanel.vue";
-import BaseMapSwitcher from "../components/BaseMapSwitcher.vue";
-import InformationBar from "../components/InformationBar.vue";
-import MapWidget from "../components/MapWidget.vue";
-import SearchBar from "../components/SearchBar.vue";
-import LayerPanel from "../components/LayerPanel.vue";
+import AttributePanel from "../components/map/AttributePanel.vue";
+import BaseMapSwitcher from "../components/map/BaseMapSwitcher.vue";
+import InformationBar from "../components/map/InformationBar.vue";
+import MapWidget from "../components/map/MapWidget.vue";
+import SearchBar from "../components/map/SearchBar.vue";
+import LayerPanel from "../components/map/LayerPanel.vue";
 import Settings from "../components/modals/Settings.vue";
 import { useSettingsStore } from "../stores/settingsStore";
 

@@ -19,8 +19,8 @@
 <script setup>
 import { computed } from "vue";
 import { storeToRefs } from "pinia";
-import { useMapStore } from "../stores/mapStore";
-import { useLayerStore } from "../stores/layerStore";
+import { useMapStore } from "../../stores/map/mapStore";
+import { useLayerStore } from "../../stores/map/layerStore";
 
 const mapStore = useMapStore();
 const layerStore = useLayerStore();
