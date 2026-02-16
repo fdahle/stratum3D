@@ -44,6 +44,7 @@ const {
   setControls,
   addModel,
   storeInitialCamera,
+  resetCamera,
   measurementMode,
   addMeasurementPoint,
   measurementPoints,
@@ -692,6 +693,59 @@ const fitCameraToScene = () => {
   controls.value.update();
 };
 
+// Get scene bounding box center and size for camera presets
+const getSceneBounds = () => {
+  if (!scene.value) return null;
+  
+  const box = new THREE.Box3();
+  scene.value.traverse((object) => {
+    if (object.isMesh || object.isPoints) {
+      box.expandByObject(object);
+    }
+  });
+  
+  if (box.isEmpty()) return null;
+  
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  return { center, size, maxDim };
+};
+
+// Camera preset views
+const setCameraPreset = (preset) => {
+  if (!camera.value || !controls.value) return;
+  
+  const bounds = getSceneBounds();
+  if (!bounds) return;
+  
+  const { center, maxDim } = bounds;
+  const distance = maxDim * 1.8;
+  
+  switch (preset) {
+    case 'top':
+      camera.value.position.set(center.x, center.y + distance, center.z);
+      camera.value.up.set(0, 0, -1);
+      break;
+    case 'front':
+      camera.value.position.set(center.x, center.y, center.z + distance);
+      camera.value.up.set(0, 1, 0);
+      break;
+    case 'right':
+      camera.value.position.set(center.x + distance, center.y, center.z);
+      camera.value.up.set(0, 1, 0);
+      break;
+  }
+  
+  controls.value.target.copy(center);
+  camera.value.lookAt(center);
+  controls.value.update();
+};
+
+const resetToInitialCamera = () => {
+  resetCamera();
+};
+
 // Layer management
 const toggleLayerVisibility = (layerId, visible) => {
   if (!scene.value) return;
@@ -878,7 +932,9 @@ defineExpose({
   toggleLayerVisibility,
   removeLayer,
   enableMeasurementMode,
-  disableMeasurementMode
+  disableMeasurementMode,
+  setCameraPreset,
+  resetToInitialCamera
 });
 </script>
 

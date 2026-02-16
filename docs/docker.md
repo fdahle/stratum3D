@@ -153,6 +153,7 @@ PORT=3000
 # Client
 VITE_API_URL=http://localhost:3000
 
+
 ## Included Tools
 
 The Docker image includes:

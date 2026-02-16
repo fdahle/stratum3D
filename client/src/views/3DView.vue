@@ -1,6 +1,6 @@
 <template>
   <div class="viewer-3d-view">
-    <!-- Ribbon menu -->
+    <!-- Ribbon menu at top -->
     <RibbonMenu 
       @load-model="handleLoadModel"
       @load-pointcloud="handleLoadPointCloud"
@@ -10,68 +10,74 @@
       @toggle-grid="onToggleGrid"
       @reset-camera="onResetCamera"
       @fit-to-scene="onFitToScene"
-      @back-to-map="backToMap"
+      @view-top="onViewTop"
+      @view-front="onViewFront"
+      @view-right="onViewRight"
+      @measure-distance="onMeasureDistance"
+      @measure-area="onMeasureArea"
     />
 
-    <!-- Main 3D canvas -->
-    <Viewer3DCanvas 
-      ref="canvasRef"
-      :model-urls="modelUrls"
-      :pointcloud-urls="pointcloudUrls"
-      :coordinates="coordinates"
-      :model-name="modelName"
-      @scene-ready="onSceneReady"
-      @model-loaded="onModelLoaded"
-      @loading-error="onLoadingError"
-      @loading-progress="onLoadingProgress"
-      @parsing-started="onParsingStarted"
-      @parsing-progress="onParsingProgress"
-      @building-geometry="onBuildingGeometry"
-    />
-    
-    <!-- Layer Manager -->
-    <LayerManager 
-      ref="layerManagerRef"
-      @toggle-layer-visibility="onToggleLayerVisibility"
-      @remove-layer="onRemoveLayer"
-    />
+    <!-- Body: Layer panel + Canvas -->
+    <div class="viewer-body">
+      <!-- Layer Manager fixed at left -->
+      <LayerManager 
+        ref="layerManagerRef"
+        @toggle-layer-visibility="onToggleLayerVisibility"
+        @remove-layer="onRemoveLayer"
+      />
 
-    <!-- Loading indicator -->
-    <div v-if="isLoading" class="loading-overlay">
-      <div class="loading-container">
-        <div class="loading-content">
-          <div class="spinner"></div>
-          <p class="loading-title">Loading 3D Model...</p>
-          <div class="progress-bar-container">
-            <div 
-              class="progress-bar" 
-              :class="{ parsing: isParsing }"
-              :style="{ width: loadingProgress + '%' }"
-            ></div>
+      <!-- Main 3D canvas -->
+      <div class="canvas-area">
+        <Viewer3DCanvas 
+          ref="canvasRef"
+          :model-urls="modelUrls"
+          :pointcloud-urls="pointcloudUrls"
+          :coordinates="coordinates"
+          :model-name="modelName"
+          @scene-ready="onSceneReady"
+          @model-loaded="onModelLoaded"
+          @loading-error="onLoadingError"
+          @loading-progress="onLoadingProgress"
+          @parsing-started="onParsingStarted"
+          @parsing-progress="onParsingProgress"
+          @building-geometry="onBuildingGeometry"
+        />
+
+        <!-- Loading indicator -->
+        <div v-if="isLoading" class="loading-overlay">
+          <div class="loading-content">
+            <div class="spinner"></div>
+            <p class="loading-title">Loading 3D Model...</p>
+            <div class="progress-bar-container">
+              <div 
+                class="progress-bar" 
+                :class="{ parsing: isParsing }"
+                :style="{ width: loadingProgress + '%' }"
+              ></div>
+            </div>
+            <p class="loading-status">{{ loadingStatus }}</p>
           </div>
-          <p class="loading-status">{{ loadingStatus }}</p>
+        </div>
+
+        <!-- Error message -->
+        <div v-if="errorMessage" class="error-toast">
+          <span>{{ errorMessage }}</span>
+          <button @click="errorMessage = null">&#10005;</button>
         </div>
       </div>
-    </div>
-
-    <!-- Error message -->
-    <div v-if="errorMessage" class="error-toast">
-      <span>{{ errorMessage }}</span>
-      <button @click="errorMessage = null">✕</button>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, computed } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { useViewer3D } from '@/composables/useViewer3D.js';
 import Viewer3DCanvas from '@/components/viewer3D/Canvas.vue';
 import RibbonMenu from '@/components/viewer3D/RibbonMenu.vue';
 import LayerManager from '@/components/viewer3D/LayerManager.vue';
 
 const route = useRoute();
-const router = useRouter();
 const canvasRef = ref(null);
 const layerManagerRef = ref(null);
 const isLoading = ref(false);
@@ -80,7 +86,7 @@ const loadingStatus = ref('');
 const isParsing = computed(() => loadingStatus.value.includes('Parsing'));
 const errorMessage = ref(null);
 
-const { cleanup } = useViewer3D();
+const { cleanup, startMeasurement } = useViewer3D();
 
 // Parse route params
 const x = computed(() => parseFloat(route.query.x) || 0);
@@ -176,32 +182,54 @@ const onLoadingError = ({ url, error }) => {
   errorMessage.value = `Failed to load model: ${error}`;
   isLoading.value = false;
   
-  // Auto-hide error after 5 seconds
   setTimeout(() => {
     errorMessage.value = null;
   }, 5000);
 };
 
-// Control events
-const onToggleWireframe = (value) => {
-  console.log('Wireframe:', value);
-};
-
-const onToggleBoundingBox = (value) => {
-  console.log('Bounding box:', value);
-};
-
-const onToggleGrid = (value) => {
-  console.log('Grid:', value);
-};
+// View toggle events
+const onToggleWireframe = () => {};
+const onToggleBoundingBox = () => {};
+const onToggleGrid = () => {};
 
 const onResetCamera = () => {
-  console.log('Camera reset');
+  if (canvasRef.value && canvasRef.value.resetToInitialCamera) {
+    canvasRef.value.resetToInitialCamera();
+  }
 };
 
-const backToMap = () => {
-  cleanup();
-  router.push({ name: 'MapView' });
+// Camera preset views
+const onViewTop = () => {
+  if (canvasRef.value && canvasRef.value.setCameraPreset) {
+    canvasRef.value.setCameraPreset('top');
+  }
+};
+
+const onViewFront = () => {
+  if (canvasRef.value && canvasRef.value.setCameraPreset) {
+    canvasRef.value.setCameraPreset('front');
+  }
+};
+
+const onViewRight = () => {
+  if (canvasRef.value && canvasRef.value.setCameraPreset) {
+    canvasRef.value.setCameraPreset('right');
+  }
+};
+
+// Measurement events
+const onMeasureDistance = () => {
+  startMeasurement('distance');
+  if (canvasRef.value && canvasRef.value.enableMeasurementMode) {
+    canvasRef.value.enableMeasurementMode('distance');
+  }
+};
+
+const onMeasureArea = () => {
+  startMeasurement('area');
+  if (canvasRef.value && canvasRef.value.enableMeasurementMode) {
+    canvasRef.value.enableMeasurementMode('area');
+  }
 };
 
 // File loading from ribbon menu
@@ -215,10 +243,7 @@ const handleLoadPointCloud = (file) => {
   if (canvasRef.value && canvasRef.value.loadPointCloudFile) {
     canvasRef.value.loadPointCloudFile(file);
   } else {
-    errorMessage.value = 'Point cloud loading not yet implemented in Canvas component.';
-    setTimeout(() => {
-      errorMessage.value = null;
-    }, 3000);
+    showError('Point cloud loading not yet implemented.');
   }
 };
 
@@ -226,10 +251,7 @@ const handleLoadCameras = (file) => {
   if (canvasRef.value && canvasRef.value.loadCamerasFile) {
     canvasRef.value.loadCamerasFile(file);
   } else {
-    errorMessage.value = 'Camera loading not yet implemented in Canvas component.';
-    setTimeout(() => {
-      errorMessage.value = null;
-    }, 3000);
+    showError('Camera loading not yet implemented.');
   }
 };
 
@@ -250,15 +272,34 @@ const onRemoveLayer = (layerId) => {
     canvasRef.value.removeLayer(layerId);
   }
 };
+
+const showError = (msg) => {
+  errorMessage.value = msg;
+  setTimeout(() => { errorMessage.value = null; }, 3000);
+};
 </script>
 
 <style scoped>
 .viewer-3d-view {
   width: 100vw;
   height: 100vh;
-  position: relative;
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   background: #1a1a1a;
+  font-family: "Segoe UI", sans-serif;
+}
+
+.viewer-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.canvas-area {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
 }
 
 .loading-overlay {
@@ -275,14 +316,6 @@ const onRemoveLayer = (layerId) => {
   backdrop-filter: blur(5px);
 }
 
-.loading-container {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-}
-
 .loading-content {
   text-align: center;
   color: white;
@@ -295,11 +328,11 @@ const onRemoveLayer = (layerId) => {
 }
 
 .spinner {
-  width: 50px;
-  height: 50px;
-  margin: 0 auto 20px;
-  border: 4px solid rgba(255, 255, 255, 0.3);
-  border-top-color: #007bff;
+  width: 40px;
+  height: 40px;
+  margin: 0 auto 16px;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #3b82f6;
   border-radius: 50%;
   animation: spin 1s linear infinite;
 }
@@ -309,26 +342,26 @@ const onRemoveLayer = (layerId) => {
 }
 
 .loading-title {
-  margin: 0 0 20px 0;
-  font-size: 18px;
+  margin: 0 0 16px 0;
+  font-size: 16px;
   font-weight: 600;
+  font-family: "Segoe UI", sans-serif;
 }
 
 .progress-bar-container {
   width: 100%;
-  height: 8px;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
   overflow: hidden;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .progress-bar {
   height: 100%;
-  background: linear-gradient(90deg, #007bff, #0056b3);
-  border-radius: 4px;
+  background: #3b82f6;
+  border-radius: 3px;
   transition: width 0.3s ease;
-  box-shadow: 0 0 10px rgba(0, 123, 255, 0.5);
 }
 
 .progress-bar.parsing {
@@ -336,19 +369,15 @@ const onRemoveLayer = (layerId) => {
 }
 
 @keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .loading-status {
   margin: 0;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.8);
-  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  font-family: "Segoe UI", sans-serif;
 }
 
 .error-toast {
@@ -358,19 +387,21 @@ const onRemoveLayer = (layerId) => {
   transform: translateX(-50%);
   background: #dc3545;
   color: white;
-  padding: 12px 20px;
-  border-radius: 8px;
+  padding: 10px 16px;
+  border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   display: flex;
   align-items: center;
   gap: 12px;
   z-index: 2000;
+  font-size: 13px;
+  font-family: "Segoe UI", sans-serif;
   animation: slideUp 0.3s ease;
 }
 
 @keyframes slideUp {
   from {
-    transform: translate(-50%, 100px);
+    transform: translate(-50%, 60px);
     opacity: 0;
   }
   to {
@@ -383,11 +414,11 @@ const onRemoveLayer = (layerId) => {
   background: none;
   border: none;
   color: white;
-  font-size: 18px;
+  font-size: 14px;
   cursor: pointer;
   padding: 0;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;

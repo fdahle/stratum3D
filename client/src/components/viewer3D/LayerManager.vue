@@ -1,5 +1,5 @@
 <template>
-  <div class="layer-manager">
+  <div class="layer-panel">
     <div class="layer-header">
       <h4>Layers</h4>
     </div>
@@ -17,18 +17,18 @@
           @click.stop="toggleVisibility(layer)"
           :title="layer.visible ? 'Hide layer' : 'Show layer'"
         >
-          {{ layer.visible ? '👁️' : '👁️‍🗨️' }}
+          <span v-html="layer.visible ? ICON_EYE : ICON_EYE_OFF"></span>
         </button>
         
-        <span class="layer-icon">{{ getLayerIcon(layer.type) }}</span>
-        <span class="layer-name">{{ layer.name }}</span>
+        <span class="layer-icon" v-html="getLayerIcon(layer.type)"></span>
+        <span class="layer-name" :title="layer.name">{{ layer.name }}</span>
         
         <button 
           class="layer-action" 
           @click.stop="removeLayer(layer.id)"
           title="Remove layer"
         >
-          ×
+          <span v-html="ICON_TRASH"></span>
         </button>
       </div>
       
@@ -41,6 +41,15 @@
 
 <script setup>
 import { ref } from 'vue';
+import {
+  ICON_3D_MODEL,
+  ICON_POINT_CLOUD,
+  ICON_CAMERA,
+  ICON_PACKAGE,
+  ICON_EYE,
+  ICON_EYE_OFF,
+  ICON_TRASH
+} from '@/constants/icons.js';
 
 const emit = defineEmits(['toggle-layer-visibility', 'remove-layer']);
 
@@ -49,10 +58,10 @@ const selectedLayerId = ref(null);
 
 const getLayerIcon = (type) => {
   switch(type) {
-    case 'model': return '🏔️';
-    case 'pointcloud': return '☁️';
-    case 'camera': return '📷';
-    default: return '📦';
+    case 'model': return ICON_3D_MODEL;
+    case 'pointcloud': return ICON_POINT_CLOUD;
+    case 'camera': return ICON_CAMERA;
+    default: return ICON_PACKAGE;
   }
 };
 
@@ -89,85 +98,104 @@ defineExpose({
 </script>
 
 <style scoped>
-.layer-manager {
-  position: absolute;
-  top: 80px;
-  left: 20px;
-  background: rgba(255, 255, 255, 0.95);
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  width: 260px;
-  max-height: calc(100vh - 120px);
+.layer-panel {
+  width: 240px;
+  height: 100%;
+  background: #f8f9fa;
+  border-right: 1px solid #ddd;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
+  font-family: "Segoe UI", sans-serif;
   z-index: 800;
-  backdrop-filter: blur(10px);
 }
 
 .layer-header {
-  padding: 10px 12px;
-  border-bottom: 1px solid #e0e0e0;
-  background: linear-gradient(to bottom, #f9f9f9 0%, #f0f0f0 100%);
-  border-radius: 4px 4px 0 0;
+  padding: 0 15px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  background: #343a40;
+  flex-shrink: 0;
 }
 
 .layer-header h4 {
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
-  color: #333;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+  color: #fff;
+  letter-spacing: 0.3px;
 }
 
 .layer-list {
   flex: 1;
   overflow-y: auto;
-  padding: 4px;
+  padding: 8px;
 }
 
 .layer-item {
   display: flex;
   align-items: center;
-  padding: 6px 8px;
-  margin: 2px 0;
-  border-radius: 3px;
+  padding: 7px 8px;
+  margin-bottom: 2px;
+  border-radius: 4px;
   cursor: pointer;
   transition: background-color 0.15s;
-  gap: 6px;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid #eee;
 }
 
 .layer-item:hover {
-  background: rgba(0, 123, 255, 0.08);
+  background: #f1f1f1;
 }
 
 .layer-item.selected {
-  background: rgba(0, 123, 255, 0.15);
-  border-left: 3px solid #007bff;
+  background: #fff;
+  border-left: 4px solid #007bff;
   padding-left: 5px;
 }
 
 .visibility-btn {
-  padding: 2px 4px;
+  padding: 2px;
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 14px;
+  color: #666;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   opacity: 0.7;
   transition: opacity 0.15s;
+  flex-shrink: 0;
 }
 
 .visibility-btn:hover {
   opacity: 1;
+  color: #333;
+}
+
+.visibility-btn :deep(svg) {
+  width: 15px;
+  height: 15px;
 }
 
 .layer-icon {
-  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.layer-icon :deep(svg) {
+  width: 15px;
+  height: 15px;
 }
 
 .layer-name {
   flex: 1;
-  font-size: 11px;
+  font-size: 12px;
   color: #333;
   white-space: nowrap;
   overflow: hidden;
@@ -175,33 +203,42 @@ defineExpose({
 }
 
 .layer-action {
-  padding: 0;
-  width: 18px;
-  height: 18px;
+  padding: 2px;
+  width: 20px;
+  height: 20px;
   border: none;
-  background: rgba(220, 53, 69, 0.1);
-  color: #dc3545;
+  background: none;
+  color: #999;
   border-radius: 3px;
   cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0.6;
+  opacity: 0;
   transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.layer-item:hover .layer-action {
+  opacity: 0.6;
 }
 
 .layer-action:hover {
-  opacity: 1;
-  background: rgba(220, 53, 69, 0.2);
+  opacity: 1 !important;
+  color: #dc3545;
+  background: rgba(220, 53, 69, 0.1);
+}
+
+.layer-action :deep(svg) {
+  width: 13px;
+  height: 13px;
 }
 
 .empty-state {
   padding: 40px 20px;
   text-align: center;
   color: #999;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* Scrollbar styling */
@@ -214,11 +251,11 @@ defineExpose({
 }
 
 .layer-list::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, 0.15);
   border-radius: 3px;
 }
 
 .layer-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(0, 0, 0, 0.25);
 }
 </style>

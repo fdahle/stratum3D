@@ -296,24 +296,12 @@ const processGeoTIFFs = async () => {
 
   const files = fs
     .readdirSync(GEOTIFFS_INPUT_DIR)
-    .filter((f`  - GeoTIFFs: ${PREPROCESS_CONFIG.geotiffs?.enabled ? 'Enabled' : 'Disabled'}`);
-  if (PREPROCESS_CONFIG.geotiffs?.enabled && PREPROCESS_CONFIG.geotiffs?.optimization?.createCOG) {
-    console.log(`  - COG Optimization: Enabled`);
-  }
-  console.log("\n");
-  
-  // Process shapes
-  console.log("=== Processing Shapes ===\n");
-  await processShapes();
-  
-  // Process 3D models
-  await processModels();
-  
-  // Process point clouds
-  await processPointClouds();
-  
-  // Process GeoTIFFs
-  await processGeoTIFFh.join(GEOTIFFS_INPUT_DIR, file);
+    .filter((f) => /\.tiff?$/i.test(f));
+
+  console.log(`  Found ${files.length} GeoTIFF(s) to process`);
+
+  for (const file of files) {
+    const inputPath = path.join(GEOTIFFS_INPUT_DIR, file);
     const outputName = file.replace(/\.tiff?$/, ".tif");
     const outputPath = path.join(GEOTIFFS_OUTPUT_DIR, outputName);
 
@@ -432,6 +420,10 @@ const main = async () => {
   if (PREPROCESS_CONFIG.pointclouds.enabled && PREPROCESS_CONFIG.pointclouds.thinning.enabled) {
     console.log(`  - Thinning: Max ${PREPROCESS_CONFIG.pointclouds.thinning.maxPoints.toLocaleString()} points`);
   }
+  console.log(`  - GeoTIFFs: ${PREPROCESS_CONFIG.geotiffs?.enabled ? 'Enabled' : 'Disabled'}`);
+  if (PREPROCESS_CONFIG.geotiffs?.enabled && PREPROCESS_CONFIG.geotiffs?.optimization?.createCOG) {
+    console.log(`  - COG Optimization: Enabled`);
+  }
   console.log("\n");
   
   // Process shapes
@@ -443,6 +435,9 @@ const main = async () => {
   
   // Process point clouds
   await processPointClouds();
+  
+  // Process GeoTIFFs
+  await processGeoTIFFs();
   
   console.log("\n========================================");
   console.log("   PREPROCESSING COMPLETE");

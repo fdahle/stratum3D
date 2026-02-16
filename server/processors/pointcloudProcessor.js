@@ -64,15 +64,30 @@ export class PointCloudProcessor {
   }
 
   /**
-   * Convert LAS/LAZ to COPC using PDAL
+   * Get the correct PDAL reader type for a given file extension
+   */
+  getReaderType(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    switch (ext) {
+      case '.ply': return 'readers.ply';
+      case '.las':
+      case '.laz': return 'readers.las';
+      default: return 'readers.las';
+    }
+  }
+
+  /**
+   * Convert LAS/LAZ/PLY to COPC using PDAL
    */
   async convertToCOPC(inputPath, outputPath) {
     try {
+      const readerType = this.getReaderType(inputPath);
+
       // PDAL pipeline for COPC conversion
       const pipeline = {
         pipeline: [
           {
-            type: "readers.las",
+            type: readerType,
             filename: inputPath
           },
           {
@@ -115,10 +130,11 @@ export class PointCloudProcessor {
    */
   async thinPointCloud(inputPath, outputPath, keepEveryNth = 2) {
     try {
+      const readerType = this.getReaderType(inputPath);
       const pipeline = {
         pipeline: [
           {
-            type: "readers.las",
+            type: readerType,
             filename: inputPath
           },
           {
@@ -160,6 +176,7 @@ export class PointCloudProcessor {
    */
   async getPointCloudInfo(filePath) {
     try {
+      // For PLY files, try pdal info first; if that fails, estimate from file size
       const command = `pdal info --summary "${filePath}"`;
       const { stdout } = await execAsync(command, { maxBuffer: 10 * 1024 * 1024 });
       const info = JSON.parse(stdout);
@@ -174,6 +191,18 @@ export class PointCloudProcessor {
         dimensions: summary.dimensions || []
       };
     } catch (error) {
+      // PLY files: estimate point count from file size (rough: ~15-30 bytes/point for ASCII, ~12-24 for binary)
+      const ext = path.extname(filePath).toLowerCase();
+      if (ext === '.ply') {
+        try {
+          const stats = this.getFileStats(filePath);
+          const estimatedPoints = Math.round(stats.sizeBytes / 20); // rough estimate
+          console.log(`  - Could not read PLY metadata via PDAL, estimating ~${estimatedPoints.toLocaleString()} points from file size`);
+          return { pointCount: estimatedPoints, bounds: {}, dimensions: [] };
+        } catch (e) {
+          // fall through
+        }
+      }
       console.error(`  Error getting point cloud info: ${error.message}`);
       return null;
     }
@@ -183,8 +212,16 @@ export class PointCloudProcessor {
    * Process a single point cloud file
    */
   async processPointCloud(inputPath, outputDir) {
-    const basename = path.basename(inputPath, path.extname(inputPath));
-    const ext = path.extname(inputPath);
+    // Strip double extensions like .copc.laz
+    let basename = path.basename(inputPath);
+    // Remove known compound extensions first
+    basename = basename.replace(/\.copc\.laz$/i, '');
+    // Then remove remaining simple extension
+    if (basename === path.basename(inputPath)) {
+      basename = path.basename(inputPath, path.extname(inputPath));
+    }
+    const ext = path.extname(inputPath).toLowerCase();
+    const isPLY = ext === '.ply';
     
     console.log(`\nProcessing point cloud: ${path.basename(inputPath)}`);
     
@@ -314,7 +351,7 @@ export async function processAllPointClouds(inputDir, outputDir, config) {
   }
 
   const files = fs.readdirSync(inputDir).filter(f => 
-    f.endsWith('.las') || f.endsWith('.laz') || f.endsWith('.copc.laz')
+    f.endsWith('.las') || f.endsWith('.laz') || f.endsWith('.copc.laz') || f.endsWith('.ply')
   );
 
   console.log(`\nFound ${files.length} point cloud(s) to process\n`);
