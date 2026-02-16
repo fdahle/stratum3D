@@ -24,6 +24,7 @@
         ref="layerManagerRef"
         @toggle-layer-visibility="onToggleLayerVisibility"
         @remove-layer="onRemoveLayer"
+        @zoom-to-layer="onZoomToLayer"
       />
 
       <!-- Main 3D canvas -->
@@ -47,7 +48,7 @@
         <div v-if="isLoading" class="loading-overlay">
           <div class="loading-content">
             <div class="spinner"></div>
-            <p class="loading-title">Loading 3D Model...</p>
+            <p class="loading-title">{{ loadingTitle }}</p>
             <div class="progress-bar-container">
               <div 
                 class="progress-bar" 
@@ -83,6 +84,7 @@ const layerManagerRef = ref(null);
 const isLoading = ref(false);
 const loadingProgress = ref(0);
 const loadingStatus = ref('');
+const loadingTitle = ref('Loading...');
 const isParsing = computed(() => loadingStatus.value.includes('Parsing'));
 const errorMessage = ref(null);
 
@@ -108,6 +110,7 @@ const onSceneReady = () => {
   console.log('3D scene initialized and ready');
   if (modelUrls.value.length > 0) {
     isLoading.value = true;
+    loadingTitle.value = 'Loading 3D Model...';
   }
 };
 
@@ -120,12 +123,22 @@ const onLoadingProgress = ({ url, index, loaded, total, progress, status }) => {
     loadingStatus.value = `Downloading model ${index + 1}/${modelUrls.value.length}: ${loadedMB}MB / ${totalMB}MB (${progress}%)`;
   } else if (status === 'decoding') {
     loadingStatus.value = `Decoding model data (${totalMB}MB)...`;
+  } else if (status === 'reading') {
+    const fileName = url.split('/').pop();
+    loadingStatus.value = `Reading ${fileName}: ${loadedMB}MB / ${totalMB}MB (${progress}%)`;
+  } else if (status === 'parsing') {
+    const fileName = url.split('/').pop();
+    loadingStatus.value = `Parsing ${fileName}...`;
   }
 };
 
 const onParsingStarted = ({ index, size }) => {
   const sizeMB = (size / (1024 * 1024)).toFixed(1);
-  loadingStatus.value = `Parsing model ${index + 1}/${modelUrls.value.length} (${sizeMB}MB)...`;
+  if (modelUrls.value.length > 0) {
+    loadingStatus.value = `Parsing model ${index + 1}/${modelUrls.value.length} (${sizeMB}MB)...`;
+  } else {
+    loadingStatus.value = `Parsing (${sizeMB}MB)...`;
+  }
   loadingProgress.value = 0;
 };
 
@@ -153,13 +166,21 @@ const onBuildingGeometry = ({ index, stage, vertices, faces, triangles }) => {
 };
 
 const onModelLoaded = ({ url, index, object }) => {
-  console.log(`Model loaded: ${url} (${index + 1}/${modelUrls.value.length})`);
+  console.log(`Model loaded: ${url}${modelUrls.value.length > 0 ? ` (${index + 1}/${modelUrls.value.length})` : ''}`);
+  console.log('Object:', object, 'LayerManager ref:', layerManagerRef.value);
   
   // Add to layer manager
   if (layerManagerRef.value && object) {
-    const layerName = url.split('/').pop() || `Model ${index + 1}`;
-    const layerType = object.userData?.type === 'camera' ? 'camera' : 
-                      object.isPoints ? 'pointcloud' : 'model';
+    let layerName = url.split('/').pop() || `Model ${index + 1}`;
+    const layerType = object.userData?.type || 
+                      (object.isPoints ? 'pointcloud' : 'model');
+    
+    // Add camera count to layer name if it's a camera group
+    if (layerType === 'camera' && object.userData?.cameraCount) {
+      layerName = `${layerName} (${object.userData.cameraCount} cameras)`;
+    }
+    
+    console.log(`Adding to layer manager: ${layerName} (type: ${layerType})`);
     
     layerManagerRef.value.addLayer({
       id: object.uuid,
@@ -168,19 +189,34 @@ const onModelLoaded = ({ url, index, object }) => {
       visible: true,
       object: object
     });
+  } else {
+    console.warn('Could not add to layer manager:', { layerManagerRef: layerManagerRef.value, object });
   }
   
-  if (index === modelUrls.value.length - 1) {
+  // For URL-based loading, hide loading indicator when all models are loaded
+  if (modelUrls.value.length > 0 && index === modelUrls.value.length - 1) {
     isLoading.value = false;
     loadingProgress.value = 0;
     loadingStatus.value = '';
+    loadingTitle.value = 'Loading...';
+  } else if (modelUrls.value.length === 0) {
+    // For file-based loading, hide loading indicator after a short delay
+    setTimeout(() => {
+      isLoading.value = false;
+      loadingProgress.value = 0;
+      loadingStatus.value = '';
+      loadingTitle.value = 'Loading...';
+    }, 500);
   }
 };
 
 const onLoadingError = ({ url, error }) => {
   console.error('Loading error:', error);
-  errorMessage.value = `Failed to load model: ${error}`;
+  errorMessage.value = `Failed to load: ${error}`;
   isLoading.value = false;
+  loadingProgress.value = 0;
+  loadingStatus.value = '';
+  loadingTitle.value = 'Loading...';
   
   setTimeout(() => {
     errorMessage.value = null;
@@ -235,12 +271,20 @@ const onMeasureArea = () => {
 // File loading from ribbon menu
 const handleLoadModel = (file) => {
   if (canvasRef.value) {
+    isLoading.value = true;
+    loadingTitle.value = 'Loading 3D Model...';
+    loadingStatus.value = `Loading model: ${file.name}...`;
+    loadingProgress.value = 0;
     canvasRef.value.loadUserObjFile(file);
   }
 };
 
 const handleLoadPointCloud = (file) => {
   if (canvasRef.value && canvasRef.value.loadPointCloudFile) {
+    isLoading.value = true;
+    loadingTitle.value = 'Loading Point Cloud...';
+    loadingStatus.value = `Loading point cloud: ${file.name}...`;
+    loadingProgress.value = 0;
     canvasRef.value.loadPointCloudFile(file);
   } else {
     showError('Point cloud loading not yet implemented.');
@@ -249,6 +293,10 @@ const handleLoadPointCloud = (file) => {
 
 const handleLoadCameras = (file) => {
   if (canvasRef.value && canvasRef.value.loadCamerasFile) {
+    isLoading.value = true;
+    loadingTitle.value = 'Loading Cameras...';
+    loadingStatus.value = `Loading cameras: ${file.name}...`;
+    loadingProgress.value = 0;
     canvasRef.value.loadCamerasFile(file);
   } else {
     showError('Camera loading not yet implemented.');
@@ -270,6 +318,12 @@ const onToggleLayerVisibility = ({ layerId, visible }) => {
 const onRemoveLayer = (layerId) => {
   if (canvasRef.value && canvasRef.value.removeLayer) {
     canvasRef.value.removeLayer(layerId);
+  }
+};
+
+const onZoomToLayer = (layer) => {
+  if (canvasRef.value && canvasRef.value.zoomToLayer && layer) {
+    canvasRef.value.zoomToLayer(layer.id);
   }
 };
 

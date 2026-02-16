@@ -11,6 +11,7 @@
         class="layer-item"
         :class="{ selected: selectedLayerId === layer.id }"
         @click="selectLayer(layer.id)"
+        @contextmenu.prevent="handleRightClick($event, layer)"
       >
         <button 
           class="visibility-btn" 
@@ -36,11 +37,18 @@
         No layers loaded
       </div>
     </div>
+    
+    <!-- Context Menu -->
+    <ContextMenu3D
+      ref="contextMenuRef"
+      @action="handleMenuAction"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue';
+import ContextMenu3D from '../contextMenus/ContextMenu3D.vue';
 import {
   ICON_3D_MODEL,
   ICON_POINT_CLOUD,
@@ -51,10 +59,11 @@ import {
   ICON_TRASH
 } from '@/constants/icons.js';
 
-const emit = defineEmits(['toggle-layer-visibility', 'remove-layer']);
+const emit = defineEmits(['toggle-layer-visibility', 'remove-layer', 'zoom-to-layer']);
 
 const layers = ref([]);
 const selectedLayerId = ref(null);
+const contextMenuRef = ref(null);
 
 const getLayerIcon = (type) => {
   switch(type) {
@@ -90,6 +99,18 @@ const removeLayer = (layerId) => {
 
 const selectLayer = (layerId) => {
   selectedLayerId.value = layerId;
+};
+
+const handleRightClick = (event, layer) => {
+  contextMenuRef.value.open(event, layer);
+};
+
+const handleMenuAction = ({ type, layer }) => {
+  if (type === 'zoom') {
+    emit('zoom-to-layer', layer);
+  } else if (type === 'remove') {
+    removeLayer(layer.id);
+  }
 };
 
 defineExpose({

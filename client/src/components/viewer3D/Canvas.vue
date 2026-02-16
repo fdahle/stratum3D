@@ -33,6 +33,7 @@ const props = defineProps({
 const emit = defineEmits(['scene-ready', 'model-loaded', 'loading-error', 'loading-progress', 'parsing-started', 'parsing-progress', 'building-geometry']);
 
 const viewerRef = ref(null);
+const fileLoadedCount = ref(0); // Track number of models loaded from files
 const {
   scene,
   camera,
@@ -433,12 +434,44 @@ const adjustCameraToModel = (object, size, center) => {
   console.log(`Camera adjusted - distance: ${distance.toFixed(2)}`);
 };
 
-const loadUserObjFile = (file) => {
+const loadUserObjFile = async (file) => {
   const reader = new FileReader();
-  reader.onload = (e) => {
-    const modelIndex = props.modelUrls.length; // Use current count as index
-    loadObjFromText(e.target.result, modelIndex);
+  const currentIndex = fileLoadedCount.value;
+  const fileSize = file.size;
+  
+  // Track progress
+  reader.onprogress = (e) => {
+    if (e.lengthComputable) {
+      const progress = Math.round((e.loaded / e.total) * 100);
+      const loadedMB = (e.loaded / (1024 * 1024)).toFixed(1);
+      const totalMB = (e.total / (1024 * 1024)).toFixed(1);
+      emit('loading-progress', {
+        url: file.name,
+        index: currentIndex,
+        loaded: e.loaded,
+        total: e.total,
+        progress,
+        status: 'reading'
+      });
+    }
   };
+  
+  reader.onload = async (e) => {
+    emit('parsing-started', { url: file.name, index: currentIndex, size: fileSize });
+    
+    const object = await loadObjFromText(e.target.result, currentIndex);
+    
+    if (object) {
+      object.userData.type = 'model';
+      fileLoadedCount.value++;
+      emit('model-loaded', { url: file.name, index: currentIndex, object });
+    }
+  };
+  
+  reader.onerror = () => {
+    emit('loading-error', { url: file.name, error: 'Failed to read file' });
+  };
+  
   reader.readAsText(file);
 };
 
@@ -468,10 +501,39 @@ const loadPointCloudFile = async (file) => {
 
 const loadPLYFile = (file) => {
   const reader = new FileReader();
+  const currentIndex = fileLoadedCount.value;
+  const fileSize = file.size;
+  
+  // Track progress
+  reader.onprogress = (e) => {
+    if (e.lengthComputable) {
+      const progress = Math.round((e.loaded / e.total) * 100);
+      emit('loading-progress', {
+        url: file.name,
+        index: currentIndex,
+        loaded: e.loaded,
+        total: e.total,
+        progress,
+        status: 'reading'
+      });
+    }
+  };
+  
   reader.onload = (e) => {
-    const loader = new PLYLoader();
-    try {
-      const geometry = loader.parse(e.target.result);
+    emit('loading-progress', {
+      url: file.name,
+      index: currentIndex,
+      loaded: fileSize,
+      total: fileSize,
+      progress: 100,
+      status: 'parsing'
+    });
+    
+    // Use setTimeout to allow UI to update before synchronous parsing
+    setTimeout(() => {
+      const loader = new PLYLoader();
+      try {
+        const geometry = loader.parse(e.target.result);
       
       // Create point cloud material
       const material = new THREE.PointsMaterial({
@@ -496,8 +558,10 @@ const loadPLYFile = (file) => {
       // Apply Z-up to Y-up rotation
       pointCloud.rotation.x = -Math.PI / 2;
       
+      // Set type metadata
+      pointCloud.userData.type = 'pointcloud';
+      
       scene.value.add(pointCloud);
-      currentModel.value = pointCloud;
       
       // Fit camera to point cloud
       const box = new THREE.Box3().setFromObject(pointCloud);
@@ -516,16 +580,23 @@ const loadPLYFile = (file) => {
       camera.value.lookAt(center);
       
       // Update grid position
-      if (grid.value) {
-        grid.value.position.y = box.min.y;
+      const gridHelper = scene.value.getObjectByName('gridHelper');
+      if (gridHelper) {
+        gridHelper.position.y = box.min.y;
       }
       
       console.log(`Point cloud loaded: ${geometry.attributes.position.count} points`);
-      emit('model-loaded', { url: file.name, index: 0, object: pointCloud });
+      fileLoadedCount.value++;
+      emit('model-loaded', { url: file.name, index: currentIndex, object: pointCloud });
     } catch (error) {
       console.error('PLY loading error:', error);
       emit('loading-error', { url: file.name, error: error.message });
     }
+    }, 50); // Small delay for UI update
+  };
+  
+  reader.onerror = () => {
+    emit('loading-error', { url: file.name, error: 'Failed to read file' });
   };
   
   reader.readAsArrayBuffer(file);
@@ -534,29 +605,77 @@ const loadPLYFile = (file) => {
 // Camera frustum visualization
 const loadCamerasFile = async (file) => {
   const reader = new FileReader();
-  reader.onload = (e) => {
-    try {
-      const content = e.target.result;
-      const cameras = parseCamerasTxt(content);
-      
-      cameras.forEach((cam, index) => {
-        const cameraObjects = addCameraFrustum(cam, index);
-        // Emit each camera as a loaded object
-        if (cameraObjects) {
-          emit('model-loaded', { 
-            url: `${file.name}:${cam.name}`, 
-            index: index, 
-            object: cameraObjects.helper 
-          });
-        }
+  const fileSize = file.size;
+  
+  // Track progress
+  reader.onprogress = (e) => {
+    if (e.lengthComputable) {
+      const progress = Math.round((e.loaded / e.total) * 100);
+      emit('loading-progress', {
+        url: file.name,
+        index: 0,
+        loaded: e.loaded,
+        total: e.total,
+        progress,
+        status: 'reading'
       });
-      
-      console.log(`Loaded ${cameras.length} cameras`);
-    } catch (error) {
-      console.error('Camera loading error:', error);
-      emit('loading-error', { url: file.name, error: error.message });
     }
   };
+  
+  reader.onload = (e) => {
+    emit('loading-progress', {
+      url: file.name,
+      index: 0,
+      loaded: fileSize,
+      total: fileSize,
+      progress: 100,
+      status: 'parsing'
+    });
+    
+    // Use setTimeout to allow UI to update before synchronous parsing
+    setTimeout(() => {
+      try {
+        const content = e.target.result;
+        const cameras = parseCamerasTxt(content);
+        
+        console.log(`Parsed ${cameras.length} cameras from file`);
+        
+        // Create a group to hold all cameras
+        const cameraGroup = new THREE.Group();
+        cameraGroup.name = file.name;
+        cameraGroup.userData.type = 'camera';
+        cameraGroup.userData.cameraCount = cameras.length;
+        
+        cameras.forEach((cam, index) => {
+          const cameraObject = addCameraFrustum(cam, index);
+          if (cameraObject) {
+            // Add camera group to the parent group
+            cameraGroup.add(cameraObject);
+          }
+        });
+        
+        // Add group to scene
+        scene.value.add(cameraGroup);
+        
+        console.log(`Loaded ${cameras.length} cameras into scene as group`);
+        
+        // Emit single layer for all cameras
+        emit('model-loaded', { 
+          url: file.name, 
+          index: 0, 
+          object: cameraGroup 
+        });
+      } catch (error) {
+        console.error('Camera loading error:', error);
+        emit('loading-error', { url: file.name, error: error.message });
+      }
+    }, 50); // Small delay for UI update
+  };
+  
+  reader.onerror = () => {
+    emit('loading-error', { url: file.name, error: 'Failed to read file' });
+  };
+  
   reader.readAsText(file);
 };
 
@@ -564,14 +683,36 @@ const parseCamerasTxt = (content) => {
   const lines = content.split('\n').filter(line => line.trim() && !line.startsWith('#'));
   const cameras = [];
   
+  // Detect delimiter - check first data line
+  const firstLine = lines[0];
+  const delimiter = firstLine?.includes(';') ? ';' : /\s+/;
+  const isSemicolon = firstLine?.includes(';');
+  
   for (const line of lines) {
-    const parts = line.trim().split(/\s+/);
+    const parts = line.trim().split(delimiter).map(p => p.trim());
     
-    // Common camera.txt formats:
-    // Format 1: name x y z qw qx qy qz
-    // Format 2: name x y z roll pitch yaw
+    // Handle different formats:
+    // Semicolon CSV: Label;Enable;X;Y;Z;Yaw;Pitch;Roll;...
+    // Space-separated: name x y z qw qx qy qz OR name x y z yaw pitch roll
     
-    if (parts.length >= 7) {
+    if (isSemicolon && parts.length >= 8) {
+      // Semicolon format: Label;Enable;X;Y;Z;Yaw;Pitch;Roll
+      const camera = {
+        name: parts[0], // Label
+        position: {
+          x: parseFloat(parts[2]), // X/Easting
+          y: parseFloat(parts[3]), // Y/Northing
+          z: parseFloat(parts[4])  // Z/Altitude
+        },
+        euler: {
+          yaw: parseFloat(parts[5]),   // Yaw
+          pitch: parseFloat(parts[6]), // Pitch
+          roll: parseFloat(parts[7])   // Roll
+        }
+      };
+      cameras.push(camera);
+    } else if (!isSemicolon && parts.length >= 7) {
+      // Space-separated format
       const camera = {
         name: parts[0],
         position: {
@@ -594,9 +735,9 @@ const parseCamerasTxt = (content) => {
       } else {
         // Euler angles (degrees)
         camera.euler = {
-          roll: parseFloat(parts[4]),
+          yaw: parseFloat(parts[4]),
           pitch: parseFloat(parts[5]),
-          yaw: parseFloat(parts[6])
+          roll: parseFloat(parts[6])
         };
       }
       
@@ -610,15 +751,16 @@ const parseCamerasTxt = (content) => {
 const addCameraFrustum = (camData, index) => {
   if (!scene.value) return null;
   
-  // Create camera helper
-  const frustumCamera = new THREE.PerspectiveCamera(60, 1.33, 0.1, 10);
+  // Create a group to hold all camera components
+  const cameraGroup = new THREE.Group();
   
   // Set position (convert Z-up to Y-up)
-  frustumCamera.position.set(
+  const position = new THREE.Vector3(
     camData.position.x,
     camData.position.z, // Z becomes Y
     -camData.position.y  // Y becomes -Z
   );
+  cameraGroup.position.copy(position);
   
   // Set rotation
   if (camData.quaternion) {
@@ -628,23 +770,71 @@ const addCameraFrustum = (camData, index) => {
       -camData.quaternion.y,
       camData.quaternion.w
     );
-    frustumCamera.setRotationFromQuaternion(quat);
+    cameraGroup.setRotationFromQuaternion(quat);
   } else if (camData.euler) {
+    // Convert Yaw/Pitch/Roll to Three.js Euler
     const euler = new THREE.Euler(
-      THREE.MathUtils.degToRad(camData.euler.pitch),
-      THREE.MathUtils.degToRad(camData.euler.yaw),
-      THREE.MathUtils.degToRad(camData.euler.roll)
+      THREE.MathUtils.degToRad(-camData.euler.pitch), // Pitch (X rotation, inverted)
+      THREE.MathUtils.degToRad(camData.euler.yaw),     // Yaw (Y rotation)
+      THREE.MathUtils.degToRad(-camData.euler.roll),   // Roll (Z rotation, inverted)
+      'YXZ' // Yaw-Pitch-Roll order
     );
-    frustumCamera.setRotationFromEuler(euler);
+    cameraGroup.setRotationFromEuler(euler);
   }
   
-  // Create frustum helper
-  const helper = new THREE.CameraHelper(frustumCamera);
-  helper.name = `camera_${camData.name}`;
-  helper.userData = { type: 'camera', cameraName: camData.name };
-  scene.value.add(helper);
+  // 1. Camera body - small gray box
+  const bodyGeometry = new THREE.BoxGeometry(0.3, 0.2, 0.4);
+  const bodyMaterial = new THREE.MeshBasicMaterial({ color: 0x666666 });
+  const cameraBody = new THREE.Mesh(bodyGeometry, bodyMaterial);
+  cameraBody.name = `camera_body_${camData.name}`;
+  cameraGroup.add(cameraBody);
   
-  // Add label
+  // 2. Camera lens - small cylinder pointing forward
+  const lensGeometry = new THREE.CylinderGeometry(0.08, 0.08, 0.15, 8);
+  const lensMaterial = new THREE.MeshBasicMaterial({ color: 0x333333 });
+  const lens = new THREE.Mesh(lensGeometry, lensMaterial);
+  lens.rotation.x = Math.PI / 2; // Point forward (local -Z)
+  lens.position.set(0, 0, -0.275);
+  cameraGroup.add(lens);
+  
+  // 3. XYZ axes helper at camera position
+  const axesHelper = new THREE.AxesHelper(0.5);
+  cameraGroup.add(axesHelper);
+  
+  // 4. Subtle frustum wireframe (smaller, less prominent)
+  const frustumGeometry = new THREE.BufferGeometry();
+  const frustumVertices = new Float32Array([
+    // Near plane corners
+    -0.15, -0.1, -0.2,
+    0.15, -0.1, -0.2,
+    0.15, 0.1, -0.2,
+    -0.15, 0.1, -0.2,
+    // Far plane corners
+    -0.6, -0.4, -1.5,
+    0.6, -0.4, -1.5,
+    0.6, 0.4, -1.5,
+    -0.6, 0.4, -1.5,
+  ]);
+  frustumGeometry.setAttribute('position', new THREE.BufferAttribute(frustumVertices, 3));
+  
+  const frustumIndices = [
+    // Near plane
+    0, 1, 1, 2, 2, 3, 3, 0,
+    // Far plane
+    4, 5, 5, 6, 6, 7, 7, 4,
+    // Connecting lines
+    0, 4, 1, 5, 2, 6, 3, 7
+  ];
+  frustumGeometry.setIndex(frustumIndices);
+  
+  const frustumMaterial = new THREE.LineBasicMaterial({ color: 0x888888, transparent: true, opacity: 0.3 });
+  const frustumLines = new THREE.LineSegments(frustumGeometry, frustumMaterial);
+  cameraGroup.add(frustumLines);
+  
+  cameraGroup.name = `camera_${camData.name}`;
+  cameraGroup.userData = { type: 'camera_frustum', cameraName: camData.name };
+  
+  // 5. Label sprite above camera
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
   canvas.width = 256;
@@ -656,14 +846,13 @@ const addCameraFrustum = (camData, index) => {
   const texture = new THREE.CanvasTexture(canvas);
   const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
   const sprite = new THREE.Sprite(spriteMaterial);
-  sprite.position.copy(frustumCamera.position);
-  sprite.position.y += 2; // Offset above camera
-  sprite.scale.set(4, 1, 1);
+  sprite.position.set(0, 0.8, 0); // Position relative to camera group
+  sprite.scale.set(2, 0.5, 1);
   sprite.name = `camera_label_${camData.name}`;
-  sprite.userData = { type: 'camera_label', parentId: helper.uuid };
-  scene.value.add(sprite);
+  sprite.userData = { type: 'camera_label' };
+  cameraGroup.add(sprite);
   
-  return { helper, sprite };
+  return cameraGroup;
 };
 
 const fitCameraToScene = () => {
@@ -746,6 +935,42 @@ const resetToInitialCamera = () => {
   resetCamera();
 };
 
+// Zoom camera to specific layer
+const zoomToLayer = (layerId) => {
+  if (!scene.value || !camera.value || !controls.value) return;
+  
+  let targetObject = null;
+  scene.value.traverse((object) => {
+    if (object.uuid === layerId) {
+      targetObject = object;
+    }
+  });
+  
+  if (!targetObject) return;
+  
+  // Calculate bounding box for this object
+  const box = new THREE.Box3().setFromObject(targetObject);
+  
+  if (box.isEmpty()) return;
+  
+  const center = box.getCenter(new THREE.Vector3());
+  const size = box.getSize(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const distance = maxDim * 2.5;
+  
+  // Smoothly animate camera
+  camera.value.position.set(
+    center.x + distance,
+    center.y + distance,
+    center.z + distance
+  );
+  controls.value.target.copy(center);
+  camera.value.lookAt(center);
+  controls.value.update();
+  
+  console.log(`Zoomed to layer: ${targetObject.name}`);
+};
+
 // Layer management
 const toggleLayerVisibility = (layerId, visible) => {
   if (!scene.value) return;
@@ -761,48 +986,40 @@ const removeLayer = (layerId) => {
   if (!scene.value) return;
   
   let objectToRemove = null;
-  let relatedObjects = [];
   
   scene.value.traverse((object) => {
     if (object.uuid === layerId) {
       objectToRemove = object;
     }
-    // Also find related camera labels
-    if (object.userData && object.userData.parentId === layerId) {
-      relatedObjects.push(object);
-    }
   });
   
   if (objectToRemove) {
+    // Recursively dispose of all geometries and materials in the object tree
+    const disposeObject = (obj) => {
+      if (obj.geometry) {
+        obj.geometry.dispose();
+      }
+      if (obj.material) {
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach(m => {
+            if (m.map) m.map.dispose();
+            m.dispose();
+          });
+        } else {
+          if (obj.material.map) obj.material.map.dispose();
+          obj.material.dispose();
+        }
+      }
+      // Recursively dispose children
+      if (obj.children) {
+        obj.children.forEach(child => disposeObject(child));
+      }
+    };
+    
+    disposeObject(objectToRemove);
     scene.value.remove(objectToRemove);
     
-    // Remove related objects (e.g., camera labels)
-    relatedObjects.forEach(obj => {
-      scene.value.remove(obj);
-      if (obj.geometry) obj.geometry.dispose();
-      if (obj.material) {
-        if (obj.material.map) obj.material.map.dispose();
-        obj.material.dispose();
-      }
-    });
-    
-    // Dispose of geometry and materials
-    if (objectToRemove.geometry) {
-      objectToRemove.geometry.dispose();
-    }
-    if (objectToRemove.material) {
-      if (Array.isArray(objectToRemove.material)) {
-        objectToRemove.material.forEach(m => m.dispose());
-      } else {
-        objectToRemove.material.dispose();
-      }
-    }
-    
-    // Remove from models array if it exists
-    const index = models.value.findIndex(m => m.uuid === layerId);
-    if (index !== -1) {
-      models.value.splice(index, 1);
-    }
+    console.log(`Removed layer: ${objectToRemove.name || 'Unnamed'}`);
   }
 };
 
@@ -934,7 +1151,8 @@ defineExpose({
   enableMeasurementMode,
   disableMeasurementMode,
   setCameraPreset,
-  resetToInitialCamera
+  resetToInitialCamera,
+  zoomToLayer
 });
 </script>
 
