@@ -4,6 +4,7 @@ import { useLayerStore } from "../stores/map/layerStore";
 import { useSelectionStore } from "../stores/map/selectionStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { generateUUID } from "./utils";
+import { logger } from "../utils/logger";
 import {
   createPinStyle,
   createVectorStyle,
@@ -106,7 +107,7 @@ export function useLayerManager(map) {
         layerConfig = createGeoJSONLayerConfig(layerConf, layerId);
         break;
       default:
-        console.error(`Unknown layer type: ${layerConf.type}`);
+        logger.error('LayerManager', `Unknown layer type: ${layerConf.type}`);
         return;
     }
 
@@ -117,6 +118,8 @@ export function useLayerManager(map) {
     if (layerConfig.layerInstance) {
       map.addLayer(layerConfig.layerInstance);
       layerStore.setLayerStatus(layerId, LAYER_STATUS.READY);
+      // Update z-indexes to respect current layer ordering
+      layerStore.updateLayerZIndexes();
     }
   };
 
@@ -143,7 +146,7 @@ export function useLayerManager(map) {
         finalizeGeoJsonLayer(data, layer, worker);
       }
       if (type === "ERROR") {
-        console.error("Worker Error:", error);
+        logger.error('LayerManager', 'Worker Error:', error);
         layerStore.setLayerError(layer._layerId, error);
         worker.terminate();
         activeWorkers.delete(layer._layerId);
@@ -244,6 +247,8 @@ export function useLayerManager(map) {
       storeLayer.status = LAYER_STATUS.READY;
       storeLayer.metadata = geoJsonData._metadata || {};
       map.addLayer(olLayer);
+      // Update z-indexes to respect current layer ordering
+      layerStore.updateLayerZIndexes();
     }
 
     worker.terminate();

@@ -2,6 +2,8 @@
   <div class="viewer-3d-view">
     <!-- Ribbon menu at top -->
     <RibbonMenu 
+      :is-measuring-distance="isMeasurementModalVisible && activeMeasurementType === 'distance'"
+      :is-measuring-area="isMeasurementModalVisible && activeMeasurementType === 'area'"
       @load-model="handleLoadModel"
       @load-pointcloud="handleLoadPointCloud"
       @load-cameras="handleLoadCameras"
@@ -67,6 +69,21 @@
         </div>
       </div>
     </div>
+
+    <!-- Measurement Modal -->
+    <MeasurementModal
+      :is-visible="isMeasurementModalVisible"
+      :measurement-type="activeMeasurementType"
+      :measurements="measurements"
+      :points-count="measurementPointsCount"
+      :current-value="currentMeasurementValue"
+      @close="closeMeasurementModal"
+      @reset="resetMeasurements"
+      @remove-measurement="removeMeasurement"
+      @save-current="saveCurrentMeasurement"
+      @undo-point="undoLastPoint"
+      @cancel-measurement="cancelCurrentMeasurement"
+    />
   </div>
 </template>
 
@@ -77,6 +94,7 @@ import { useViewer3D } from '@/composables/useViewer3D.js';
 import Viewer3DCanvas from '@/components/viewer3D/Canvas.vue';
 import RibbonMenu from '@/components/viewer3D/RibbonMenu.vue';
 import LayerManager from '@/components/viewer3D/LayerManager.vue';
+import MeasurementModal from '@/components/modals/MeasurementModal.vue';
 
 const route = useRoute();
 const canvasRef = ref(null);
@@ -89,6 +107,13 @@ const isParsing = computed(() => loadingStatus.value.includes('Parsing'));
 const errorMessage = ref(null);
 
 const { cleanup, startMeasurement } = useViewer3D();
+
+// Measurement state
+const isMeasurementModalVisible = ref(false);
+const activeMeasurementType = ref('distance'); // 'distance' or 'area'
+const measurements = ref([]);
+const measurementPointsCount = ref(0);
+const currentMeasurementValue = ref(null);
 
 // Parse route params
 const x = computed(() => parseFloat(route.query.x) || 0);
@@ -255,16 +280,127 @@ const onViewRight = () => {
 
 // Measurement events
 const onMeasureDistance = () => {
-  startMeasurement('distance');
-  if (canvasRef.value && canvasRef.value.enableMeasurementMode) {
-    canvasRef.value.enableMeasurementMode('distance');
+  // Toggle measurement mode
+  if (isMeasurementModalVisible.value && activeMeasurementType.value === 'distance') {
+    // If already in distance mode, close it
+    closeMeasurementModal();
+  } else {
+    // Switch to distance mode (clear previous measurements when switching)
+    if (isMeasurementModalVisible.value && activeMeasurementType.value !== 'distance') {
+      measurements.value = [];
+      // Clear visual measurements in canvas when switching modes
+      if (canvasRef.value && canvasRef.value.clearMeasurements) {
+        canvasRef.value.clearMeasurements();
+      }
+    }
+    activeMeasurementType.value = 'distance';
+    isMeasurementModalVisible.value = true;
+    measurementPointsCount.value = 0;
+    currentMeasurementValue.value = null;
+    
+    startMeasurement('distance');
+    if (canvasRef.value && canvasRef.value.enableMeasurementMode) {
+      canvasRef.value.enableMeasurementMode('distance', handleMeasurementUpdate);
+    }
   }
 };
 
 const onMeasureArea = () => {
-  startMeasurement('area');
-  if (canvasRef.value && canvasRef.value.enableMeasurementMode) {
-    canvasRef.value.enableMeasurementMode('area');
+  // Toggle measurement mode
+  if (isMeasurementModalVisible.value && activeMeasurementType.value === 'area') {
+    // If already in area mode, close it
+    closeMeasurementModal();
+  } else {
+    // Switch to area mode (clear previous measurements when switching)
+    if (isMeasurementModalVisible.value && activeMeasurementType.value !== 'area') {
+      measurements.value = [];
+      // Clear visual measurements in canvas when switching modes
+      if (canvasRef.value && canvasRef.value.clearMeasurements) {
+        canvasRef.value.clearMeasurements();
+      }
+    }
+    activeMeasurementType.value = 'area';
+    isMeasurementModalVisible.value = true;
+    measurementPointsCount.value = 0;
+    currentMeasurementValue.value = null;
+    
+    startMeasurement('area');
+    if (canvasRef.value && canvasRef.value.enableMeasurementMode) {
+      canvasRef.value.enableMeasurementMode('area', handleMeasurementUpdate);
+    }
+  }
+};
+
+const handleMeasurementUpdate = (data) => {
+  // Update measurement data from canvas
+  measurementPointsCount.value = data.pointsCount || 0;
+  currentMeasurementValue.value = data.value || null;
+  
+  // If measurement is complete, add to list
+  if (data.complete && data.value) {
+    measurements.value.push({
+      type: activeMeasurementType.value,
+      value: data.value,
+      timestamp: new Date().toISOString()
+    });
+    // Reset for next measurement
+    measurementPointsCount.value = 0;
+    currentMeasurementValue.value = null;
+  }
+};
+
+const closeMeasurementModal = () => {
+  isMeasurementModalVisible.value = false;
+  measurementPointsCount.value = 0;
+  currentMeasurementValue.value = null;
+  
+  // Clear all measurements when toggling off
+  measurements.value = [];
+  
+  // Disable measurement mode in canvas and clear visual markers
+  if (canvasRef.value && canvasRef.value.disableMeasurementMode) {
+    canvasRef.value.disableMeasurementMode();
+  }
+  if (canvasRef.value && canvasRef.value.clearMeasurements) {
+    canvasRef.value.clearMeasurements();
+  }
+};
+
+const resetMeasurements = () => {
+  measurements.value = [];
+  measurementPointsCount.value = 0;
+  currentMeasurementValue.value = null;
+  
+  // Clear visual measurements in canvas
+  if (canvasRef.value && canvasRef.value.clearMeasurements) {
+    canvasRef.value.clearMeasurements();
+  }
+};
+
+const removeMeasurement = (index) => {
+  // Remove from data
+  measurements.value.splice(index, 1);
+  // Remove visual objects from scene
+  if (canvasRef.value && canvasRef.value.removeSavedMeasurement) {
+    canvasRef.value.removeSavedMeasurement(index);
+  }
+};
+
+const saveCurrentMeasurement = () => {
+  if (canvasRef.value && canvasRef.value.saveCurrentMeasurement) {
+    canvasRef.value.saveCurrentMeasurement();
+  }
+};
+
+const undoLastPoint = () => {
+  if (canvasRef.value && canvasRef.value.undoLastPoint) {
+    canvasRef.value.undoLastPoint();
+  }
+};
+
+const cancelCurrentMeasurement = () => {
+  if (canvasRef.value && canvasRef.value.cancelCurrentMeasurement) {
+    canvasRef.value.cancelCurrentMeasurement();
   }
 };
 
@@ -344,6 +480,10 @@ const showError = (msg) => {
   font-family: "Segoe UI", sans-serif;
 }
 
+.theme-light .viewer-3d-view {
+  background: #f5f5f5;
+}
+
 .viewer-body {
   flex: 1;
   display: flex;
@@ -370,6 +510,10 @@ const showError = (msg) => {
   backdrop-filter: blur(5px);
 }
 
+.theme-light .loading-overlay {
+  background: rgba(255, 255, 255, 0.8);
+}
+
 .loading-content {
   text-align: center;
   color: white;
@@ -381,6 +525,12 @@ const showError = (msg) => {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
+.theme-light .loading-content {
+  color: #1a1a1a;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
+
 .spinner {
   width: 40px;
   height: 40px;
@@ -389,6 +539,11 @@ const showError = (msg) => {
   border-top-color: #3b82f6;
   border-radius: 50%;
   animation: spin 1s linear infinite;
+}
+
+.theme-light .spinner {
+  border: 3px solid rgba(0, 0, 0, 0.1);
+  border-top-color: #3b82f6;
 }
 
 @keyframes spin {
@@ -409,6 +564,10 @@ const showError = (msg) => {
   border-radius: 3px;
   overflow: hidden;
   margin-bottom: 10px;
+}
+
+.theme-light .progress-bar-container {
+  background: rgba(0, 0, 0, 0.1);
 }
 
 .progress-bar {
@@ -432,6 +591,10 @@ const showError = (msg) => {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.7);
   font-family: "Segoe UI", sans-serif;
+}
+
+.theme-light .loading-status {
+  color: rgba(0, 0, 0, 0.6);
 }
 
 .error-toast {

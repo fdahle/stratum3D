@@ -51,6 +51,12 @@ const activeOverlayCount = computed(
   backdrop-filter: blur(2px);
 }
 
+.theme-dark .info-bar {
+  background: rgba(42, 42, 42, 0.9);
+  border-top: 1px solid #444;
+  color: #ccc;
+}
+
 .info-group {
   display: flex;
   align-items: center;

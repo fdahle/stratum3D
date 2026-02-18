@@ -16,6 +16,7 @@
 
 <script setup>
 import { ref } from "vue";
+import { logger } from "../../utils/logger";
 
 const visible = ref(false);
 const x = ref(0);
@@ -45,9 +46,9 @@ const handleCopyCoordinates = async () => {
   
   try {
     await navigator.clipboard.writeText(coordText);
-    console.log("Coordinates copied:", coordText);
+    logger.debug('ContextMenu', 'Coordinates copied:', coordText);
   } catch (err) {
-    console.error("Failed to copy coordinates:", err);
+    logger.error('ContextMenu', 'Failed to copy coordinates:', err);
   }
   
   close();
@@ -68,6 +69,13 @@ defineExpose({ open, close });
   font-family: "Segoe UI", sans-serif;
   font-size: 13px;
   color: #333;
+}
+
+.theme-dark .context-menu {
+  background: #2a2a2a;
+  border: 1px solid #555;
+  box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.6);
+  color: #e0e0e0;
 }
 
 /* This overlay now catches the clicks */
@@ -93,7 +101,15 @@ li {
   border-bottom: 1px solid #f5f5f5;
 }
 
+.theme-dark li {
+  border-bottom: 1px solid #444;
+}
+
 li:hover {
   background: #f0f0f0;
+}
+
+.theme-dark li:hover {
+  background: #3a3a3a;
 }
 </style>

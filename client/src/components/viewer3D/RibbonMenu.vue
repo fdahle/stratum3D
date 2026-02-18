@@ -90,11 +90,11 @@
       <div v-if="activeTab === 'tools'" class="ribbon-panel">
         <div class="ribbon-group">
           <div class="ribbon-group-buttons">
-            <button @click="emit('measure-distance')" class="ribbon-btn">
+            <button @click="emit('measure-distance')" class="ribbon-btn" :class="{ active: isMeasuringDistance }">
               <span class="btn-icon" v-html="ICON_DISTANCE"></span>
               <span class="btn-label">Distance</span>
             </button>
-            <button @click="emit('measure-area')" class="ribbon-btn">
+            <button @click="emit('measure-area')" class="ribbon-btn" :class="{ active: isMeasuringArea }">
               <span class="btn-icon" v-html="ICON_AREA"></span>
               <span class="btn-label">Area</span>
             </button>
@@ -147,6 +147,17 @@ import {
   ICON_VIEW_FRONT,
   ICON_VIEW_RIGHT
 } from '@/constants/icons.js';
+
+const props = defineProps({
+  isMeasuringDistance: {
+    type: Boolean,
+    default: false
+  },
+  isMeasuringArea: {
+    type: Boolean,
+    default: false
+  }
+});
 
 const emit = defineEmits([
   'load-model',
@@ -241,11 +252,20 @@ const handleCamerasFile = (event) => {
   user-select: none;
 }
 
+.theme-dark .ribbon-menu {
+  background: #2a2a2a;
+  border-bottom: 1px solid #444;
+}
+
 .ribbon-tabs {
   display: flex;
   background: #343a40;
   padding: 0;
   min-height: 28px;
+}
+
+.theme-dark .ribbon-tabs {
+  background: #1a1a1a;
 }
 
 .tab-btn {
@@ -272,12 +292,21 @@ const handleCamerasFile = (event) => {
   border-bottom-color: #3b82f6;
 }
 
+.theme-dark .tab-btn.active {
+  background: #2a2a2a;
+  color: #e0e0e0;
+}
+
 .ribbon-content {
   padding: 0 6px;
   height: 64px;
   background: #f8f9fa;
   display: flex;
   align-items: stretch;
+}
+
+.theme-dark .ribbon-content {
+  background: #2a2a2a;
 }
 
 .ribbon-panel {
@@ -294,6 +323,10 @@ const handleCamerasFile = (event) => {
   height: 100%;
   border-right: 1px solid #ddd;
   position: relative;
+}
+
+.theme-dark .ribbon-group {
+  border-right: 1px solid #444;
 }
 
 .ribbon-group:last-child {
@@ -319,6 +352,10 @@ const handleCamerasFile = (event) => {
   white-space: nowrap;
 }
 
+.theme-dark .group-label {
+  color: #999;
+}
+
 .ribbon-btn {
   display: flex;
   flex-direction: column;
@@ -336,16 +373,32 @@ const handleCamerasFile = (event) => {
   color: #444;
 }
 
+.theme-dark .ribbon-btn {
+  color: #ccc;
+}
+
 .ribbon-btn:hover {
   background: #fff;
   border-color: #ddd;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
+.theme-dark .ribbon-btn:hover {
+  background: #3a3a3a;
+  border-color: #555;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
 .ribbon-btn.active {
   background: #e8f0fe;
   border-color: #c7ddf9;
   color: #3b82f6;
+}
+
+.theme-dark .ribbon-btn.active {
+  background: rgba(74, 158, 255, 0.15);
+  border-color: rgba(74, 158, 255, 0.3);
+  color: #4a9eff;
 }
 
 .btn-icon {

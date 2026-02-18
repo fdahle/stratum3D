@@ -126,6 +126,7 @@ import { useRouter } from "vue-router";
 import { useSelectionStore } from "../../stores/map/selectionStore";
 import { useLayerStore } from "../../stores/map/layerStore";
 import { formatKey } from "../../composables/utils";
+import { logger } from "../../utils/logger";
 
 const router = useRouter();
 const selectionStore = useSelectionStore();
@@ -207,7 +208,7 @@ const handle3DView = () => {
   
   if (model3dUrls.value.length === 0 && pointcloudUrls.value.length === 0) return;
   
-  console.log("Opening 3D viewer with:", { models: model3dUrls.value, pointclouds: pointcloudUrls.value });
+  logger.debug('AttributePanel', 'Opening 3D viewer with:', { models: model3dUrls.value, pointclouds: pointcloudUrls.value });
   
   const props = selectedFeature.value.properties;
   
@@ -285,6 +286,11 @@ const featureTitle = computed(() => {
   flex-direction: column;
 }
 
+.theme-dark .attribute-panel {
+  background: #2a2a2a;
+  box-shadow: -2px 0 5px rgba(0, 0, 0, 0.5);
+}
+
 .panel-header {
   padding: 0 15px;
   background: #343a40;
@@ -294,6 +300,10 @@ const featureTitle = computed(() => {
   align-items: center;
   height: 48px;
   box-sizing: border-box;
+}
+
+.theme-dark .panel-header {
+  background: #1a1a1a;
 }
 
 .close-btn {
@@ -328,12 +338,20 @@ const featureTitle = computed(() => {
   cursor: pointer;
 }
 
+.theme-dark .thumbnail-wrapper {
+  background: #3a3a3a;
+}
+
 .feature-thumbnail {
   width: 100%;
   height: 100%;
   object-fit: cover;
   border: 1px solid #eee;
   transition: transform 0.3s ease;
+}
+
+.theme-dark .feature-thumbnail {
+  border: 1px solid #555;
 }
 
 .hover-overlay {
@@ -382,6 +400,11 @@ const featureTitle = computed(() => {
   text-align: center;
 }
 
+.theme-dark .feature-title {
+  color: #e0e0e0;
+  border-bottom: 2px solid #444;
+}
+
 .feature-actions {
   display: flex;
   justify-content: center;
@@ -414,6 +437,13 @@ const featureTitle = computed(() => {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
+.theme-dark .action-btn {
+  color: #e0e0e0;
+  border: 1px solid #555;
+  background: #3a3a3a;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
 /* Icon specific spacing */
 .btn-icon {
   margin-right: 8px;
@@ -428,6 +458,12 @@ const featureTitle = computed(() => {
   transform: translateY(-1px); /* Slight lift */
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.08);
   color: #000;
+}
+
+.theme-dark .action-btn:hover {
+  background: #454545;
+  border-color: #666;
+  color: #fff;
 }
 
 .action-btn:active {
@@ -476,14 +512,26 @@ const featureTitle = computed(() => {
   font-size: 14px;
 }
 
+.theme-dark .attr-table td {
+  border-bottom: 1px solid #444;
+}
+
 .key {
   font-weight: 600;
   color: #666;
   width: 40%;
 }
 
+.theme-dark .key {
+  color: #999;
+}
+
 .value {
   color: #333;
+}
+
+.theme-dark .value {
+  color: #e0e0e0;
 }
 
 /* Slide Animation */

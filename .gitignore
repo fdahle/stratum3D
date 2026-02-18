@@ -26,12 +26,21 @@ client/node_modules/
 *.sln
 *.sw?
 
+# ESLint and Prettier cache
+.eslintcache
+.cache
+
 # --- Client Specific ---
 client/dist/
+client/.env
 client/.env.local
+client/.env.production
 
 # --- Server Specific ---
 server/data/
+server/.env
+server/.env.local
+server/.env.production
 *.laz
 *.las
 *.obj

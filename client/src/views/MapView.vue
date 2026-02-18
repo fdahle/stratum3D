@@ -69,6 +69,10 @@ const isLayerPanelOpen = ref(false);
   background: white;
 }
 
+.theme-dark .main-layerpanel {
+  background: #2a2a2a;
+}
+
 .map-area {
   flex: 1;
   position: relative;
@@ -112,6 +116,12 @@ const isLayerPanelOpen = ref(false);
     border-radius: 4px;
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
     cursor: pointer;
+  }
+
+  .theme-dark .menu-toggle {
+    background: #2a2a2a;
+    color: #e0e0e0;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
   }
 
   .main-layerpanel {
@@ -169,6 +179,10 @@ const isLayerPanelOpen = ref(false);
   color: #666;
 }
 
+.theme-dark .loading {
+  color: #999;
+}
+
 /* Add simple styles for the error modal */
 .error-screen {
   height: 100%;
@@ -177,6 +191,11 @@ const isLayerPanelOpen = ref(false);
   align-items: center;
   background: #f3f4f6;
 }
+
+.theme-dark .error-screen {
+  background: #2a2a2a;
+}
+
 .error-modal {
   background: white;
   padding: 2rem;
@@ -185,6 +204,13 @@ const isLayerPanelOpen = ref(false);
   max-width: 500px;
   text-align: center;
 }
+
+.theme-dark .error-modal {
+  background: #3a3a3a;
+  color: #e0e0e0;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
 .error-details {
   background: #fee2e2;
   color: #b91c1c;
@@ -193,6 +219,11 @@ const isLayerPanelOpen = ref(false);
   margin: 1.5rem 0;
   text-align: left;
   font-family: monospace;
+}
+
+.theme-dark .error-details {
+  background: rgba(220, 53, 69, 0.2);
+  color: #f87171;
 }
 .retry-btn {
   background: #3b82f6;

@@ -112,11 +112,20 @@ const handleBackToMap = () => {
   backdrop-filter: blur(10px);
 }
 
+.theme-dark .controls-panel {
+  background: rgba(42, 42, 42, 0.95);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
 .controls-panel h3 {
   margin: 0 0 15px 0;
   color: #333;
   font-size: 18px;
   font-weight: 600;
+}
+
+.theme-dark .controls-panel h3 {
+  color: #e0e0e0;
 }
 
 .info-section {
@@ -125,15 +134,27 @@ const handleBackToMap = () => {
   border-bottom: 1px solid #e0e0e0;
 }
 
+.theme-dark .info-section {
+  border-bottom: 1px solid #444;
+}
+
 .info-item {
   margin: 8px 0;
   color: #666;
   line-height: 1.5;
 }
 
+.theme-dark .info-item {
+  color: #999;
+}
+
 .info-item strong {
   color: #333;
   font-weight: 600;
+}
+
+.theme-dark .info-item strong {
+  color: #e0e0e0;
 }
 
 .info-item span {
@@ -148,6 +169,10 @@ const handleBackToMap = () => {
   margin-bottom: 15px;
   padding-bottom: 15px;
   border-bottom: 1px solid #e0e0e0;
+}
+
+.theme-dark .view-controls {
+  border-bottom: 1px solid #444;
 }
 
 .toggle-btn {
@@ -182,6 +207,10 @@ const handleBackToMap = () => {
   border-bottom: 1px solid #e0e0e0;
 }
 
+.theme-dark .file-section {
+  border-bottom: 1px solid #444;
+}
+
 .file-section:last-of-type {
   border-bottom: none;
 }
@@ -194,6 +223,10 @@ const handleBackToMap = () => {
   font-size: 13px;
 }
 
+.theme-dark .file-section label {
+  color: #e0e0e0;
+}
+
 .file-section input[type="file"] {
   width: 100%;
   font-size: 12px;
@@ -202,6 +235,12 @@ const handleBackToMap = () => {
   border-radius: 4px;
   background: white;
   cursor: pointer;
+}
+
+.theme-dark .file-section input[type="file"] {
+  background: #3a3a3a;
+  border: 1px solid #555;
+  color: #e0e0e0;
 }
 
 .file-section input[type="file"]::-webkit-file-upload-button {
@@ -214,8 +253,18 @@ const handleBackToMap = () => {
   margin-right: 8px;
 }
 
+.theme-dark .file-section input[type="file"]::-webkit-file-upload-button {
+  background: #2a2a2a;
+  border: 1px solid #555;
+  color: #e0e0e0;
+}
+
 .file-section input[type="file"]::-webkit-file-upload-button:hover {
   background: #e9ecef;
+}
+
+.theme-dark .file-section input[type="file"]::-webkit-file-upload-button:hover {
+  background: #3a3a3a;
 }
 
 .file-section small {
@@ -224,6 +273,10 @@ const handleBackToMap = () => {
   font-size: 11px;
   margin-top: 4px;
   font-style: italic;
+}
+
+.theme-dark .file-section small {
+  color: #666;
 }
 
 .action-buttons {

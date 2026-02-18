@@ -261,11 +261,20 @@ const calculateArea = (points) => {
   backdrop-filter: blur(10px);
 }
 
+.theme-dark .measurement-tools {
+  background: rgba(42, 42, 42, 0.95);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
 .measurement-tools h3 {
   margin: 0 0 15px 0;
   color: #333;
   font-size: 18px;
   font-weight: 600;
+}
+
+.theme-dark .measurement-tools h3 {
+  color: #e0e0e0;
 }
 
 .measurement-modes {
@@ -304,6 +313,11 @@ const calculateArea = (points) => {
   background: #f8f9fa;
   border-radius: 6px;
   border: 2px solid #007bff;
+}
+
+.theme-dark .active-measurement {
+  background: #3a3a3a;
+  border: 2px solid #4a9eff;
 }
 
 .measurement-header {
@@ -349,6 +363,10 @@ const calculateArea = (points) => {
   line-height: 1.5;
 }
 
+.theme-dark .measurement-instructions p {
+  color: #999;
+}
+
 .points-info {
   display: inline-block;
   padding: 4px 8px;
@@ -367,6 +385,11 @@ const calculateArea = (points) => {
   text-align: center;
   margin: 12px 0;
   border: 1px solid #28a745;
+}
+
+.theme-dark .current-value {
+  background: #2a2a2a;
+  border: 1px solid #5cb85c;
 }
 
 .current-value strong {
@@ -399,11 +422,19 @@ const calculateArea = (points) => {
   border-top: 2px solid #e0e0e0;
 }
 
+.theme-dark .measurements-list {
+  border-top: 2px solid #444;
+}
+
 .measurements-list h4 {
   margin: 0 0 12px 0;
   color: #333;
   font-size: 14px;
   font-weight: 600;
+}
+
+.theme-dark .measurements-list h4 {
+  color: #e0e0e0;
 }
 
 .measurement-item {
@@ -414,6 +445,10 @@ const calculateArea = (points) => {
   background: #f8f9fa;
   border-radius: 4px;
   margin-bottom: 8px;
+}
+
+.theme-dark .measurement-item {
+  background: #3a3a3a;
 }
 
 .measurement-content {
@@ -429,11 +464,19 @@ const calculateArea = (points) => {
   font-weight: 600;
 }
 
+.theme-dark .measurement-type {
+  color: #999;
+}
+
 .measurement-value {
   font-size: 14px;
   color: #333;
   font-weight: 600;
   font-family: 'Courier New', monospace;
+}
+
+.theme-dark .measurement-value {
+  color: #e0e0e0;
 }
 
 .remove-btn {

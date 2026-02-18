@@ -131,6 +131,11 @@ defineExpose({
   z-index: 800;
 }
 
+.theme-dark .layer-panel {
+  background: #2a2a2a;
+  border-right: 1px solid #444;
+}
+
 .layer-header {
   padding: 0 15px;
   height: 48px;
@@ -138,6 +143,10 @@ defineExpose({
   align-items: center;
   background: #343a40;
   flex-shrink: 0;
+}
+
+.theme-light .layer-header {
+  background: #4a5568;
 }
 
 .layer-header h4 {
@@ -167,14 +176,28 @@ defineExpose({
   border: 1px solid #eee;
 }
 
+.theme-dark .layer-item {
+  background: #3a3a3a;
+  border: 1px solid #4a4a4a;
+}
+
 .layer-item:hover {
   background: #f1f1f1;
+}
+
+.theme-dark .layer-item:hover {
+  background: #454545;
 }
 
 .layer-item.selected {
   background: #fff;
   border-left: 4px solid #007bff;
   padding-left: 5px;
+}
+
+.theme-dark .layer-item.selected {
+  background: #3a3a3a;
+  border-left: 4px solid #4a9eff;
 }
 
 .visibility-btn {
@@ -191,9 +214,17 @@ defineExpose({
   flex-shrink: 0;
 }
 
+.theme-dark .visibility-btn {
+  color: #999;
+}
+
 .visibility-btn:hover {
   opacity: 1;
   color: #333;
+}
+
+.theme-dark .visibility-btn:hover {
+  color: #ccc;
 }
 
 .visibility-btn :deep(svg) {
@@ -209,6 +240,10 @@ defineExpose({
   flex-shrink: 0;
 }
 
+.theme-dark .layer-icon {
+  color: #999;
+}
+
 .layer-icon :deep(svg) {
   width: 15px;
   height: 15px;
@@ -221,6 +256,10 @@ defineExpose({
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.theme-dark .layer-name {
+  color: #e0e0e0;
 }
 
 .layer-action {
@@ -260,6 +299,10 @@ defineExpose({
   text-align: center;
   color: #999;
   font-size: 12px;
+}
+
+.theme-dark .empty-state {
+  color: #666;
 }
 
 /* Scrollbar styling */

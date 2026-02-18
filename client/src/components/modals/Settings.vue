@@ -1,55 +1,115 @@
 <template>
-  <Transition name="fade">
-    <div v-if="isOpen" class="modal-overlay" @click.self="$emit('close')">
-      <div class="modal-content">
-        <header class="modal-header">
-          <h2>Settings</h2>
-          <button class="close-btn" @click="$emit('close')" title="Close">
-            &times;
-          </button>
-        </header>
+  <div>
+    <Transition name="fade">
+      <div v-if="isOpen" class="modal-overlay" @click.self="$emit('close')">
+        <div class="modal-content">
+          <header class="modal-header">
+            <h3>
+              <span v-html="ICON_SETTINGS"></span>
+              Settings
+            </h3>
+            <button class="close-btn" @click="$emit('close')" title="Close">
+              <span v-html="ICON_CLOSE"></span>
+            </button>
+          </header>
 
-        <div class="modal-body">
-          <section class="settings-section">
-            <h3 class="section-title">Interface</h3>
+          <div class="modal-body">
+            <section class="settings-section">
+              <h4>Appearance</h4>
 
-            <div class="setting-row">
-              <div class="setting-info">
-                <label for="info-bar-toggle">Show Information Bar</label>
-                <p class="setting-desc">
-                  Displays coordinates, zoom level, and layer stats.
-                </p>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <label for="theme-toggle">Dark Mode</label>
+                  <p class="setting-desc">
+                    Switch between light and dark theme
+                  </p>
+                </div>
+
+                <div class="toggle-switch">
+                  <input
+                    id="theme-toggle"
+                    type="checkbox"
+                    :checked="theme === 'dark'"
+                    @change="toggleTheme"
+                  />
+                  <label for="theme-toggle" class="slider"></label>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-section">
+              <h4>Interface</h4>
+
+              <div class="setting-row">
+                <div class="setting-info">
+                  <label for="info-bar-toggle">Show Information Bar</label>
+                  <p class="setting-desc">
+                    Displays coordinates, zoom level, and layer stats.
+                  </p>
+                </div>
+
+                <div class="toggle-switch">
+                  <input
+                    id="info-bar-toggle"
+                    type="checkbox"
+                    :checked="showInfoBar"
+                    @change="toggleInfoBar"
+                  />
+                  <label for="info-bar-toggle" class="slider"></label>
+                </div>
               </div>
 
-              <div class="toggle-switch">
-                <input
-                  id="info-bar-toggle"
-                  type="checkbox"
-                  :checked="showInfoBar"
-                  @change="toggleInfoBar"
-                />
-                <label for="info-bar-toggle" class="slider"></label>
-              </div>
-            </div>
-          </section>
+              <div class="setting-row">
+                <div class="setting-info">
+                  <label for="arrow-buttons-toggle">Show Layer Order Arrows</label>
+                  <p class="setting-desc">
+                    Display ▲▼ buttons for layer ordering. Drag & drop always available.
+                  </p>
+                </div>
 
-          <section class="settings-section">
-            <h3 class="section-title">Map Preferences</h3>
-            <div class="empty-state">More settings coming soon...</div>
-          </section>
+                <div class="toggle-switch">
+                  <input
+                    id="arrow-buttons-toggle"
+                    type="checkbox"
+                    :checked="showArrowButtons"
+                    @change="toggleArrowButtons"
+                  />
+                  <label for="arrow-buttons-toggle" class="slider"></label>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-section">
+              <h4>Map Preferences</h4>
+              <div class="empty-state">More settings coming soon...</div>
+            </section>
+          </div>
+
+          <footer class="modal-footer">
+            <button class="btn-secondary" @click="openAcknowledgments" title="About & Acknowledgments">
+              <span v-html="ICON_INFO"></span>
+              <span>About</span>
+            </button>
+            <button class="btn-primary" @click="$emit('close')">Done</button>
+          </footer>
         </div>
-
-        <footer class="modal-footer">
-          <button class="btn-primary" @click="$emit('close')">Done</button>
-        </footer>
       </div>
-    </div>
-  </Transition>
+    </Transition>
+
+    <!-- Acknowledgments Modal -->
+    <Acknowledgments
+      :is-open="isAcknowledgmentsOpen"
+      @close="isAcknowledgmentsOpen = false"
+    />
+  </div>
 </template>
 
 <script setup>
-import { storeToRefs } from "pinia"; // <--- 1. Import storeToRefs
+import { ref } from 'vue';
+import { storeToRefs } from "pinia";
 import { useSettingsStore } from "../../stores/settingsStore";
+import Acknowledgments from './Acknowledgments.vue';
+import { ICON_INFO, ICON_CLOSE, ICON_SETTINGS } from '@/constants/icons.js';
 
 defineProps({
   isOpen: {
@@ -60,12 +120,17 @@ defineProps({
 defineEmits(["close"]);
 
 const settingsStore = useSettingsStore();
+const isAcknowledgmentsOpen = ref(false);
 
-// 2. Extract State (Must use storeToRefs to keep it reactive!)
-const { showInfoBar } = storeToRefs(settingsStore);
+const openAcknowledgments = () => {
+  isAcknowledgmentsOpen.value = true;
+};
 
-// 3. Extract Actions (Can be destructured directly)
-const { toggleInfoBar } = settingsStore;
+// Extract State (Must use storeToRefs to keep it reactive!)
+const { showInfoBar, showArrowButtons, theme } = storeToRefs(settingsStore);
+
+// Extract Actions (Can be destructured directly)
+const { toggleInfoBar, toggleArrowButtons, toggleTheme } = settingsStore;
 </script>
 
 <style scoped>
@@ -85,77 +150,194 @@ const { toggleInfoBar } = settingsStore;
   position: fixed;
   top: 0;
   left: 0;
-  width: 100vw;
-  height: 100vh;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(3px);
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
   display: flex;
-  justify-content: center;
   align-items: center;
+  justify-content: center;
   z-index: 9999;
+  backdrop-filter: blur(5px);
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 .modal-content {
-  background: #fff;
   width: 90%;
-  max-width: 480px;
+  max-width: 600px;
+  max-height: 80vh;
+  background: rgba(30, 30, 30, 0.98);
+  border: 1px solid #444;
   border-radius: 12px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1),
-    0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8);
+  color: #e0e0e0;
+  font-family: 'Segoe UI', sans-serif;
   display: flex;
   flex-direction: column;
-  max-height: 85vh;
-  overflow: hidden;
+  animation: slideUp 0.3s ease;
+}
+
+.theme-light .modal-content {
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid #ddd;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  color: #1a1a1a;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(30px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 /* --- Header --- */
 .modal-header {
-  padding: 16px 24px;
-  border-bottom: 1px solid #f0f0f0;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  background: #fafafa;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid #444;
+  background: rgba(40, 40, 40, 0.9);
+  border-radius: 12px 12px 0 0;
 }
 
-.modal-header h2 {
+.theme-light .modal-header {
+  border-bottom: 1px solid #e5e5e5;
+  background: rgba(245, 245, 245, 0.9);
+}
+
+.modal-header h3 {
   margin: 0;
-  font-size: 1.25rem;
-  color: #1f2937;
+  font-size: 20px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #fff;
+  line-height: 1;
+}
+
+.theme-light .modal-header h3 {
+  color: #333;
+}
+
+.modal-header h3 :deep(span) {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.modal-header h3 :deep(svg) {
+  width: 20px;
+  height: 20px;
+  stroke: #4a9eff;
+  display: block;
+}
+
+.theme-light .modal-header h3 :deep(svg) {
+  stroke: #2563eb;
 }
 
 .close-btn {
   background: none;
   border: none;
-  font-size: 24px;
-  color: #9ca3af;
+  color: #aaa;
   cursor: pointer;
-  line-height: 1;
-  padding: 0;
-  transition: color 0.2s;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.theme-light .close-btn {
+  color: #666;
 }
 
 .close-btn:hover {
-  color: #ef4444;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.theme-light .close-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #000;
+}
+
+.close-btn :deep(svg) {
+  width: 18px;
+  height: 18px;
 }
 
 /* --- Body --- */
 .modal-body {
-  padding: 24px;
+  flex: 1;
   overflow-y: auto;
+  padding: 24px;
+}
+
+.modal-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.theme-light .modal-body::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.theme-light .modal-body::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.theme-light .modal-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
 }
 
 .settings-section {
-  margin-bottom: 24px;
+  margin-bottom: 32px;
 }
 
-.section-title {
-  font-size: 0.75rem;
+.settings-section:last-child {
+  margin-bottom: 0;
+}
+
+.settings-section h4 {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #4a9eff;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #6b7280;
-  margin-bottom: 12px;
-  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.theme-light .settings-section h4 {
+  color: #2563eb;
 }
 
 /* --- Setting Row --- */
@@ -163,28 +345,76 @@ const { toggleInfoBar } = settingsStore;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 0;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  transition: all 0.2s;
+  margin-bottom: 12px;
+}
+
+.theme-light .setting-row {
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.setting-row:last-child {
+  margin-bottom: 0;
+}
+
+.setting-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.theme-light .setting-row:hover {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+.setting-info {
+  flex: 1;
 }
 
 .setting-info label {
   font-weight: 500;
-  color: #374151;
+  color: #fff;
   display: block;
   margin-bottom: 4px;
   cursor: pointer;
+  font-size: 15px;
+}
+
+.theme-light .setting-info label {
+  color: #1a1a1a;
 }
 
 .setting-desc {
   margin: 0;
-  font-size: 0.85rem;
-  color: #9ca3af;
+  font-size: 13px;
+  color: #999;
+  line-height: 1.4;
+}
+
+.theme-light .setting-desc {
+  color: #666;
 }
 
 .empty-state {
-  font-size: 0.9rem;
-  color: #d1d5db;
+  font-size: 14px;
+  color: #888;
   font-style: italic;
-  padding: 8px 0;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  text-align: center;
+}
+
+.theme-light .empty-state {
+  color: #999;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 /* --- Toggle Switch CSS --- */
@@ -208,9 +438,13 @@ const { toggleInfoBar } = settingsStore;
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: #e5e7eb;
+  background-color: #555;
   transition: 0.3s;
   border-radius: 24px;
+}
+
+.theme-light .slider {
+  background-color: #ccc;
 }
 
 .slider:before {
@@ -220,41 +454,102 @@ const { toggleInfoBar } = settingsStore;
   width: 18px;
   left: 3px;
   bottom: 3px;
-  background-color: white;
+  background-color: #ccc;
   transition: 0.3s;
   border-radius: 50%;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.theme-light .slider:before {
+  background-color: #fff;
 }
 
 input:checked + .slider {
-  background-color: #3b82f6;
+  background-color: #4a9eff;
 }
 
 input:checked + .slider:before {
   transform: translateX(20px);
+  background-color: #fff;
 }
 
 /* --- Footer --- */
 .modal-footer {
-  padding: 16px 24px;
-  border-top: 1px solid #f0f0f0;
+  padding: 20px 24px;
+  border-top: 1px solid #444;
   display: flex;
-  justify-content: flex-end;
-  background: #fafafa;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(40, 40, 40, 0.9);
+}
+
+.theme-light .modal-footer {
+  border-top: 1px solid #e5e5e5;
+  background: rgba(245, 245, 245, 0.9);
 }
 
 .btn-primary {
-  background: #3b82f6;
+  background: #4a9eff;
   color: white;
   border: none;
-  padding: 8px 20px;
-  border-radius: 6px;
+  padding: 10px 24px;
+  border-radius: 8px;
   font-weight: 500;
+  font-size: 14px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
 }
 
 .btn-primary:hover {
-  background: #2563eb;
+  background: #3b8eef;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(74, 158, 255, 0.3);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ccc;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 10px 18px;
+  border-radius: 8px;
+  font-weight: 500;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.theme-light .btn-secondary {
+  background: rgba(0, 0, 0, 0.03);
+  color: #555;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+.theme-light .btn-secondary:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #000;
+  border-color: rgba(0, 0, 0, 0.25);
+}
+
+.btn-secondary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary :deep(svg) {
+  width: 16px;
+  height: 16px;
 }
 </style>

@@ -63,6 +63,13 @@ defineExpose({ open, close });
   color: #333;
 }
 
+.theme-dark .context-menu {
+  background: #2a2a2a;
+  border: 1px solid #555;
+  box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.6);
+  color: #e0e0e0;
+}
+
 .overlay {
   position: fixed;
   top: 0;
@@ -85,12 +92,20 @@ li {
   border-bottom: 1px solid #f5f5f5;
 }
 
+.theme-dark li {
+  border-bottom: 1px solid #444;
+}
+
 li:last-child {
   border-bottom: none;
 }
 
 li:hover {
   background: #f0f0f0;
+}
+
+.theme-dark li:hover {
+  background: #3a3a3a;
 }
 
 .separator {
@@ -101,7 +116,15 @@ li:hover {
   cursor: default;
 }
 
+.theme-dark .separator {
+  background: #444;
+}
+
 .separator:hover {
   background: #eee;
+}
+
+.theme-dark .separator:hover {
+  background: #444;
 }
 </style>

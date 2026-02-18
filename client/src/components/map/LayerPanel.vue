@@ -5,6 +5,13 @@
     </div>
 
     <div class="layer-list">
+      <!-- Drop indicator line -->
+      <div 
+        v-if="dropIndicatorIndex !== null" 
+        class="drop-indicator"
+        :style="{ top: getDropIndicatorPosition(dropIndicatorIndex) + 'px' }"
+      ></div>
+      
       <div
         v-for="layer in overlayLayers"
         :key="layer._layerId"
@@ -13,7 +20,18 @@
           active: layer.active,
           'is-idle': layer.status === 'idle',
           'layer-error': layer.status === 'error',
+          'dragging': draggedLayerId === layer._layerId,
+          'drag-over': dragOverLayerId === layer._layerId,
         }"
+        draggable="true"
+        @dragstart="handleDragStart($event, layer)"
+        @dragend="handleDragEnd"
+        @dragover.prevent="handleDragOver($event, layer)"
+        @dragleave="handleDragLeave"
+        @drop="handleDrop($event, layer)"
+        @touchstart="handleTouchStart($event, layer)"
+        @touchmove="handleTouchMove($event)"
+        @touchend="handleTouchEnd($event)"
         @contextmenu.prevent="handleRightClick($event, layer)"
       >
         <div
@@ -66,8 +84,8 @@
                 v-if="layer.status === 'error'"
                 class="warning-icon"
                 :title="layer.error || STRINGS.layer.error"
+                v-html="EMOJI_ICONS.WARNING"
               >
-                {{ EMOJI_ICONS.WARNING }}
               </span>
 
               <button
@@ -75,9 +93,29 @@
                 class="action-btn cancel-btn"
                 :title="STRINGS.cancel"
                 @click.stop="handleCancel(layer._layerId)"
+                v-html="EMOJI_ICONS.CLOSE"
               >
-                {{ EMOJI_ICONS.CLOSE }}
               </button>
+
+              <!-- Layer ordering buttons (optional based on setting) -->
+              <div v-if="settingsStore.showArrowButtons && overlayLayers.length > 1" class="order-buttons">
+                <button
+                  class="order-btn"
+                  :disabled="isFirstLayer(layer._layerId)"
+                  :title="'Move layer up'"
+                  @click.stop="moveLayerUp(layer._layerId)"
+                >
+                  ▲
+                </button>
+                <button
+                  class="order-btn"
+                  :disabled="isLastLayer(layer._layerId)"
+                  :title="'Move layer down'"
+                  @click.stop="moveLayerDown(layer._layerId)"
+                >
+                  ▼
+                </button>
+              </div>
             </div>
           </div>
         </label>
@@ -90,7 +128,7 @@
 
     <div class="layerpanel-footer">
       <button class="settings-btn" @click="$emit('open-settings')">
-        <span class="icon">{{ EMOJI_ICONS.SETTINGS }}</span>
+        <span class="icon" v-html="EMOJI_ICONS.SETTINGS"></span>
         <span class="text">{{ STRINGS.settings.title }}</span>
       </button>
     </div>
@@ -108,6 +146,7 @@ import { ref, inject } from "vue";
 import { storeToRefs } from "pinia";
 import { useLayerStore } from "../../stores/map/layerStore";
 import { useMapStore } from "../../stores/map/mapStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 import ContextMenu from "../contextMenus/ContextMenuLayers.vue";
 import GeoJSON from "ol/format/GeoJSON"; // Import OL GeoJSON Format
 import { ICON_POINT, ICON_LINE, ICON_POLYGON, EMOJI_ICONS, getGeometryIcon } from "../../constants/icons";
@@ -117,6 +156,7 @@ defineEmits(['open-settings']);
 
 const layerStore = useLayerStore();
 const mapStore = useMapStore();
+const settingsStore = useSettingsStore();
 const layerManager = inject("layerManager"); // ref — access via .value
 
 const { overlayLayers } = storeToRefs(layerStore);
@@ -201,6 +241,266 @@ const handleColorChange = ({ color, layer }) => {
 const handleCancel = (layerId) => {
   layerStore.cancelLayerLoad(layerId);
 };
+
+const moveLayerUp = (layerId) => {
+  layerStore.moveLayerUp(layerId);
+};
+
+const moveLayerDown = (layerId) => {
+  layerStore.moveLayerDown(layerId);
+};
+
+const isFirstLayer = (layerId) => {
+  return overlayLayers.value[0]?._layerId === layerId;
+};
+
+const isLastLayer = (layerId) => {
+  const len = overlayLayers.value.length;
+  return overlayLayers.value[len - 1]?._layerId === layerId;
+};
+
+// Drag and drop state
+const draggedLayerId = ref(null);
+const dragOverLayerId = ref(null);
+const dropIndicatorIndex = ref(null);
+
+// Touch drag state
+const touchStartY = ref(0);
+const touchCurrentY = ref(0);
+const touchDraggedElement = ref(null);
+const touchScrollStartY = ref(0);
+const isDraggingTouch = ref(false);
+
+const handleDragStart = (event, layer) => {
+  // Allow dragging for all layers now
+  draggedLayerId.value = layer._layerId;
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', layer._layerId);
+  
+  // Add a slight delay to allow the drag image to be created
+  setTimeout(() => {
+    event.target.style.opacity = '0.5';
+  }, 0);
+};
+
+const handleDragEnd = (event) => {
+  event.target.style.opacity = '1';
+  draggedLayerId.value = null;
+  dragOverLayerId.value = null;
+  dropIndicatorIndex.value = null;
+};
+
+const handleDragOver = (event, layer) => {
+  if (!draggedLayerId.value || draggedLayerId.value === layer._layerId) return;
+  
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  
+  // Calculate which side of the layer we're hovering over
+  const rect = event.currentTarget.getBoundingClientRect();
+  const midpoint = rect.top + rect.height / 2;
+  const targetIndex = overlayLayers.value.findIndex(l => l._layerId === layer._layerId);
+  
+  if (targetIndex === -1) return;
+  
+  // Find the index of the dragged layer
+  const draggedIndex = overlayLayers.value.findIndex(l => l._layerId === draggedLayerId.value);
+  
+  // Show drop indicator above or below based on mouse position
+  if (event.clientY < midpoint) {
+    // Drop above this layer (before it)
+    dropIndicatorIndex.value = targetIndex;
+  } else {
+    // Drop below this layer (after it)
+    dropIndicatorIndex.value = targetIndex + 1;
+  }
+  
+  dragOverLayerId.value = layer._layerId;
+};
+
+const handleDragLeave = () => {
+  // Don't clear immediately as we might be moving between elements
+  // The dragover event will update it correctly
+};
+
+const handleDrop = (event, targetLayer) => {
+  event.preventDefault();
+  
+  const draggedId = event.dataTransfer.getData('text/plain');
+  if (!draggedId) {
+    dropIndicatorIndex.value = null;
+    return;
+  }
+  
+  // Get the dragged layer's current index in overlays
+  const draggedIndex = overlayLayers.value.findIndex(l => l._layerId === draggedId);
+  
+  if (draggedIndex === -1 || dropIndicatorIndex.value === null) {
+    dropIndicatorIndex.value = null;
+    return;
+  }
+  
+  // dropIndicatorIndex represents where to insert in the current array
+  // reorderLayer will handle the adjustment after removal
+  const targetIndex = dropIndicatorIndex.value;
+  
+  // Clamp to valid range
+  const clampedTargetIndex = Math.max(0, Math.min(targetIndex, overlayLayers.value.length));
+  
+  // Only reorder if position actually changed
+  if (draggedIndex !== clampedTargetIndex && draggedIndex + 1 !== clampedTargetIndex) {
+    layerStore.reorderLayer(draggedId, clampedTargetIndex);
+  }
+  
+  // Clear drag state
+  dragOverLayerId.value = null;
+  dropIndicatorIndex.value = null;
+};
+
+// Touch event handlers for mobile
+const handleTouchStart = (event, layer) => {
+  // Allow touch dragging for all layers
+  const touch = event.touches[0];
+  touchStartY.value = touch.clientY;
+  touchCurrentY.value = touch.clientY;
+  touchScrollStartY.value = event.target.closest('.layer-list')?.scrollTop || 0;
+  touchDraggedElement.value = event.currentTarget;
+  isDraggingTouch.value = false; // Start as false, will become true if moved enough
+  
+  // Store the layer being touched
+  draggedLayerId.value = layer._layerId;
+};
+
+const handleTouchMove = (event) => {
+  if (!draggedLayerId.value || !touchDraggedElement.value) return;
+  
+  const touch = event.touches[0];
+  const deltaY = Math.abs(touch.clientY - touchStartY.value);
+  
+  // Only start dragging if moved more than 10px (prevents accidental drags)
+  if (deltaY > 10) {
+    isDraggingTouch.value = true;
+    event.preventDefault(); // Prevent scrolling when dragging
+    
+    touchCurrentY.value = touch.clientY;
+    
+    // Find which layer is under the touch point
+    const layerList = touchDraggedElement.value.closest('.layer-list');
+    const layers = Array.from(layerList.querySelectorAll('.layer-row'));
+    
+    let targetLayer = null;
+    let targetLayerIndex = -1;
+    
+    for (let i = 0; i < layers.length; i++) {
+      const layer = layers[i];
+      const rect = layer.getBoundingClientRect();
+      if (touch.clientY >= rect.top && touch.clientY <= rect.bottom) {
+        targetLayer = layer;
+        targetLayerIndex = i;
+        
+        // Calculate if touch is in top or bottom half
+        const midpoint = rect.top + rect.height / 2;
+        if (touch.clientY < midpoint) {
+          // Drop above this layer
+          dropIndicatorIndex.value = i;
+        } else {
+          // Drop below this layer
+          dropIndicatorIndex.value = i + 1;
+        }
+        break;
+      }
+    }
+    
+    // Update drag over state
+    if (targetLayer) {
+      const targetId = overlayLayers.value.find(
+        l => targetLayer.textContent.includes(l.name)
+      )?._layerId;
+      
+      if (targetId && targetId !== draggedLayerId.value) {
+        dragOverLayerId.value = targetId;
+      } else {
+        dragOverLayerId.value = null;
+      }
+    } else {
+      dragOverLayerId.value = null;
+      dropIndicatorIndex.value = null;
+    }
+  }
+};
+
+const handleTouchEnd = (event) => {
+  if (!draggedLayerId.value || !isDraggingTouch.value) {
+    // If we didn't actually drag, just clear state
+    draggedLayerId.value = null;
+    dragOverLayerId.value = null;
+    touchDraggedElement.value = null;
+    isDraggingTouch.value = false;
+    return;
+  }
+  
+  event.preventDefault();
+  
+  // Get the target layer under the touch point
+  if (dropIndicatorIndex.value !== null && draggedLayerId.value) {
+    const draggedIndex = overlayLayers.value.findIndex(l => l._layerId === draggedLayerId.value);
+    
+    if (draggedIndex !== -1) {
+      // dropIndicatorIndex represents where to insert in the current array
+      // reorderLayer will handle the adjustment after removal
+      const targetIndex = dropIndicatorIndex.value;
+      
+      // Clamp to valid range
+      const clampedTargetIndex = Math.max(0, Math.min(targetIndex, overlayLayers.value.length));
+      
+      // Only reorder if position actually changed
+      if (draggedIndex !== clampedTargetIndex && draggedIndex + 1 !== clampedTargetIndex) {
+        layerStore.reorderLayer(draggedLayerId.value, clampedTargetIndex);
+      }
+    }
+  }
+  
+  // Clear all touch drag state
+  draggedLayerId.value = null;
+  dragOverLayerId.value = null;
+  dropIndicatorIndex.value = null;
+  touchDraggedElement.value = null;
+  isDraggingTouch.value = false;
+  touchStartY.value = 0;
+  touchCurrentY.value = 0;
+};
+
+// Calculate drop indicator position
+const getDropIndicatorPosition = (index) => {
+  // Get the layer list element
+  const layerList = document.querySelector('.layer-list');
+  if (!layerList) return 0;
+  
+  const layers = Array.from(layerList.querySelectorAll('.layer-row'));
+  
+  if (index === 0) {
+    // Position at the top
+    return 0;
+  } else if (index >= layers.length) {
+    // Position at the bottom
+    const lastLayer = layers[layers.length - 1];
+    if (lastLayer) {
+      const rect = lastLayer.getBoundingClientRect();
+      const listRect = layerList.getBoundingClientRect();
+      return rect.bottom - listRect.top + layerList.scrollTop;
+    }
+  } else {
+    // Position between layers
+    const targetLayer = layers[index];
+    if (targetLayer) {
+      const rect = targetLayer.getBoundingClientRect();
+      const listRect = layerList.getBoundingClientRect();
+      return rect.top - listRect.top + layerList.scrollTop;
+    }
+  }
+  
+  return 0;
+};
 </script>
 
 <style scoped>
@@ -218,6 +518,11 @@ const handleCancel = (layerId) => {
   pointer-events: auto;
 }
 
+.theme-dark .layerpanel {
+  background: #2a2a2a;
+  border-right: 1px solid #444;
+}
+
 .header {
   padding: 0 15px;
   background: #343a40;
@@ -226,6 +531,10 @@ const handleCancel = (layerId) => {
   display: flex;
   align-items: center;
   box-sizing: border-box;
+}
+
+.theme-dark .header {
+  background: #1a1a1a;
 }
 
 .header h3 {
@@ -238,6 +547,34 @@ const handleCancel = (layerId) => {
   flex: 1;
   overflow-y: auto;
   padding: 10px;
+  position: relative; /* For absolute positioning of drop indicator */
+  /* Improve touch scrolling on mobile */
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.drop-indicator {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 3px;
+  background: #007bff;
+  border-radius: 2px;
+  box-shadow: 0 0 8px rgba(0, 123, 255, 0.6);
+  pointer-events: none;
+  z-index: 1000;
+  animation: pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scaleY(1.2);
+  }
 }
 
 .layer-row {
@@ -251,10 +588,30 @@ const handleCancel = (layerId) => {
   border-radius: 4px;
   transition: all 0.2s;
   overflow: hidden;
+  cursor: grab;
+}
+
+.layer-row.dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+.layer-row.drag-over {
+  /* Subtle highlight - main indicator is the line */
+  background-color: rgba(0, 123, 255, 0.05);
+}
+
+.theme-dark .layer-row {
+  background: #3a3a3a;
+  border: 1px solid #4a4a4a;
 }
 
 .layer-row:hover:not(.layer-error) {
   background: #f1f1f1;
+}
+
+.theme-dark .layer-row:hover:not(.layer-error) {
+  background: #454545;
 }
 
 .layer-row.active {
@@ -322,10 +679,19 @@ label {
   flex: 1;
 }
 
+.theme-dark .layer-name-text {
+  color: #e0e0e0;
+}
+
 .layer-error {
   background: #fdf2f2 !important;
   border: 1px solid #fababa !important;
   cursor: not-allowed;
+}
+
+.theme-dark .layer-error {
+  background: rgba(220, 53, 69, 0.2) !important;
+  border: 1px solid rgba(220, 53, 69, 0.5) !important;
 }
 
 .disabled-label {
@@ -337,6 +703,41 @@ label {
   gap: 4px;
   margin-left: 8px;
   flex-shrink: 0;
+}
+
+.order-buttons {
+  display: flex;
+  gap: 2px;
+}
+
+.order-btn {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  cursor: pointer;
+  font-size: 10px;
+  color: #666;
+  line-height: 1;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.theme-dark .order-btn {
+  color: #aaa;
+}
+
+.order-btn:hover:not(:disabled) {
+  opacity: 1;
+  color: #333;
+}
+
+.theme-dark .order-btn:hover:not(:disabled) {
+  color: #fff;
+}
+
+.order-btn:disabled {
+  opacity: 0.2;
+  cursor: not-allowed;
 }
 
 .action-btn {
@@ -371,6 +772,10 @@ label {
   text-align: center;
   color: #999;
   font-size: 13px;
+}
+
+.theme-dark .empty-state {
+  color: #666;
 }
 
 .icon-container {
@@ -422,6 +827,11 @@ input[type="checkbox"]:disabled {
   background: #f9f9f9;
 }
 
+.theme-dark .layerpanel-footer {
+  border-top: 1px solid #444;
+  background: #2a2a2a;
+}
+
 .settings-btn {
   width: 100%;
   display: flex;
@@ -437,9 +847,18 @@ input[type="checkbox"]:disabled {
   transition: background 0.2s;
 }
 
+.theme-dark .settings-btn {
+  color: #ccc;
+}
+
 .settings-btn:hover {
   background: #e0e0e0;
   color: #000;
+}
+
+.theme-dark .settings-btn:hover {
+  background: #3a3a3a;
+  color: #fff;
 }
 
 .icon {

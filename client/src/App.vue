@@ -1,5 +1,5 @@
 <template>
-  <div id="app">
+  <div id="app" :class="'theme-' + theme">
     <div v-if="isConfigLoaded">
       <router-view />
     </div>
@@ -18,14 +18,27 @@
 </template>
 
 <script setup>
-import { ref, onMounted, provide } from "vue";
+import { ref, onMounted, provide, watch } from "vue";
+import { storeToRefs } from "pinia";
 import yaml from "js-yaml";
 import { validateConfig } from "./constants/configValidation";
 import { STRINGS } from "./constants/strings";
+import { useSettingsStore } from "./stores/settingsStore";
+import { logger } from "./utils/logger";
+import { enableDevMode } from "./utils/devTools";
 
 const appConfig = ref(null);
 const isConfigLoaded = ref(false);
 const configError = ref(null);
+
+// Theme management
+const settingsStore = useSettingsStore();
+const { theme } = storeToRefs(settingsStore);
+
+// Apply theme to document body
+watch(theme, (newTheme) => {
+  document.body.className = `theme-${newTheme}`;
+}, { immediate: true });
 
 // --- 1. RESTORE THIS MISSING PART ---
 const layerManagerRef = ref(null);
@@ -35,6 +48,11 @@ provide("layerManager", layerManagerRef);
 provide("config", appConfig);
 
 onMounted(async () => {
+  // Enable development tools in dev mode
+  if (import.meta.env.DEV) {
+    enableDevMode();
+  }
+  
   try {
     const res = await fetch("/config.yaml");
     if (!res.ok) throw new Error(`Config not found: ${res.status}`);
@@ -65,10 +83,10 @@ onMounted(async () => {
         link.href = site.favicon;
       }
     } catch (e) {
-      console.warn('Failed to apply website settings:', e);
+      logger.warn('App', 'Failed to apply website settings:', e);
     }
   } catch (e) {
-    console.error(e);
+    logger.error('App', 'Failed to load config:', e);
     configError.value = e.message;
   }
 });
@@ -84,11 +102,26 @@ body {
   padding: 0;
   height: 100%;
   overflow: hidden;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
+
+/* Dark theme (default) */
+body.theme-dark {
+  background: #1a1a1a;
+  color: #e0e0e0;
+}
+
+/* Light theme */
+body.theme-light {
+  background: #ffffff;
+  color: #1a1a1a;
+}
+
 #app {
   height: 100%;
   width: 100%;
 }
+
 .loading {
   display: flex;
   justify-content: center;
@@ -96,6 +129,11 @@ body {
   height: 100%;
   color: #666;
 }
+
+.theme-light .loading {
+  color: #999;
+}
+
 .error-screen {
   display: flex;
   justify-content: center;
@@ -103,6 +141,11 @@ body {
   height: 100%;
   background: #f3f4f6;
 }
+
+.theme-dark .error-screen {
+  background: #2a2a2a;
+}
+
 .error-modal {
   background: white;
   padding: 2rem;
@@ -110,6 +153,13 @@ body {
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
   text-align: center;
 }
+
+.theme-dark .error-modal {
+  background: #3a3a3a;
+  color: #e0e0e0;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+}
+
 .retry-btn {
   background: #3b82f6;
   color: white;
@@ -117,5 +167,10 @@ body {
   border-radius: 6px;
   border: none;
   cursor: pointer;
+  transition: background 0.2s;
+}
+
+.retry-btn:hover {
+  background: #2563eb;
 }
 </style>

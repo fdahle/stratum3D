@@ -186,6 +186,12 @@ onUnmounted(() => {
   min-width: 64px;
 }
 
+.theme-dark .base-switcher {
+  background: #2a2a2a;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
 /* --- Thumbnails --- */
 .base-thumb {
   position: relative;
@@ -218,6 +224,10 @@ onUnmounted(() => {
   background-size: cover;
   background-position: center;
   position: relative;
+}
+
+.theme-dark .preview-box {
+  background-color: #444;
 }
 
 /* Gradient and Labels */

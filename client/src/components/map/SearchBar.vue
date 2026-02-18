@@ -42,6 +42,7 @@ import { useLayerStore } from "../../stores/map/layerStore";
 import { useMapStore } from "../../stores/map/mapStore";
 import { SEARCH_MIN_LENGTH, SEARCH_DEBOUNCE_MS } from "../../constants/layerConstants";
 import { STRINGS } from "../../constants/strings";
+import { logger } from "../../utils/logger";
 
 const layerStore = useLayerStore();
 const mapStore = useMapStore();
@@ -141,7 +142,7 @@ const selectResult = (result) => {
 
   const map = mapStore.getMap();
   if (!map) {
-    console.warn("Map instance not found in store");
+    logger.warn('SearchBar', 'Map instance not found in store');
     return;
   }
 
@@ -201,6 +202,12 @@ const clearSearch = () => {
   border: 1px solid #e0e0e0;
 }
 
+.theme-dark .search-box {
+  background: #2a2a2a;
+  border: 1px solid #444;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+}
+
 .search-box input {
   border: none;
   outline: none;
@@ -209,9 +216,18 @@ const clearSearch = () => {
   margin: 0 10px;
 }
 
+.theme-dark .search-box input {
+  background: #2a2a2a;
+  color: #e0e0e0;
+}
+
 .search-icon {
   font-size: 16px;
   color: #666;
+}
+
+.theme-dark .search-icon {
+  color: #999;
 }
 
 .clear-btn {
@@ -237,11 +253,20 @@ const clearSearch = () => {
   overflow-y: auto;
 }
 
+.theme-dark .results-list {
+  background: #2a2a2a;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+
 .results-list li {
   padding: 10px 20px;
   cursor: pointer;
   transition: background 0.1s;
   border-bottom: 1px solid #f5f5f5;
+}
+
+.theme-dark .results-list li {
+  border-bottom: 1px solid #444;
 }
 
 .results-list li:last-child {
@@ -251,6 +276,11 @@ const clearSearch = () => {
 .results-list li:hover,
 .results-list li.is-active {
   background-color: #f0f7ff;
+}
+
+.theme-dark .results-list li:hover,
+.theme-dark .results-list li.is-active {
+  background-color: rgba(74, 158, 255, 0.15);
 }
 
 .result-info {
@@ -264,12 +294,20 @@ const clearSearch = () => {
   font-size: 14px;
 }
 
+.theme-dark .result-name {
+  color: #e0e0e0;
+}
+
 .result-layer {
   font-size: 11px;
   color: #888;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-top: 2px;
+}
+
+.theme-dark .result-layer {
+  color: #999;
 }
 
 .no-results {
@@ -280,5 +318,11 @@ const clearSearch = () => {
     text-align: center;
     color: #888;
     box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.theme-dark .no-results {
+    background: #2a2a2a;
+    color: #999;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5);
 }
 </style>

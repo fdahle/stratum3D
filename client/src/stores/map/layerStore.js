@@ -220,6 +220,108 @@ export const useLayerStore = defineStore("layers", () => {
     layerObj.color = newColor;
   };
 
+  /**
+   * Move a layer up in the stack (increases z-index)
+   * @param {string} layerId - Layer ID to move
+   */
+  const moveLayerUp = (layerId) => {
+    const index = layers.value.findIndex(l => l._layerId === layerId);
+    if (index <= 0) return; // Already at top or not found
+    
+    // Swap with layer above
+    [layers.value[index - 1], layers.value[index]] = [layers.value[index], layers.value[index - 1]];
+    
+    // Update z-indexes
+    updateLayerZIndexes();
+  };
+
+  /**
+   * Move a layer down in the stack (decreases z-index)
+   * @param {string} layerId - Layer ID to move
+   */
+  const moveLayerDown = (layerId) => {
+    const index = layers.value.findIndex(l => l._layerId === layerId);
+    if (index === -1 || index >= layers.value.length - 1) return; // Already at bottom or not found
+    
+    // Swap with layer below
+    [layers.value[index], layers.value[index + 1]] = [layers.value[index + 1], layers.value[index]];
+    
+    // Update z-indexes
+    updateLayerZIndexes();
+  };
+
+  /**
+   * Update z-indexes based on array position
+   * First item in array = bottom (lowest z-index)
+   * Last item in array = top (highest z-index)
+   */
+  const updateLayerZIndexes = () => {
+    // Count overlay layers for reverse z-index calculation
+    const overlayCount = layers.value.filter(l => l.category === LAYER_CATEGORY.OVERLAY).length;
+    let overlayIndex = 0;
+    
+    layers.value.forEach((layer) => {
+      let newZIndex;
+      if (layer.category === LAYER_CATEGORY.BASE) {
+        newZIndex = Z_INDEX.BASE;
+      } else {
+        // Overlay layers: first in array (top of UI) gets highest z-index (renders on top)
+        // Calculate reverse order: first layer gets (overlayCount-1)*10, last gets 0
+        newZIndex = Z_INDEX.OVERLAY + ((overlayCount - overlayIndex - 1) * 10);
+        overlayIndex++;
+      }
+      
+      layer.zIndex = newZIndex;
+      if (layer.layerInstance) {
+        layer.layerInstance.setZIndex(newZIndex);
+      }
+    });
+  };
+
+  /**
+   * Reorder layer to a specific position (used for drag & drop)
+   * @param {string} layerId - Layer to move
+   * @param {number} targetOverlayIndex - Target insertion index within overlay layers (includes the element being moved)
+   */
+  const reorderLayer = (layerId, targetOverlayIndex) => {
+    // Get the layer to move
+    const layer = layerIndex.get(layerId);
+    if (!layer || layer.category !== LAYER_CATEGORY.OVERLAY) return;
+    
+    // Get all overlay layers
+    const overlays = layers.value.filter(l => l.category === LAYER_CATEGORY.OVERLAY);
+    const currentOverlayIndex = overlays.findIndex(l => l._layerId === layerId);
+    
+    if (currentOverlayIndex === -1) return;
+    
+    // Clamp target index to valid range (0 to length, since it's an insertion point)
+    const clampedIndex = Math.max(0, Math.min(targetOverlayIndex, overlays.length));
+    
+    // Find indices in the full layers array
+    const currentFullIndex = layers.value.findIndex(l => l._layerId === layerId);
+    
+    // Count base layers (they come before overlays)
+    const baseLayerCount = layers.value.filter(l => l.category === LAYER_CATEGORY.BASE).length;
+    
+    // Calculate the target insertion index in the full layers array
+    // targetOverlayIndex is where we want to insert in the overlay-only array
+    let targetFullIndex = baseLayerCount + clampedIndex;
+    
+    // Remove from current position
+    const [movedLayer] = layers.value.splice(currentFullIndex, 1);
+    
+    // Adjust insertion index if we removed an element before it
+    if (currentFullIndex < targetFullIndex) {
+      targetFullIndex--;
+    }
+    
+    // Insert at new position
+    layers.value.splice(targetFullIndex, 0, movedLayer);
+    
+    // Update all z-indexes
+    updateLayerZIndexes();
+  };
+
   // --- GETTERS ---
   const baseLayers = computed(() =>
     layers.value.filter((l) => l.category === LAYER_CATEGORY.BASE),
@@ -243,5 +345,9 @@ export const useLayerStore = defineStore("layers", () => {
     retryLayer,
     cancelLayerLoad,
     registerCancelHandler,
+    moveLayerUp,
+    moveLayerDown,
+    reorderLayer,
+    updateLayerZIndexes,
   };
 });

@@ -9,6 +9,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
 import { useViewer3D } from '@/composables/useViewer3D.js';
+import { useSettingsStore } from '@/stores/settingsStore.js';
+import { storeToRefs } from 'pinia';
 
 const props = defineProps({
   modelUrls: {
@@ -34,6 +36,10 @@ const emit = defineEmits(['scene-ready', 'model-loaded', 'loading-error', 'loadi
 
 const viewerRef = ref(null);
 const fileLoadedCount = ref(0); // Track number of models loaded from files
+
+const settingsStore = useSettingsStore();
+const { theme } = storeToRefs(settingsStore);
+
 const {
   scene,
   camera,
@@ -62,7 +68,8 @@ const initViewer = () => {
 
   // Scene
   const newScene = new THREE.Scene();
-  newScene.background = new THREE.Color(0x87ceeb);
+  // Set background color based on theme
+  newScene.background = new THREE.Color(theme.value === 'dark' ? 0x1a1a1a : 0x87ceeb);
   setScene(newScene);
 
   // Camera
@@ -119,6 +126,12 @@ const initViewer = () => {
 
   // Handle mouse clicks for measurements
   newRenderer.domElement.addEventListener('click', onCanvasClick);
+  
+  // Track mouse down position to detect drags vs clicks
+  newRenderer.domElement.addEventListener('mousedown', (e) => {
+    mouseDownPosition.x = e.clientX;
+    mouseDownPosition.y = e.clientY;
+  });
 
   emit('scene-ready');
 };
@@ -1025,6 +1038,13 @@ const removeLayer = (layerId) => {
 
 // Raycasting for measurements
 const onCanvasClick = (event) => {
+  // Use the new measurement handler if active
+  if (currentMeasurementMode) {
+    handleMeasurementClick(event);
+    return;
+  }
+
+  // Legacy handling (fallback)
   if (!measurementMode.value || !scene.value || !camera.value) return;
 
   // Calculate mouse position in normalized device coordinates
@@ -1089,13 +1109,407 @@ const clearMeasurementMarkers = () => {
   measurementMarkers.length = 0;
 };
 
-const enableMeasurementMode = (mode) => {
-  clearMeasurementMarkers();
+let measurementCallback = null;
+let currentMeasurementMode = null;
+let currentMeasurementPoints = [];
+let savedMeasurementObjects = []; // Array of arrays - each inner array contains objects for one measurement
+let isMouseDownForMeasurement = false;
+let mouseDownPosition = { x: 0, y: 0 };
+let currentClosingLine = null; // Track the current closing line for area measurements
+
+const enableMeasurementMode = (mode, callback) => {
+  clearCurrentMeasurementMarkers();
+  currentMeasurementMode = mode;
+  measurementCallback = callback;
+  currentMeasurementPoints = [];
   console.log('Measurement mode enabled:', mode);
 };
 
 const disableMeasurementMode = () => {
-  clearMeasurementMarkers();
+  currentMeasurementMode = null;
+  measurementCallback = null;
+  currentMeasurementPoints = [];
+  clearCurrentMeasurementMarkers();
+  clearAllMeasurements();
+};
+
+const clearMeasurements = () => {
+  currentMeasurementPoints = [];
+  clearCurrentMeasurementMarkers();
+  clearAllMeasurements();
+};
+
+const clearCurrentMeasurementMarkers = () => {
+  if (!scene.value) return;
+  // Only remove current measurement markers, not saved ones
+  const markersToRemove = [];
+  scene.value.children.forEach(child => {
+    if (child.name === 'currentMeasurementMarker') {
+      markersToRemove.push(child);
+    }
+  });
+  markersToRemove.forEach(marker => {
+    scene.value.remove(marker);
+    if (marker.geometry) marker.geometry.dispose();
+    if (marker.material) marker.material.dispose();
+  });
+  measurementMarkers.length = 0;
+  currentClosingLine = null; // Reset closing line reference
+};
+
+const clearAllMeasurements = () => {
+  if (!scene.value) return;
+  // Remove all saved measurement objects
+  savedMeasurementObjects.forEach(measurementGroup => {
+    measurementGroup.forEach(obj => {
+      scene.value.remove(obj);
+      if (obj.geometry) obj.geometry.dispose();
+      if (obj.material) obj.material.dispose();
+    });
+  });
+  // Also remove any current measurement markers
+  const allMeasurements = [];
+  scene.value.children.forEach(child => {
+    if (child.name === 'currentMeasurementMarker' || child.name === 'savedMeasurementMarker') {
+      allMeasurements.push(child);
+    }
+  });
+  allMeasurements.forEach(marker => {
+    scene.value.remove(marker);
+    if (marker.geometry) marker.geometry.dispose();
+    if (marker.material) marker.material.dispose();
+  });
+  measurementMarkers.length = 0;
+  savedMeasurementObjects.length = 0;
+};
+
+const removeSavedMeasurement = (index) => {
+  if (!scene.value || index < 0 || index >= savedMeasurementObjects.length) return;
+  
+  // Remove all objects belonging to this measurement from the scene
+  const measurementGroup = savedMeasurementObjects[index];
+  measurementGroup.forEach(obj => {
+    scene.value.remove(obj);
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) obj.material.dispose();
+  });
+  
+  // Remove the group from the array
+  savedMeasurementObjects.splice(index, 1);
+};
+
+const handleMeasurementClick = (event) => {
+  if (!currentMeasurementMode || !scene.value || !camera.value) return;
+  
+  // Don't register click if mouse moved significantly (camera was being rotated)
+  const dx = event.clientX - mouseDownPosition.x;
+  const dy = event.clientY - mouseDownPosition.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  
+  if (distance > 5) { // 5 pixel threshold
+    return; // Mouse moved too much, this was a drag not a click
+  }
+
+  // Calculate mouse position in normalized device coordinates
+  const rect = viewerRef.value.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+  // Update raycaster
+  raycaster.setFromCamera(mouse, camera.value);
+
+  // Find intersections with scene objects
+  const intersects = raycaster.intersectObjects(scene.value.children, true);
+  
+  if (intersects.length > 0) {
+    const point = intersects[0].point;
+    currentMeasurementPoints.push(point);
+
+    // Add visual marker
+    const markerGeometry = new THREE.SphereGeometry(0.5, 16, 16);
+    const markerMaterial = new THREE.MeshBasicMaterial({ 
+      color: 0xff0000,
+      depthTest: false,
+      depthWrite: false
+    });
+    const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+    marker.position.copy(point);
+    marker.name = 'currentMeasurementMarker';
+    marker.renderOrder = 999; // Render on top
+    scene.value.add(marker);
+    measurementMarkers.push(marker);
+
+    // Draw lines between points
+    if (currentMeasurementPoints.length > 1) {
+      // Connect last two points
+      const linePoints = [
+        currentMeasurementPoints[currentMeasurementPoints.length - 2], 
+        point
+      ];
+
+      const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
+      const lineMaterial = new THREE.LineBasicMaterial({ 
+        color: 0xff0000, 
+        linewidth: 2,
+        depthTest: false,
+        depthWrite: false
+      });
+      const line = new THREE.Line(lineGeometry, lineMaterial);
+      line.name = 'currentMeasurementMarker';
+      line.renderOrder = 999; // Render on top
+      scene.value.add(line);
+      measurementMarkers.push(line);
+    }
+    
+    // For area measurements, also draw closing line to first point
+    if (currentMeasurementMode === 'area' && currentMeasurementPoints.length >= 2) {
+      // Remove the previous closing line if it exists
+      if (currentClosingLine) {
+        scene.value.remove(currentClosingLine);
+        if (currentClosingLine.geometry) currentClosingLine.geometry.dispose();
+        if (currentClosingLine.material) currentClosingLine.material.dispose();
+        const index = measurementMarkers.indexOf(currentClosingLine);
+        if (index > -1) measurementMarkers.splice(index, 1);
+      }
+      
+      // Create new closing line
+      const closingLinePoints = [point, currentMeasurementPoints[0]];
+      const closingLineGeometry = new THREE.BufferGeometry().setFromPoints(closingLinePoints);
+      const closingLineMaterial = new THREE.LineBasicMaterial({ 
+        color: 0xff0000, 
+        linewidth: 2,
+        opacity: 0.7,
+        transparent: true,
+        depthTest: false,
+        depthWrite: false
+      });
+      currentClosingLine = new THREE.Line(closingLineGeometry, closingLineMaterial);
+      currentClosingLine.name = 'currentMeasurementMarker';
+      currentClosingLine.renderOrder = 999; // Render on top
+      scene.value.add(currentClosingLine);
+      measurementMarkers.push(currentClosingLine);
+    }
+
+    // Calculate and report measurement
+    let value = null;
+    let complete = false;
+
+    if (currentMeasurementMode === 'distance' && currentMeasurementPoints.length >= 2) {
+      // Calculate total distance for multi-segment line
+      let totalDistance = 0;
+      for (let i = 1; i < currentMeasurementPoints.length; i++) {
+        const p1 = currentMeasurementPoints[i - 1];
+        const p2 = currentMeasurementPoints[i];
+        const segmentDistance = Math.sqrt(
+          Math.pow(p2.x - p1.x, 2) + 
+          Math.pow(p2.y - p1.y, 2) + 
+          Math.pow(p2.z - p1.z, 2)
+        );
+        totalDistance += segmentDistance;
+      }
+      value = `${totalDistance.toFixed(2)} m`;
+    } else if (currentMeasurementMode === 'area' && currentMeasurementPoints.length >= 3) {
+      // Simple polygon area calculation (assumes planar polygon on XY plane)
+      let area = 0;
+      for (let i = 0; i < currentMeasurementPoints.length; i++) {
+        const j = (i + 1) % currentMeasurementPoints.length;
+        area += currentMeasurementPoints[i].x * currentMeasurementPoints[j].y;
+        area -= currentMeasurementPoints[j].x * currentMeasurementPoints[i].y;
+      }
+      area = Math.abs(area / 2);
+      value = `${area.toFixed(2)} m²`;
+    }
+
+    // Call callback with measurement data
+    if (measurementCallback) {
+      measurementCallback({
+        pointsCount: currentMeasurementPoints.length,
+        value,
+        complete
+      });
+    }
+
+    // Don't auto-reset - let user continue or manually save
+  }
+};
+
+const saveCurrentMeasurement = () => {
+  if (!currentMeasurementMode || currentMeasurementPoints.length === 0) return;
+  
+  let value = null;
+  
+  if (currentMeasurementMode === 'distance' && currentMeasurementPoints.length >= 2) {
+    // Calculate total distance
+    let totalDistance = 0;
+    for (let i = 1; i < currentMeasurementPoints.length; i++) {
+      const p1 = currentMeasurementPoints[i - 1];
+      const p2 = currentMeasurementPoints[i];
+      const segmentDistance = Math.sqrt(
+        Math.pow(p2.x - p1.x, 2) + 
+        Math.pow(p2.y - p1.y, 2) + 
+        Math.pow(p2.z - p1.z, 2)
+      );
+      totalDistance += segmentDistance;
+    }
+    value = `${totalDistance.toFixed(2)} m`;
+  } else if (currentMeasurementMode === 'area' && currentMeasurementPoints.length >= 3) {
+    // Calculate area
+    let area = 0;
+    for (let i = 0; i < currentMeasurementPoints.length; i++) {
+      const j = (i + 1) % currentMeasurementPoints.length;
+      area += currentMeasurementPoints[i].x * currentMeasurementPoints[j].y;
+      area -= currentMeasurementPoints[j].x * currentMeasurementPoints[i].y;
+    }
+    area = Math.abs(area / 2);
+    value = `${area.toFixed(2)} m²`;
+  }
+  
+  if (value && measurementCallback) {
+    // Convert current markers to saved markers and group them
+    const measurementGroup = [];
+    measurementMarkers.forEach(marker => {
+      marker.name = 'savedMeasurementMarker';
+      measurementGroup.push(marker);
+    });
+    // Store this group of objects for this measurement
+    savedMeasurementObjects.push(measurementGroup);
+    
+    measurementCallback({
+      pointsCount: currentMeasurementPoints.length,
+      value,
+      complete: true  // Mark as complete to save it
+    });
+  }
+  
+  // Clear for next measurement (but don't remove visual markers)
+  currentMeasurementPoints = [];
+  measurementMarkers.length = 0;
+};
+
+const undoLastPoint = () => {
+  if (currentMeasurementPoints.length === 0) return;
+  
+  // Remove last point
+  currentMeasurementPoints.pop();
+  
+  // Redraw all markers and lines
+  clearCurrentMeasurementMarkers();
+  
+  // Redraw all points and lines
+  for (let i = 0; i < currentMeasurementPoints.length; i++) {
+    const point = currentMeasurementPoints[i];
+    
+    // Add marker
+    const markerGeometry = new THREE.SphereGeometry(0.5, 16, 16);
+    const markerMaterial = new THREE.MeshBasicMaterial({ 
+      color: 0xff0000,
+      depthTest: false,
+      depthWrite: false
+    });
+    const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+    marker.position.copy(point);
+    marker.name = 'currentMeasurementMarker';
+    marker.renderOrder = 999;
+    scene.value.add(marker);
+    measurementMarkers.push(marker);
+    
+    // Add line from previous point
+    if (i > 0) {
+      const linePoints = [currentMeasurementPoints[i - 1], point];
+      const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
+      const lineMaterial = new THREE.LineBasicMaterial({ 
+        color: 0xff0000, 
+        linewidth: 2,
+        depthTest: false,
+        depthWrite: false
+      });
+      const line = new THREE.Line(lineGeometry, lineMaterial);
+      line.name = 'currentMeasurementMarker';
+      line.renderOrder = 999;
+      scene.value.add(line);
+      measurementMarkers.push(line);
+    }
+  }
+  
+  // Add closing line for area if we have at least 2 points
+  if (currentMeasurementMode === 'area' && currentMeasurementPoints.length >= 2) {
+    // Remove old closing line if exists
+    if (currentClosingLine) {
+      scene.value.remove(currentClosingLine);
+      if (currentClosingLine.geometry) currentClosingLine.geometry.dispose();
+      if (currentClosingLine.material) currentClosingLine.material.dispose();
+      const index = measurementMarkers.indexOf(currentClosingLine);
+      if (index > -1) measurementMarkers.splice(index, 1);
+    }
+    
+    const closingLinePoints = [
+      currentMeasurementPoints[currentMeasurementPoints.length - 1],
+      currentMeasurementPoints[0]
+    ];
+    const closingLineGeometry = new THREE.BufferGeometry().setFromPoints(closingLinePoints);
+    const closingLineMaterial = new THREE.LineBasicMaterial({ 
+      color: 0xff0000, 
+      linewidth: 2,
+      opacity: 0.7,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false
+    });
+    currentClosingLine = new THREE.Line(closingLineGeometry, closingLineMaterial);
+    currentClosingLine.name = 'currentMeasurementMarker';
+    currentClosingLine.renderOrder = 999;
+    scene.value.add(currentClosingLine);
+    measurementMarkers.push(currentClosingLine);
+  }
+  
+  // Update callback with new values
+  if (measurementCallback) {
+    let value = null;
+    
+    if (currentMeasurementMode === 'distance' && currentMeasurementPoints.length >= 2) {
+      let totalDistance = 0;
+      for (let i = 1; i < currentMeasurementPoints.length; i++) {
+        const p1 = currentMeasurementPoints[i - 1];
+        const p2 = currentMeasurementPoints[i];
+        const segmentDistance = Math.sqrt(
+          Math.pow(p2.x - p1.x, 2) + 
+          Math.pow(p2.y - p1.y, 2) + 
+          Math.pow(p2.z - p1.z, 2)
+        );
+        totalDistance += segmentDistance;
+      }
+      value = `${totalDistance.toFixed(2)} m`;
+    } else if (currentMeasurementMode === 'area' && currentMeasurementPoints.length >= 3) {
+      let area = 0;
+      for (let i = 0; i < currentMeasurementPoints.length; i++) {
+        const j = (i + 1) % currentMeasurementPoints.length;
+        area += currentMeasurementPoints[i].x * currentMeasurementPoints[j].y;
+        area -= currentMeasurementPoints[j].x * currentMeasurementPoints[i].y;
+      }
+      area = Math.abs(area / 2);
+      value = `${area.toFixed(2)} m²`;
+    }
+    
+    measurementCallback({
+      pointsCount: currentMeasurementPoints.length,
+      value,
+      complete: false
+    });
+  }
+};
+
+const cancelCurrentMeasurement = () => {
+  currentMeasurementPoints = [];
+  currentClosingLine = null;
+  clearCurrentMeasurementMarkers();
+  
+  if (measurementCallback) {
+    measurementCallback({
+      pointsCount: 0,
+      value: null,
+      complete: false
+    });
+  }
 };
 
 // Watch for model URL changes
@@ -1128,14 +1542,21 @@ onUnmounted(() => {
   if (animationFrameId) {
     cancelAnimationFrame(animationFrameId);
   }
-  clearMeasurementMarkers();
+  clearAllMeasurements();
   cleanup();
 });
 
 // Watch for measurement mode changes
 watch(measurementMode, (newMode) => {
   if (!newMode) {
-    clearMeasurementMarkers();
+    clearCurrentMeasurementMarkers();
+  }
+});
+
+// Watch for theme changes and update scene background
+watch(theme, (newTheme) => {
+  if (scene.value) {
+    scene.value.background = new THREE.Color(newTheme === 'dark' ? 0x1a1a1a : 0x87ceeb);
   }
 });
 
@@ -1150,6 +1571,11 @@ defineExpose({
   removeLayer,
   enableMeasurementMode,
   disableMeasurementMode,
+  clearMeasurements,
+  saveCurrentMeasurement,
+  undoLastPoint,
+  cancelCurrentMeasurement,
+  removeSavedMeasurement,
   setCameraPreset,
   resetToInitialCamera,
   zoomToLayer
