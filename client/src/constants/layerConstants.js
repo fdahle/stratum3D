@@ -33,6 +33,7 @@ export const GEOMETRY_TYPE = {
   LINE_STRING: 'LineString',
   MULTI_LINE_STRING: 'MultiLineString',
   POLYGON: 'polygon',
+  RASTER: 'raster',
   UNKNOWN: 'unknown',
 };
 

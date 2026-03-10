@@ -490,25 +490,157 @@ const loadUserObjFile = async (file) => {
 
 // Point cloud loading
 const loadPointCloudFile = async (file) => {
-  const extension = file.name.split('.').pop().toLowerCase();
-  
-  if (extension === 'ply') {
+  const lower = file.name.toLowerCase();
+
+  if (lower.endsWith('.ply')) {
     loadPLYFile(file);
-  } else if (extension === 'laz' || extension === 'las') {
-    emit('loading-error', { 
-      url: file.name, 
-      error: 'LAZ/LAS support requires server-side COPC conversion. Please use preprocessing pipeline.' 
+  } else if (lower.endsWith('.copc.laz')) {
+    emit('loading-error', {
+      url: file.name,
+      error: 'COPC support coming soon. Requires Giro3D integration.'
     });
-  } else if (file.name.includes('.copc.laz')) {
-    emit('loading-error', { 
-      url: file.name, 
-      error: 'COPC support coming soon. Requires Giro3D integration.' 
-    });
+  } else if (lower.endsWith('.laz') || lower.endsWith('.las')) {
+    loadLASFile(file);
   } else {
-    emit('loading-error', { 
-      url: file.name, 
-      error: `Unsupported point cloud format: ${extension}` 
+    emit('loading-error', {
+      url: file.name,
+      error: `Unsupported point cloud format: ${lower.split('.').pop()}`
     });
+  }
+};
+
+const loadLASFile = async (file) => {
+  const currentIndex = fileLoadedCount.value;
+  const fileSize = file.size;
+
+  emit('loading-progress', {
+    url: file.name, index: currentIndex,
+    loaded: 0, total: fileSize, progress: 0, status: 'reading'
+  });
+
+  let arrayBuffer;
+  try {
+    arrayBuffer = await file.arrayBuffer();
+  } catch (e) {
+    emit('loading-error', { url: file.name, error: 'Failed to read file' });
+    return;
+  }
+
+  emit('loading-progress', {
+    url: file.name, index: currentIndex,
+    loaded: fileSize, total: fileSize, progress: 100, status: 'parsing'
+  });
+
+  try {
+    const [{ Las }, { createLazPerf }] = await Promise.all([
+      import('copc'),
+      import('laz-perf'),
+    ]);
+
+    // Initialize laz-perf with the WASM file served from /public/
+    const lazPerf = await createLazPerf({
+      locateFile: (file) => `/${file}`,
+    });
+
+    // Parse header
+    const headerBytes = new Uint8Array(arrayBuffer, 0, Math.min(375, arrayBuffer.byteLength));
+    const header = Las.Header.parse(headerBytes);
+    const { pointCount, pointDataRecordLength, pointDataRecordFormat, pointDataOffset, scale, offset } = header;
+
+    if (pointCount === 0) {
+      emit('loading-error', { url: file.name, error: 'Point cloud is empty' });
+      return;
+    }
+
+    // Decompress LAZ or slice raw LAS point data
+    let pointBytes;
+    const isLaz = file.name.toLowerCase().endsWith('.laz');
+    if (isLaz) {
+      emit('loading-progress', {
+        url: file.name, index: currentIndex,
+        loaded: fileSize, total: fileSize, progress: 0, status: 'parsing'
+      });
+      // Pass our lazPerf instance so copc uses the correctly located WASM
+      pointBytes = await Las.PointData.decompressFile(new Uint8Array(arrayBuffer), lazPerf);
+    } else {
+      pointBytes = new Uint8Array(arrayBuffer, pointDataOffset, pointCount * pointDataRecordLength);
+    }
+
+    // Create a view to read X/Y/Z (and RGB if available)
+    const view = Las.View.create(pointBytes, header);
+
+    const getX = view.getter('X');
+    const getY = view.getter('Y');
+    const getZ = view.getter('Z');
+
+    // Formats 2, 3, 5, 7, 8, 10 have RGB
+    const formatsWithColor = new Set([2, 3, 5, 7, 8, 10]);
+    const hasColor = formatsWithColor.has(pointDataRecordFormat);
+    let getR, getG, getB;
+    if (hasColor) {
+      getR = view.getter('Red');
+      getG = view.getter('Green');
+      getB = view.getter('Blue');
+    }
+
+    const positions = new Float32Array(pointCount * 3);
+    const colors = new Float32Array(pointCount * 3);
+
+    for (let i = 0; i < pointCount; i++) {
+      const x = getX(i) * scale[0] + offset[0];
+      const y = getY(i) * scale[1] + offset[1];
+      const z = getZ(i) * scale[2] + offset[2];
+      positions[i * 3]     = x;
+      positions[i * 3 + 1] = y;
+      positions[i * 3 + 2] = z;
+
+      if (hasColor) {
+        // LAS stores colors as 16-bit; normalize to [0,1]
+        colors[i * 3]     = getR(i) / 65535;
+        colors[i * 3 + 1] = getG(i) / 65535;
+        colors[i * 3 + 2] = getB(i) / 65535;
+      } else {
+        colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = 0.7;
+      }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const material = new THREE.PointsMaterial({
+      size: 0.05,
+      vertexColors: true,
+      sizeAttenuation: true
+    });
+
+    const pointCloud = new THREE.Points(geometry, material);
+    pointCloud.rotation.x = -Math.PI / 2;
+    pointCloud.userData.type = 'pointcloud';
+
+    scene.value.add(pointCloud);
+
+    // Fit camera
+    const box = new THREE.Box3().setFromObject(pointCloud);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const distance = maxDim * 2;
+
+    camera.value.position.set(center.x + distance, center.y + distance, center.z + distance);
+    controls.value.target.copy(center);
+    camera.value.lookAt(center);
+
+    const gridHelper = scene.value.getObjectByName('gridHelper');
+    if (gridHelper) gridHelper.position.y = box.min.y;
+
+    console.log(`LAS/LAZ point cloud loaded: ${pointCount} points`);
+    fileLoadedCount.value++;
+    emit('model-loaded', { url: file.name, index: currentIndex, object: pointCloud });
+
+  } catch (error) {
+    console.error('LAS/LAZ loading error:', error);
+    emit('loading-error', { url: file.name, error: error.message });
   }
 };
 
@@ -849,7 +981,7 @@ const addCameraFrustum = (camData, index) => {
   
   // 5. Label sprite above camera
   const canvas = document.createElement('canvas');
-  const context = canvas.getContext('2d');
+  const context = canvas.getContext('2d', { willReadFrequently: true });
   canvas.width = 256;
   canvas.height = 64;
   context.fillStyle = 'white';

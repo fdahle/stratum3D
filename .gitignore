@@ -66,3 +66,4 @@ server/.env.production
 # server/data/3D/
 # server/data/pointclouds/
 # server/data/geotiffs/
+/input/raster

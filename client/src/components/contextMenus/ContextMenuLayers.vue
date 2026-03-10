@@ -9,37 +9,41 @@
     >
       <ul>
         <li @click="emitAction('zoom')">🔍 Zoom to Layer</li>
-        <li @click="emitAction('download')">💾 Download GeoJSON</li>
-        <li class="separator"></li>
-        <li class="color-picker">
-          <span>🎨 Color:</span>
-          <div class="colors">
-            <button
-              @click="emitColor('#e63946')"
-              style="background: #e63946"
-            ></button>
-            <button
-              @click="emitColor('#007bff')"
-              style="background: #007bff"
-            ></button>
-            <button
-              @click="emitColor('#2a9d8f')"
-              style="background: #2a9d8f"
-            ></button>
-            <button
-              @click="emitColor('#e9c46a')"
-              style="background: #e9c46a"
-            ></button>
-            <!-- custom color -->
-            <label class="custom-color-btn" title="Choose custom color">
-              <input
-                type="color"
-                @change="emitColor($event.target.value)"
-                @click.stop
-              />
-            </label>
-          </div>
+        <li @click="emitAction('download')">
+          💾 {{ payload?.type === 'geotiff' ? 'Download TIF' : 'Download GeoJSON' }}
         </li>
+        <template v-if="payload?.type !== 'geotiff'">
+          <li class="separator"></li>
+          <li class="color-picker">
+            <span>🎨 Color:</span>
+            <div class="colors">
+              <button
+                @click="emitColor('#e63946')"
+                style="background: #e63946"
+              ></button>
+              <button
+                @click="emitColor('#007bff')"
+                style="background: #007bff"
+              ></button>
+              <button
+                @click="emitColor('#2a9d8f')"
+                style="background: #2a9d8f"
+              ></button>
+              <button
+                @click="emitColor('#e9c46a')"
+                style="background: #e9c46a"
+              ></button>
+              <!-- custom color -->
+              <label class="custom-color-btn" title="Choose custom color">
+                <input
+                  type="color"
+                  @change="emitColor($event.target.value)"
+                  @click.stop
+                />
+              </label>
+            </div>
+          </li>
+        </template>
       </ul>
     </div>
   </div>

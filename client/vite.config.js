@@ -14,6 +14,9 @@ export default defineConfig(({ mode }) => {
         "@": path.resolve(__dirname, "./src"),
       },
     },
+    worker: {
+      format: "es",
+    },
     define: {
       // This creates a global constant available everywhere
       __APP_DEBUG__: env.VITE_DEBUG_MODE === "true",

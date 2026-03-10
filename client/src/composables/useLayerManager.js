@@ -121,6 +121,8 @@ export function useLayerManager(map) {
       // Update z-indexes to respect current layer ordering
       layerStore.updateLayerZIndexes();
     }
+
+    return layerConfig;
   };
 
   const loadGeoJsonLayer = (layer) => {

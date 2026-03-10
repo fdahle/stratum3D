@@ -196,9 +196,11 @@ export function createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId) {
   const sourceConfig = {
     sources: [
       {
-        url: layerConf.url,
-        // Support for multi-band GeoTIFFs
-        bands: layerConf.bands || [1], // Default to first band
+        // Use blob directly for local files — blob: URLs don't support HTTP
+        // range requests, causing OL's tile loader to fail with AggregateError.
+        ...(layerConf.file ? { blob: layerConf.file } : { url: layerConf.url }),
+        // Only restrict bands if explicitly configured; otherwise render all bands
+        ...(layerConf.bands ? { bands: layerConf.bands } : {}),
       }
     ],
     // Optional: Normalize values for better visualization
@@ -217,6 +219,13 @@ export function createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId) {
     source: source,
     visible: layerConf.visible,
     zIndex: zIndex,
+    // transition: 0 — disables the per-tile fade-in animation.
+    // The default fade uses canvas read-back (getImageData) on every tile
+    // render, which is very expensive for large GeoTIFFs and freezes the UI.
+    transition: 0,
+    // preload: 0 — don't fetch tiles outside the current viewport on load,
+    // reducing the burst of work when the layer is first added.
+    preload: 0,
     properties: { name: layerConf.name, id: layerId },
     // Optional: Add custom styling for bands
     style: layerConf.style || undefined,
@@ -232,6 +241,7 @@ export function createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId) {
     name: layerConf.name,
     layerInstance: olLayer,
     type: "geotiff",
+    geometryType: "raster",
     visible: layerConf.visible,
     url: layerConf.url,
   };

@@ -149,7 +149,7 @@ import { useMapStore } from "../../stores/map/mapStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import ContextMenu from "../contextMenus/ContextMenuLayers.vue";
 import GeoJSON from "ol/format/GeoJSON"; // Import OL GeoJSON Format
-import { ICON_POINT, ICON_LINE, ICON_POLYGON, EMOJI_ICONS, getGeometryIcon } from "../../constants/icons";
+import { ICON_POINT, ICON_LINE, ICON_POLYGON, ICON_RASTER, EMOJI_ICONS, getGeometryIcon } from "../../constants/icons";
 import { STRINGS } from "../../constants/strings";
 
 defineEmits(['open-settings']);
@@ -173,6 +173,8 @@ const getGeometryIconSVG = (layerType) => {
       return ICON_POINT;
     case 'line':
       return ICON_LINE;
+    case 'raster':
+      return ICON_RASTER;
     default:
       return ICON_POLYGON;
   }
@@ -192,13 +194,18 @@ const handleMenuAction = ({ type, layer }) => {
     if (map) {
       const source = layer.layerInstance.getSource();
       if (source) {
-        const extent = source.getExtent();
-        // Check if extent is valid (not infinite)
-        if (extent && extent[0] !== Infinity) {
-             map.getView().fit(extent, { 
-                 padding: [50, 50, 50, 50], 
-                 duration: 1000 // Smooth animation
-             });
+        if (layer.type === 'geotiff') {
+          // GeoTIFF sources expose their extent via the async getView() promise
+          source.getView().then((viewInfo) => {
+            if (viewInfo?.extent) {
+              map.getView().fit(viewInfo.extent, { padding: [50, 50, 50, 50], duration: 1000 });
+            }
+          }).catch(() => {});
+        } else {
+          const extent = source.getExtent();
+          if (extent && extent[0] !== Infinity) {
+            map.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 1000 });
+          }
         }
       }
     }
@@ -206,28 +213,38 @@ const handleMenuAction = ({ type, layer }) => {
 
   // --- DOWNLOAD ACTION (OpenLayers) ---
   if (type === "download") {
-    const source = layer.layerInstance.getSource();
-    const features = source.getFeatures();
-    
-    // Create GeoJSON writer
-    const format = new GeoJSON();
-    
-    // Write features to object, transforming Projection -> Lat/Lon
-    const map = mapStore.getMap();
-    const projection = map.getView().getProjection();
-    
-    const geojsonObj = format.writeFeaturesObject(features, {
-        dataProjection: 'EPSG:4326', // Output as standard Lat/Lon
-        featureProjection: projection // Input is current Map Projection
-    });
+    if (layer.type === 'geotiff') {
+      // For GeoTIFF layers, download the original file directly from its URL
+      const el = document.createElement("a");
+      el.setAttribute("href", layer.url);
+      el.setAttribute("download", `${layer.name}.tif`);
+      document.body.appendChild(el);
+      el.click();
+      el.remove();
+    } else {
+      const source = layer.layerInstance.getSource();
+      const features = source.getFeatures();
 
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(geojsonObj));
-    const el = document.createElement("a");
-    el.setAttribute("href", dataStr);
-    el.setAttribute("download", `${layer.name}.json`);
-    document.body.appendChild(el);
-    el.click();
-    el.remove();
+      // Create GeoJSON writer
+      const format = new GeoJSON();
+
+      // Write features to object, transforming Projection -> Lat/Lon
+      const map = mapStore.getMap();
+      const projection = map.getView().getProjection();
+
+      const geojsonObj = format.writeFeaturesObject(features, {
+        dataProjection: 'EPSG:4326',
+        featureProjection: projection
+      });
+
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(geojsonObj));
+      const el = document.createElement("a");
+      el.setAttribute("href", dataStr);
+      el.setAttribute("download", `${layer.name}.json`);
+      document.body.appendChild(el);
+      el.click();
+      el.remove();
+    }
   }
 };
 
