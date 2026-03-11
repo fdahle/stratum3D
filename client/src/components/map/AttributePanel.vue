@@ -1,98 +1,141 @@
 <template>
   <div>
     <transition name="slide-right">
-      <div v-if="selectedFeature" class="attribute-panel">
-        <div class="panel-header">
-          <h3>Feature Details</h3>
-          <button @click="clearSelection" class="close-btn">×</button>
-        </div>
+      <div v-if="isOpen" class="attribute-panel" :style="{ width: attrPanelWidth + 'px' }">
+        <div class="resize-handle" @mousedown="startResize"></div>
 
-        <div class="panel-content">
-          <h2 v-if="featureTitle" class="feature-title">
-            {{ featureTitle }}
-          </h2>
-
-          <div
-            v-if="selectedFeature.properties._thumbnailUrl"
-            class="thumbnail-wrapper"
-            @click="showFullImage = true"
-          >
-            <img
-              :src="selectedFeature.properties._thumbnailUrl"
-              alt="Feature Thumbnail"
-              class="feature-thumbnail clickable"
-            />
-            <div class="hover-overlay">
-              <span>🔍 Enlarge</span>
+        <!-- ── Multi-selection overview ── -->
+        <template v-if="isMultiSelect">
+          <div class="panel-header">
+            <h3>{{ selectedFeatures.length }} features selected</h3>
+            <button @click="clearSelection" class="close-btn">×</button>
+          </div>
+          <div class="panel-content">
+            <div class="feature-actions">
+              <button @click="downloadCsv" class="action-btn download-btn" title="Download all selected features as CSV">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span class="btn-text">Download CSV</span>
+              </button>
             </div>
+            <ul class="feature-list">
+              <li
+                v-for="(feature, idx) in selectedFeatures"
+                :key="feature.properties._featureId || idx"
+                class="feature-list-item"
+                @click="selectionStore.setActiveDetailFeature(feature)"
+              >
+                <div class="feature-list-info">
+                  <span class="feature-list-name">{{ getFeatureTitle(feature) || ('Feature ' + (idx + 1)) }}</span>
+                  <span class="feature-list-layer">{{ getLayerName(feature) }}</span>
+                </div>
+                <span class="feature-list-arrow">›</span>
+              </li>
+            </ul>
+          </div>
+        </template>
+
+        <!-- ── Single feature detail ── -->
+        <template v-else>
+          <div class="panel-header">
+            <div class="header-left">
+              <button v-if="activeDetailFeature" @click="selectionStore.clearActiveDetail()" class="back-btn" title="Back to selection">‹</button>
+              <h3>Feature Details</h3>
+            </div>
+            <button @click="clearSelection" class="close-btn">×</button>
           </div>
 
-          <div class="feature-actions" v-if="hasActions">
-            <a
-              v-if="downloadUrl"
-              :href="downloadUrl"
-              download
-              target="_blank"
-              class="action-btn download-btn"
-              title="Download Image"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="btn-icon"
-              >
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                <polyline points="7 10 12 15 17 10"></polyline>
-                <line x1="12" y1="15" x2="12" y2="3"></line>
-              </svg>
-              <span class="btn-text">Download</span>
-            </a>
-            <button
-              v-if="layerSupports3D"
-              @click="has3DData ? handle3DView() : null"
-              class="action-btn model-btn"
-              :class="{ 'disabled': !has3DData }"
-              :title="has3DData ? 'View 3D Model' : 'No 3D data available for this feature'"
-              :disabled="!has3DData"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                class="btn-icon"
-              >
-                <path
-                  d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"
-                ></path>
-                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-                <line x1="12" y1="22.08" x2="12" y2="12"></line>
-              </svg>
-              <span class="btn-text">3D View</span>
-            </button>
-          </div>
+          <div class="panel-content">
+            <h2 v-if="featureTitle" class="feature-title">
+              {{ featureTitle }}
+            </h2>
 
-          <table class="attr-table">
-            <tbody>
-              <tr v-for="(value, key) in displayProperties" :key="key">
-                <td class="key">{{ formatKey(key) }}</td>
-                <td class="value">{{ value }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+            <div
+              v-if="selectedFeature.properties._thumbnailUrl"
+              class="thumbnail-wrapper"
+              @click="showFullImage = true"
+            >
+              <img
+                :src="selectedFeature.properties._thumbnailUrl"
+                alt="Feature Thumbnail"
+                class="feature-thumbnail clickable"
+              />
+              <div class="hover-overlay">
+                <span>🔍 Enlarge</span>
+              </div>
+            </div>
+
+            <div class="feature-actions" v-if="hasActions">
+              <a
+                v-if="downloadUrl"
+                :href="downloadUrl"
+                download
+                target="_blank"
+                class="action-btn download-btn"
+                title="Download Image"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="btn-icon"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span class="btn-text">Download</span>
+              </a>
+              <button
+                v-if="layerSupports3D"
+                @click="has3DData ? handle3DView() : null"
+                class="action-btn model-btn"
+                :class="{ 'disabled': !has3DData }"
+                :title="has3DData ? 'View 3D Model' : 'No 3D data available for this feature'"
+                :disabled="!has3DData"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  class="btn-icon"
+                >
+                  <path
+                    d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"
+                  ></path>
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                  <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                </svg>
+                <span class="btn-text">3D View</span>
+              </button>
+            </div>
+
+            <table class="attr-table">
+              <tbody>
+                <tr v-for="(value, key) in displayProperties" :key="key">
+                  <td class="key">{{ formatKey(key) }}</td>
+                  <td class="value">{{ value }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
       </div>
     </transition>
 
@@ -131,145 +174,155 @@ import { logger } from "../../utils/logger";
 const router = useRouter();
 const selectionStore = useSelectionStore();
 const layerStore = useLayerStore();
-const { selectedFeature } = storeToRefs(selectionStore);
+const { selectedFeature, selectedFeatures, activeDetailFeature } = storeToRefs(selectionStore);
 const { clearSelection } = selectionStore;
+
+// Panel is open whenever any feature is selected
+const isOpen = computed(() => selectedFeatures.value.length > 0);
+// Multi-select list mode: more than one feature and not drilled into detail
+const isMultiSelect = computed(() => selectedFeatures.value.length > 1 && !activeDetailFeature.value);
 
 // State for the modal
 const showFullImage = ref(false);
 
-// Computed Properties for Actions
+// Attribute panel resize
+const AP_MIN = 220, AP_MAX = 520, AP_DEFAULT = 300;
+const attrPanelWidth = ref(
+  Math.min(AP_MAX, Math.max(AP_MIN, parseInt(localStorage.getItem('histmap_attrpanel_width')) || AP_DEFAULT))
+);
+const startResize = (e) => {
+  e.preventDefault();
+  const startX = e.clientX;
+  const startWidth = attrPanelWidth.value;
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  const onMove = (me) => {
+    attrPanelWidth.value = Math.min(AP_MAX, Math.max(AP_MIN, startWidth + startX - me.clientX));
+  };
+  const onUp = () => {
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    localStorage.setItem('histmap_attrpanel_width', String(attrPanelWidth.value));
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+};
+
+// ── Multi-select helpers ─────────────────────────────────────────────────────
+
+// Get the display title for any feature (uses layer's headerAttribute)
+const getFeatureTitle = (feature) => {
+  const props = feature?.properties;
+  if (!props?._layerId) return null;
+  const layer = layerStore.layers.find((l) => l._layerId === props._layerId);
+  const headerKey = layer?.metadata?.headerAttribute;
+  return headerKey && props[headerKey] ? props[headerKey] : null;
+};
+
+// Get the human-readable layer name for a feature
+const getLayerName = (feature) => {
+  const props = feature?.properties;
+  if (!props?._layerId) return '';
+  const layer = layerStore.layers.find((l) => l._layerId === props._layerId);
+  return layer?.name || '';
+};
+
+// Download all selected features as a CSV file
+const downloadCsv = () => {
+  if (!selectedFeatures.value.length) return;
+
+  // Collect all unique public property keys across all features
+  const allKeys = new Set();
+  selectedFeatures.value.forEach((f) => {
+    Object.keys(f.properties).forEach((k) => {
+      if (!k.startsWith('_') && k !== 'color') allKeys.add(k);
+    });
+  });
+  const keys = [...allKeys];
+
+  const escape = (v) => {
+    if (v == null) return '';
+    const s = String(v);
+    return s.includes(',') || s.includes('"') || s.includes('\n')
+      ? `"${s.replace(/"/g, '""')}"`
+      : s;
+  };
+
+  const header = keys.map(escape).join(',');
+  const rows = selectedFeatures.value.map((f) =>
+    keys.map((k) => escape(f.properties[k] ?? '')).join(',')
+  );
+  const csv = [header, ...rows].join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `selection_${selectedFeatures.value.length}_features.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+};
+
+// ── Single-feature computed properties ──────────────────────────────────────
+
 const downloadUrl = computed(
   () => selectedFeature.value?.properties?._downloadUrl
 );
 
-// Support both old single URL and new array format
 const model3dUrls = computed(() => {
   const props = selectedFeature.value?.properties;
   if (!props) return [];
-  
-  // New array format
-  if (Array.isArray(props._model3dUrls) && props._model3dUrls.length > 0) {
-    return props._model3dUrls;
-  }
-  
-  // Old single URL format (backward compatibility)
-  if (props._model3dUrl) {
-    return [props._model3dUrl];
-  }
-  
+  if (Array.isArray(props._model3dUrls) && props._model3dUrls.length > 0) return props._model3dUrls;
+  if (props._model3dUrl) return [props._model3dUrl];
   return [];
 });
 
 const pointcloudUrls = computed(() => {
   const props = selectedFeature.value?.properties;
   if (!props) return [];
-  
-  if (Array.isArray(props._pointcloudUrls) && props._pointcloudUrls.length > 0) {
-    return props._pointcloudUrls;
-  }
-  
-  if (props._pointcloudUrl) {
-    return [props._pointcloudUrl];
-  }
-  
+  if (Array.isArray(props._pointcloudUrls) && props._pointcloudUrls.length > 0) return props._pointcloudUrls;
+  if (props._pointcloudUrl) return [props._pointcloudUrl];
   return [];
 });
 
-// Check if any 3D data exists for this feature
-const has3DData = computed(() => {
-  return model3dUrls.value.length > 0 || pointcloudUrls.value.length > 0;
-});
+const has3DData = computed(() => model3dUrls.value.length > 0 || pointcloudUrls.value.length > 0);
 
-// Check if the layer supports 3D (even if this feature doesn't have data)
 const layerSupports3D = computed(() => {
   const props = selectedFeature.value?.properties;
   if (!props?._layerId) return false;
-  
   const layer = layerStore.layers.find((l) => l._layerId === props._layerId);
   const metadata = layer?.metadata || {};
-  
   return metadata.has3DModels === true || metadata.hasPointClouds === true;
-});
-
-// Check if first model URL is external
-const isExternal3dModel = computed(() => {
-  if (model3dUrls.value.length === 0) return false;
-  const firstUrl = model3dUrls.value[0];
-  return firstUrl.startsWith('http://') || 
-         firstUrl.startsWith('https://') ||
-         firstUrl.startsWith('//');
 });
 
 const hasActions = computed(() => downloadUrl.value || has3DData.value || layerSupports3D.value);
 
-// Handle 3D view navigation - FIXED VERSION
 const handle3DView = () => {
   if (!has3DData.value) return;
-  
-  if (model3dUrls.value.length === 0 && pointcloudUrls.value.length === 0) return;
-  
   logger.debug('AttributePanel', 'Opening 3D viewer with:', { models: model3dUrls.value, pointclouds: pointcloudUrls.value });
-  
+
   const props = selectedFeature.value.properties;
-  
-  // Build query object
-  const queryObj = {
-    name: props.name || featureTitle.value || 'Model',
-    x: props._x || 0,
-    y: props._y || 0
-  };
-  
-  // Add models as comma-separated string
-  if (model3dUrls.value.length > 0) {
-    queryObj.models = model3dUrls.value.join(',');
-  }
-  
-  // Add pointclouds as comma-separated string
-  if (pointcloudUrls.value.length > 0) {
-    queryObj.pointclouds = pointcloudUrls.value.join(',');
-  }
-  
-  // Use router.resolve to get the proper URL
-  const route = router.resolve({
-    name: '3d',
-    query: queryObj
-  });
-  
-  // Open in new tab with the resolved href
+  const name = props.name || featureTitle.value || 'Model';
+  const payload = { models: model3dUrls.value, pointclouds: pointcloudUrls.value };
+  if (props._x) payload.x = props._x;
+  if (props._y) payload.y = props._y;
+  localStorage.setItem('histmap_viewer3d', JSON.stringify(payload));
+
+  const route = router.resolve({ name: '3d-viewer', query: { n: name } });
   window.open(route.href, '_blank');
 };
 
-// Computed property to handle all filtering logic
 const displayProperties = computed(() => {
   if (!selectedFeature.value?.properties) return {};
-
   const props = selectedFeature.value.properties;
-
   return Object.keys(props)
-    .filter((key) => {
-      // Exclude keys starting with _
-      if (key.startsWith("_")) return false;
-      // Exclude specific display keys
-      if (["name", "color"].includes(key)) return false;
-      return true;
-    })
-    .reduce((obj, key) => {
-      obj[key] = props[key];
-      return obj;
-    }, {});
+    .filter((key) => !key.startsWith('_') && !['name', 'color'].includes(key))
+    .reduce((obj, key) => { obj[key] = props[key]; return obj; }, {});
 });
 
-// Computed property for feature title
-const featureTitle = computed(() => {
-  const props = selectedFeature.value?.properties;
-  if (!props?._layerId) return null;
-
-  const layer = layerStore.layers.find((l) => l._layerId === props._layerId);
-  const metadata = layer?.metadata || {};
-  const headerKey = metadata.headerAttribute;
-
-  return headerKey && props[headerKey] ? props[headerKey] : null;
-});
+const featureTitle = computed(() => getFeatureTitle(selectedFeature.value));
 </script>
 
 <style scoped>
@@ -277,13 +330,29 @@ const featureTitle = computed(() => {
   position: absolute;
   top: 0;
   right: 0;
-  width: 300px;
+  /* width controlled by inline style */
   height: 100%;
   background: white;
   box-shadow: -2px 0 5px rgba(0, 0, 0, 0.1);
   z-index: 2000;
   display: flex;
   flex-direction: column;
+}
+
+.resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 5px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.resize-handle:hover {
+  background: rgba(100, 100, 100, 0.18);
 }
 
 .theme-dark .attribute-panel {
@@ -326,7 +395,7 @@ const featureTitle = computed(() => {
 .thumbnail-wrapper {
   width: 100%;
   max-width: 250px;
-  margin-bottom: 15px;
+  margin: 0 auto 15px;
   border-radius: 4px;
   overflow: hidden;
   background: #f8f9fa;
@@ -599,5 +668,105 @@ const featureTitle = computed(() => {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+@media (max-width: 768px) {
+  .resize-handle {
+    display: none;
+  }
+}
+
+/* ── Multi-selection styles ── */
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.back-btn {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 22px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+.back-btn:hover {
+  opacity: 1;
+}
+
+.feature-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.feature-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-radius: 4px;
+}
+
+.feature-list-item:hover {
+  background: #f0f4f8;
+}
+
+.theme-dark .feature-list-item {
+  border-bottom: 1px solid #3a3a3a;
+}
+
+.theme-dark .feature-list-item:hover {
+  background: #333;
+}
+
+.feature-list-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.feature-list-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.theme-dark .feature-list-name {
+  color: #e0e0e0;
+}
+
+.feature-list-layer {
+  font-size: 12px;
+  color: #888;
+}
+
+.theme-dark .feature-list-layer {
+  color: #aaa;
+}
+
+.feature-list-arrow {
+  font-size: 18px;
+  color: #bbb;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.theme-dark .feature-list-arrow {
+  color: #555;
 }
 </style>

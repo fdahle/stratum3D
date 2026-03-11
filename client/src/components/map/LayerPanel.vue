@@ -508,7 +508,7 @@ const getDropIndicatorPosition = (index) => {
 <style scoped>
 /* Keeping your exact styles as they are perfect */
 .layerpanel {
-  width: 280px;
+  width: 100%;
   height: 100%;
   background: #f8f9fa;
   border-right: 1px solid #ddd;

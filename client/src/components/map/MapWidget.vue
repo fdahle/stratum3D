@@ -15,6 +15,7 @@ import Map from "ol/Map";
 import View from "ol/View";
 import { fromLonLat } from "ol/proj";
 import { defaults as defaultControls } from "ol/control";
+import { defaults as defaultInteractions } from "ol/interaction";
 
 import { registerCustomProjections } from "../../utils/crs";
 import { useMapStore } from "../../stores/map/mapStore";
@@ -70,6 +71,7 @@ onMounted(async () => {
   map = new Map({
     target: mapContainer.value,
     controls: defaultControls({ zoom: false, attribution: false }),
+    interactions: defaultInteractions({ shiftDragZoom: false }),
     layers: [], // Layers added via Manager
     view: new View({
       projection: projectionCode,

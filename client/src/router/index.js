@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-// 1. Fix casing: 3DView -> 3dView (matches your actual filename)
 import ThreeDView from '../views/3DView.vue' 
 import MapView from '../views/MapView.vue'
 
@@ -10,15 +9,24 @@ const router = createRouter({
     {
       path: '/',
       name: 'map',
-      component: MapView
+      component: MapView,
+      meta: { title: 'Map' }
     },
     {
-      // 2. Lowercase URLs are generally preferred
-      path: '/3d', 
-      name: '3d',
-      component: ThreeDView
+      path: '/viewer',
+      name: '3d-viewer',
+      component: ThreeDView,
+      meta: { title: '3D Viewer' }
     }
   ]
+})
+
+router.afterEach((to) => {
+  const base = document.title.split(' — ')[0] || document.title
+  const pageTitle = to.meta?.title
+    ? (to.query?.n || to.meta.title)
+    : null
+  document.title = pageTitle ? `${base} — ${pageTitle}` : base
 })
 
 export default router

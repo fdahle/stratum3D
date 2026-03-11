@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
-import { useViewer3DStore } from '@/stores/viewer3dStore';
+import { useViewer3DStore } from '@/stores/viewer3D/viewer3dStore';
 import { useSettingsStore } from '@/stores/settingsStore.js';
 import { storeToRefs } from 'pinia';
 

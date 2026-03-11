@@ -4,11 +4,17 @@
       ☰
     </button>
 
-    <LayerPanel
-      class="main-layerpanel"
+    <div
+      class="main-layerpanel-wrap"
       :class="{ open: isLayerPanelOpen }"
-      @open-settings="isSettingsOpen = true"
-    />
+      :style="{ width: layerPanelWidth + 'px' }"
+    >
+      <LayerPanel
+        class="main-layerpanel"
+        @open-settings="isSettingsOpen = true"
+      />
+      <div class="layerpanel-resize-handle" @mousedown="startLayerPanelResize"></div>
+    </div>
 
     <div
       v-if="isLayerPanelOpen"
@@ -80,6 +86,31 @@ const settingsStore = useSettingsStore();
 const mapStore = useMapStore();
 const isSettingsOpen = ref(false);
 const isLayerPanelOpen = ref(false);
+
+// Layer panel resize
+const LP_MIN = 180, LP_MAX = 480, LP_DEFAULT = 280;
+const layerPanelWidth = ref(
+  Math.min(LP_MAX, Math.max(LP_MIN, parseInt(localStorage.getItem('histmap_layerpanel_width')) || LP_DEFAULT))
+);
+const startLayerPanelResize = (e) => {
+  e.preventDefault();
+  const startX = e.clientX;
+  const startWidth = layerPanelWidth.value;
+  document.body.style.cursor = 'col-resize';
+  document.body.style.userSelect = 'none';
+  const onMove = (me) => {
+    layerPanelWidth.value = Math.min(LP_MAX, Math.max(LP_MIN, startWidth + me.clientX - startX));
+  };
+  const onUp = () => {
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    localStorage.setItem('histmap_layerpanel_width', String(layerPanelWidth.value));
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+};
 
 // Note: Config is now provided by App.vue, so we Inject it if needed,
 // or just rely on the components using it.
@@ -213,7 +244,12 @@ const processDroppedFile = async (file) => {
       // (blob: URLs don't support HTTP range requests — they cause tile failures).
       const blobUrl = URL.createObjectURL(file);
       await layerManagerRef.value.processLayer(
-        { type: "geotiff", url: blobUrl, file: file, name: layerName, visible: true },
+        {
+          type: "geotiff", url: blobUrl, file: file, name: layerName, visible: true,
+          bandCount: metadata.bands,
+          dataMin: metadata.dataMin,
+          dataMax: metadata.dataMax,
+        },
         "overlay",
       );
 
@@ -252,15 +288,31 @@ const processDroppedFile = async (file) => {
   overflow: hidden;
 }
 
-.main-layerpanel {
-  width: 280px;
+.main-layerpanel-wrap {
+  position: relative;
   flex-shrink: 0;
   z-index: 2000;
-  background: white;
 }
 
-.theme-dark .main-layerpanel {
-  background: #2a2a2a;
+.main-layerpanel {
+  width: 100%;
+  height: 100%;
+}
+
+.layerpanel-resize-handle {
+  position: absolute;
+  right: -3px;
+  top: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 2001;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.layerpanel-resize-handle:hover {
+  background: rgba(100, 100, 100, 0.18);
 }
 
 .map-area {
@@ -314,17 +366,22 @@ const processDroppedFile = async (file) => {
     box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5);
   }
 
-  .main-layerpanel {
+  .main-layerpanel-wrap {
     position: absolute;
     top: 0;
-    left: -280px;
+    left: 0;
     height: 100%;
-    transition: left 0.3s ease-in-out;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease-in-out;
     box-shadow: 2px 0 10px rgba(0, 0, 0, 0.3);
   }
 
-  .main-layerpanel.open {
-    left: 0;
+  .main-layerpanel-wrap.open {
+    transform: translateX(0);
+  }
+
+  .layerpanel-resize-handle {
+    display: none;
   }
 
   .layerpanel-overlay {

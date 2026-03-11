@@ -131,7 +131,7 @@
 
 <script setup>
 import { ref } from 'vue';
-import { useViewer3DStore } from '@/stores/viewer3dStore';
+import { useViewer3DStore } from '@/stores/viewer3D/viewer3dStore';
 import { storeToRefs } from 'pinia';
 import {
   ICON_3D_MODEL,

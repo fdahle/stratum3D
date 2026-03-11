@@ -21,6 +21,7 @@
 import { ref, onMounted, provide, watch } from "vue";
 import { storeToRefs } from "pinia";
 import yaml from "js-yaml";
+import { useRoute } from "vue-router";
 import { validateConfig } from "./constants/configValidation";
 import { STRINGS } from "./constants/strings";
 import { useSettingsStore } from "./stores/settingsStore";
@@ -47,6 +48,16 @@ provide("layerManager", layerManagerRef);
 
 provide("config", appConfig);
 
+const route = useRoute();
+
+// Build page title from config base + current route
+function applyRouteTitle(baseTitle) {
+  const routePageTitle = route.meta?.title
+    ? (route.query?.n || route.meta.title)
+    : null;
+  document.title = routePageTitle ? `${baseTitle} — ${routePageTitle}` : baseTitle;
+}
+
 onMounted(async () => {
   // Enable development tools in dev mode
   if (import.meta.env.DEV) {
@@ -69,7 +80,7 @@ onMounted(async () => {
     try {
       const site = parsed.website || {};
       if (site.title) {
-        document.title = site.title;
+        applyRouteTitle(site.title);
       }
 
       if (site.favicon) {

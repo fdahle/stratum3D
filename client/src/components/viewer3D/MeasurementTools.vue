@@ -64,7 +64,7 @@
 
 <script setup>
 import { computed } from 'vue';
-import { useViewer3DStore } from '@/stores/viewer3dStore';
+import { useViewer3DStore } from '@/stores/viewer3D/viewer3dStore';
 import { storeToRefs } from 'pinia';
 
 const emit = defineEmits(['measurement-started', 'measurement-complete', 'measurement-cancelled']);

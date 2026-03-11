@@ -193,6 +193,34 @@ export function createGeoJSONLayerConfig(layerConf, layerId) {
  * @returns {Object} Layer configuration object
  */
 export function createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId) {
+  // For a single-band file, build a grayscale style with proper range stretching.
+  // With normalize:true OL assumes a 16-bit range (0–65535) when no metadata is
+  // present, so values like 6–2000 (a typical DEM) appear nearly black.
+  const isSingleBand = layerConf.bandCount === 1;
+  const dataMin = layerConf.dataMin ?? null;
+  const dataMax = layerConf.dataMax ?? null;
+  const hasRange = isSingleBand && dataMin !== null && dataMax !== null && dataMax > dataMin;
+
+  // When we know the real range, turn off OL normalization and stretch manually.
+  // When we don't know the range, keep normalize:true + grayscale (best effort).
+  let resolvedStyle;
+  let normalize = layerConf.normalize !== undefined ? layerConf.normalize : true;
+
+  if (layerConf.style) {
+    resolvedStyle = layerConf.style;
+  } else if (hasRange) {
+    normalize = false;
+    // Linear stretch: clamp((val - min) / (max - min), 0, 1) → grayscale
+    const range = dataMax - dataMin;
+    const stretched = ['clamp', ['/', ['-', ['band', 1], dataMin], range], 0, 1];
+    resolvedStyle = { color: ['array', stretched, stretched, stretched, 1] };
+  } else if (isSingleBand) {
+    // Fallback grayscale — works when normalize:true maps band to [0,1]
+    resolvedStyle = { color: ['array', ['band', 1], ['band', 1], ['band', 1], 1] };
+  } else {
+    resolvedStyle = undefined;
+  }
+
   const sourceConfig = {
     sources: [
       {
@@ -203,8 +231,7 @@ export function createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId) {
         ...(layerConf.bands ? { bands: layerConf.bands } : {}),
       }
     ],
-    // Optional: Normalize values for better visualization
-    normalize: layerConf.normalize !== undefined ? layerConf.normalize : true,
+    normalize,
   };
 
   // Add optional overviews for better performance with large GeoTIFFs
@@ -227,8 +254,7 @@ export function createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId) {
     // reducing the burst of work when the layer is first added.
     preload: 0,
     properties: { name: layerConf.name, id: layerId },
-    // Optional: Add custom styling for bands
-    style: layerConf.style || undefined,
+    style: resolvedStyle,
   });
 
   // Set opacity if specified

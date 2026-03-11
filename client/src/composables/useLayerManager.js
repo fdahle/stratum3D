@@ -30,8 +30,8 @@ import {
 import VectorLayer from "ol/layer/Vector";
 import VectorSource from "ol/source/Vector";
 import GeoJSON from "ol/format/GeoJSON";
-import { Select } from "ol/interaction";
-import { click } from "ol/events/condition";
+import { Select, DragBox } from "ol/interaction";
+import { click, shiftKeyOnly } from "ol/events/condition";
 
 export function useLayerManager(map) {
   const layerStore = useLayerStore();
@@ -285,6 +285,23 @@ export function useLayerManager(map) {
     olLayer.setStyle(null);
   };
 
+  let dragBoxInteraction = null;
+
+  // Sync the OL selection collection into the store
+  const syncSelectionToStore = () => {
+    const allSelected = selectInteraction.getFeatures().getArray();
+    if (allSelected.length === 0) {
+      selectionStore.clearSelection();
+    } else {
+      const featureData = allSelected.map((f) => {
+        const properties = f.getProperties();
+        const { geometry, ...props } = properties;
+        return { properties: props };
+      });
+      selectionStore.setSelectedFeatures(featureData);
+    }
+  };
+
   const setupSelection = () => {
     // Create selection style function using the factory
     const selectionStyleFunction = createSelectionStyleFunction(
@@ -293,34 +310,50 @@ export function useLayerManager(map) {
 
     selectInteraction = new Select({
       condition: click,
+      toggleCondition: shiftKeyOnly, // shift+click adds/removes from selection
       style: selectionStyleFunction,
     });
 
     selectInteraction.on("select", (e) => {
-      const selected = e.selected[0];
-      const deselected = e.deselected[0];
-      
-      // When deselecting a feature, restore its current layer style
-      if (deselected) {
+      // Restore styles for all deselected features
+      e.deselected.forEach((deselected) => {
         const layerId = deselected.get("_layerId");
         const layerObj = layerStore.getLayerById(layerId);
         if (layerObj?.color) {
           applyFeatureStyle(deselected, layerObj.color);
         }
-      }
-      
-      if (selected) {
-        const properties = selected.getProperties();
-        const { geometry, ...props } = properties;
+      });
 
-        selectionStore.selectFeature({
-          properties: props,
-        });
-      } else {
-        selectionStore.clearSelection();
-      }
+      syncSelectionToStore();
     });
 
+    // DragBox interaction for shift+drag box selection
+    dragBoxInteraction = new DragBox({ condition: shiftKeyOnly });
+
+    dragBoxInteraction.on("boxend", () => {
+      const boxExtent = dragBoxInteraction.getGeometry().getExtent();
+      const selFeatures = selectInteraction.getFeatures();
+
+      // Collect features already in the selection for fast duplicate check
+      const alreadySelected = new Set(selFeatures.getArray().map((f) => f.getId()));
+
+      map.getLayers().forEach((layer) => {
+        if (!(layer instanceof VectorLayer)) return;
+        if (!layer.getVisible()) return; // skip hidden layers
+        layer.getSource().forEachFeatureIntersectingExtent(boxExtent, (feature) => {
+          if (!alreadySelected.has(feature.getId())) {
+            selFeatures.push(feature);
+            alreadySelected.add(feature.getId());
+            // Apply selection style manually since we're bypassing the Select interaction
+            feature.setStyle(selectionStyleFunction(feature));
+          }
+        });
+      });
+
+      syncSelectionToStore();
+    });
+
+    map.addInteraction(dragBoxInteraction);
     map.addInteraction(selectInteraction);
   };
 
@@ -328,6 +361,10 @@ export function useLayerManager(map) {
     activeWorkers.forEach((w) => w.terminate());
     activeWorkers.clear();
     searchIndex.clear();
+    if (dragBoxInteraction) {
+      map.removeInteraction(dragBoxInteraction);
+      dragBoxInteraction = null;
+    }
     if (selectInteraction) {
       map.removeInteraction(selectInteraction);
       selectInteraction = null;

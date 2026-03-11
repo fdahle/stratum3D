@@ -88,7 +88,7 @@
 import { ref, computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { storeToRefs } from 'pinia';
-import { useViewer3DStore } from '@/stores/viewer3dStore';
+import { useViewer3DStore } from '@/stores/viewer3D/viewer3dStore';
 import { logger } from '@/utils/logger';
 import Viewer3DCanvas from '@/components/viewer3D/Canvas.vue';
 import RibbonMenu from '@/components/viewer3D/RibbonMenu.vue';
@@ -115,20 +115,25 @@ const measurements = ref([]);
 const measurementPointsCount = ref(0);
 const currentMeasurementValue = ref(null);
 
-// Parse route params
-const x = computed(() => parseFloat(route.query.x) || 0);
-const y = computed(() => parseFloat(route.query.y) || 0);
-const modelUrls = computed(() => 
-  route.query.models ? route.query.models.split(',').filter(u => u) : []
-);
-const pointcloudUrls = computed(() => 
-  route.query.pointclouds ? route.query.pointclouds.split(',').filter(u => u) : []
-);
-const modelName = computed(() => route.query.name || 'Model');
-const coordinates = computed(() => ({ 
-  x: x.value, 
-  y: y.value 
-}));
+// Load viewer data from localStorage (written by AttributePanel before opening this tab)
+const _stored = (() => {
+  try {
+    const raw = localStorage.getItem('histmap_viewer3d');
+    if (raw) {
+      const data = JSON.parse(raw);
+      localStorage.removeItem('histmap_viewer3d');
+      return data;
+    }
+  } catch (e) {
+    logger.warn('3DView', 'Failed to read viewer data from localStorage', e);
+  }
+  return {};
+})();
+
+const modelName = route.query.n || 'Model';
+const modelUrls = ref(_stored.models || []);
+const pointcloudUrls = ref(_stored.pointclouds || []);
+const coordinates = ref({ x: _stored.x || 0, y: _stored.y || 0 });
 
 // Scene events
 const onSceneReady = () => {

@@ -54,6 +54,61 @@ self.onmessage = async (e) => {
 
     const imageCount = await tiff.getImageCount();
 
+    // ── Extract min/max for single-band rasters (DEMs, etc.) ─────────────────
+    // Without real data range, OL normalizes against the full uint16 range
+    // (0–65535), making values like 6–2000 appear nearly black.
+    let dataMin = null;
+    let dataMax = null;
+    const noDataValue = image.getGDALNoData();
+
+    if (samplesPerPixel === 1) {
+      // 1. Cheapest: TIFF MinSampleValue / MaxSampleValue tags
+      const fileDir = image.getFileDirectory();
+      if (fileDir.MinSampleValue?.[0] != null) dataMin = fileDir.MinSampleValue[0];
+      if (fileDir.MaxSampleValue?.[0] != null) dataMax = fileDir.MaxSampleValue[0];
+
+      // 2. GDAL statistics embedded as XML in GDAL_METADATA tag
+      if ((dataMin === null || dataMax === null) && fileDir.GDAL_METADATA) {
+        const xml = fileDir.GDAL_METADATA;
+        const minMatch = xml.match(/name="STATISTICS_MINIMUM"[^>]*>([^<]+)/);
+        const maxMatch = xml.match(/name="STATISTICS_MAXIMUM"[^>]*>([^<]+)/);
+        if (minMatch) dataMin = parseFloat(minMatch[1]);
+        if (maxMatch) dataMax = parseFloat(maxMatch[1]);
+      }
+
+      // 3. Fallback: read the smallest overview (or full image if small) to
+      //    compute actual min/max off the main thread
+      if (dataMin === null || dataMax === null) {
+        try {
+          self.postMessage({ type: "PROGRESS", layerId, progress: 85, message: "Analysing data range…" });
+          const sampleIdx = imageCount > 1 ? imageCount - 1 : 0;
+          const sampleImg = await tiff.getImage(sampleIdx);
+          const sampleW = sampleImg.getWidth();
+          const sampleH = sampleImg.getHeight();
+
+          // Cap scan at 1 M pixels to keep it fast
+          if (sampleW * sampleH < 1_000_000) {
+            const [raster] = await sampleImg.readRasters({ samples: [0] });
+            let mn = Infinity, mx = -Infinity;
+            for (let i = 0; i < raster.length; i++) {
+              const v = raster[i];
+              // Skip nodata, NaN, and ±Infinity
+              if (!isFinite(v)) continue;
+              if (noDataValue !== null && v === noDataValue) continue;
+              if (v < mn) mn = v;
+              if (v > mx) mx = v;
+            }
+            if (isFinite(mn) && isFinite(mx) && mn < mx) {
+              dataMin = mn;
+              dataMax = mx;
+            }
+          }
+        } catch (_) {
+          // Non-fatal — layer will still render, just potentially flat
+        }
+      }
+    }
+
     self.postMessage({
       type: "COMPLETE",
       layerId,
@@ -66,6 +121,9 @@ self.onmessage = async (e) => {
         hasOverviews: imageCount > 1,
         imageCount,
         fileSize: file.size,
+        dataMin,
+        dataMax,
+        noDataValue,
       },
     });
   } catch (err) {
