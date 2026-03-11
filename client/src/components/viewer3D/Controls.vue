@@ -37,7 +37,8 @@
 
 <script setup>
 import { computed } from 'vue';
-import { useViewer3D } from '@/composables/useViewer3D.js';
+import { useViewer3DStore } from '@/stores/viewer3dStore';
+import { storeToRefs } from 'pinia';
 
 const props = defineProps({
   modelName: {
@@ -58,15 +59,9 @@ const emit = defineEmits([
   'back-to-map'
 ]);
 
-const { 
-  showWireframe, 
-  showBoundingBox, 
-  showGrid,
-  toggleWireframe,
-  toggleBoundingBox,
-  toggleGrid,
-  resetCamera
-} = useViewer3D();
+const viewer3DStore = useViewer3DStore();
+const { showWireframe, showBoundingBox, showGrid } = storeToRefs(viewer3DStore);
+const { toggleWireframe, toggleBoundingBox, toggleGrid, resetCamera } = viewer3DStore;
 
 const coordinatesText = computed(() => {
   return `${props.coordinates.x.toFixed(2)}, ${props.coordinates.y.toFixed(2)}`;

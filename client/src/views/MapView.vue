@@ -463,55 +463,5 @@ const processDroppedFile = async (file) => {
   color: #999;
 }
 
-/* Add simple styles for the error modal */
-.error-screen {
-  height: 100%;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background: #f3f4f6;
-}
-
-.theme-dark .error-screen {
-  background: #2a2a2a;
-}
-
-.error-modal {
-  background: white;
-  padding: 2rem;
-  border-radius: 8px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-  max-width: 500px;
-  text-align: center;
-}
-
-.theme-dark .error-modal {
-  background: #3a3a3a;
-  color: #e0e0e0;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
-}
-
-.error-details {
-  background: #fee2e2;
-  color: #b91c1c;
-  padding: 1rem;
-  border-radius: 4px;
-  margin: 1.5rem 0;
-  text-align: left;
-  font-family: monospace;
-}
-
-.theme-dark .error-details {
-  background: rgba(220, 53, 69, 0.2);
-  color: #f87171;
-}
-.retry-btn {
-  background: #3b82f6;
-  color: white;
-  border: none;
-  padding: 0.75rem 1.5rem;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: bold;
-}
+/* Error screen styles are in assets/error-screen.css (imported globally in App.vue) */
 </style>

@@ -26,14 +26,15 @@ export const LAYER_CATEGORY = {
 };
 
 // Geometry types
+// Custom types use lowercase; OL-native types use their original casing for direct comparison
 export const GEOMETRY_TYPE = {
-  POINT: 'point',
-  MULTI_POINT: 'MultiPoint',
-  LINE: 'line',
-  LINE_STRING: 'LineString',
-  MULTI_LINE_STRING: 'MultiLineString',
-  POLYGON: 'polygon',
-  RASTER: 'raster',
+  POINT: 'point',               // Custom simplified type
+  MULTI_POINT: 'MultiPoint',    // OL-native
+  LINE: 'line',                 // Custom simplified type
+  LINE_STRING: 'LineString',    // OL-native
+  MULTI_LINE_STRING: 'MultiLineString', // OL-native
+  POLYGON: 'polygon',           // Custom simplified type
+  RASTER: 'raster',             // Custom type for GeoTIFF layers
   UNKNOWN: 'unknown',
 };
 
@@ -49,5 +50,5 @@ export const DEFAULT_COLOR = '#3388ff';
 export const DEFAULT_STROKE_WIDTH = 2;
 export const DEFAULT_SELECTION_WIDTH = 5;
 export const DEFAULT_TILE_SIZE = 256;
-export const DEFAULT_OPACITY = 0.5; // 80 in hex = 0.5
-export const DEFAULT_SELECTION_OPACITY = 0.7; // B3 in hex = 0.7
+export const DEFAULT_OPACITY = 0.5; // 50% fill opacity (hex: ~80)
+export const DEFAULT_SELECTION_OPACITY = 0.7; // 70% selection fill opacity (hex: ~B3)

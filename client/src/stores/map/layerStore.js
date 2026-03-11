@@ -9,19 +9,7 @@ import {
   Z_INDEX,
   PROGRESS_UPDATE_DEBOUNCE 
 } from "../../constants/layerConstants";
-
-// Simple debounce implementation
-function debounce(func, wait) {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-}
+import { debounce } from "../../utils/helpers";
 
 export const useLayerStore = defineStore("layers", () => {
   const layers = ref([]);

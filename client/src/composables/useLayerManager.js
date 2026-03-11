@@ -3,21 +3,21 @@ import { watch } from "vue";
 import { useLayerStore } from "../stores/map/layerStore";
 import { useSelectionStore } from "../stores/map/selectionStore";
 import { useSettingsStore } from "../stores/settingsStore";
-import { generateUUID } from "./utils";
+import { generateUUID } from "../utils/helpers";
 import { logger } from "../utils/logger";
 import {
   createPinStyle,
   createVectorStyle,
   createSelectionStyleFunction,
   applyFeatureStyle,
-} from "./styleFactory";
+} from "../utils/styleFactory";
 import {
   createTileLayerConfig,
   createWMSLayerConfig,
   createWMTSLayerConfig,
   createGeoJSONLayerConfig,
   createGeoTIFFLayerConfig,
-} from "./layerFactory";
+} from "../utils/layerFactory";
 import {
   BATCH_SIZE,
   Z_INDEX,

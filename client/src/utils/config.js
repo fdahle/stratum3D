@@ -65,16 +65,6 @@ export const appConfig = {
 };
 
 /**
- * Check if a feature flag is enabled
- * @param {string} feature - Feature name
- * @returns {boolean}
- */
-export function isFeatureEnabled(feature) {
-  const key = `VITE_FEATURE_${feature.toUpperCase()}`;
-  return getEnvBool(key, false);
-}
-
-/**
  * Get API endpoint URL
  * @param {string} path - API path
  * @returns {string} Full URL

@@ -149,17 +149,4 @@ export function getString(path) {
   return typeof value === 'string' ? value : path;
 }
 
-/**
- * Format a string with parameters
- * Usage: formatString('Loading {0} of {1}', 10, 100) returns 'Loading 10 of 100'
- * 
- * @param {string} template - String with {0}, {1}, etc. placeholders
- * @param {...any} args - Values to replace placeholders
- * @returns {string} Formatted string
- */
-export function formatString(template, ...args) {
-  return template.replace(/{(\d+)}/g, (match, index) => {
-    const argIndex = parseInt(index);
-    return args[argIndex] !== undefined ? String(args[argIndex]) : match;
-  });
-}
+

@@ -1,5 +1,17 @@
 # ==========================================
-# ANTARCTICA CORRECTED CONFIGURATION
+#  HIST MAP — Main Configuration File
+# ==========================================
+# This is the SINGLE configuration file for your Hist Map instance.
+# All user-facing settings are controlled here.
+#
+# Sections:
+#   1. website    — Page title, favicon, search defaults
+#   2. view       — Initial map center, zoom, extent constraints
+#   3. crs        — Coordinate Reference System (EPSG code + optional custom projection)
+#   4. base_layers    — Background map tiles (only one visible at a time)
+#   5. overlay_layers — Data layers (GeoJSON, GeoTIFF) rendered on top
+#
+# For a full example see: examples/config_london.yaml
 # ==========================================
 
 # Website settings (title and favicon). Place favicon file in the `public/` folder

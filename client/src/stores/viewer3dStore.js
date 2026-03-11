@@ -1,27 +1,30 @@
-import { ref, shallowRef } from 'vue';
+// Pinia store for 3D viewer state (replaces composables/useViewer3D.js)
+// Provides devtools integration and consistency with the map stores.
+import { defineStore } from 'pinia';
+import { ref, shallowRef, markRaw } from 'vue';
 
-// Shared Three.js objects (use shallowRef to avoid deep reactivity on Three.js objects)
-const scene = shallowRef(null);
-const camera = shallowRef(null);
-const renderer = shallowRef(null);
-const controls = shallowRef(null);
+export const useViewer3DStore = defineStore('viewer3d', () => {
+  // Shared Three.js objects (use shallowRef to avoid deep reactivity on Three.js objects)
+  const scene = shallowRef(null);
+  const camera = shallowRef(null);
+  const renderer = shallowRef(null);
+  const controls = shallowRef(null);
 
-// Models and scene state
-const loadedModels = ref([]);
-const initialCameraPosition = ref(null);
-const initialCameraTarget = ref(null);
+  // Models and scene state
+  const loadedModels = ref([]);
+  const initialCameraPosition = ref(null);
+  const initialCameraTarget = ref(null);
 
-// View settings
-const showWireframe = ref(false);
-const showBoundingBox = ref(true);
-const showGrid = ref(true);
+  // View settings
+  const showWireframe = ref(false);
+  const showBoundingBox = ref(true);
+  const showGrid = ref(true);
 
-// Measurement state
-const measurementMode = ref(null); // null, 'distance', 'area'
-const measurements = ref([]);
-const measurementPoints = ref([]);
+  // Measurement state
+  const measurementMode = ref(null); // null, 'distance', 'area'
+  const measurements = ref([]);
+  const measurementPoints = ref([]);
 
-export const useViewer3D = () => {
   // Scene management
   const setScene = (newScene) => {
     scene.value = newScene;
@@ -41,11 +44,10 @@ export const useViewer3D = () => {
 
   // Model management
   const addModel = (model) => {
-    loadedModels.value.push(model);
+    loadedModels.value.push(markRaw(model));
   };
 
   const clearModels = () => {
-    // Remove models from scene
     loadedModels.value.forEach(model => {
       if (scene.value) {
         scene.value.remove(model);
@@ -134,7 +136,6 @@ export const useViewer3D = () => {
 
   // Cleanup
   const cleanup = () => {
-    // Dispose models properly
     loadedModels.value.forEach(model => {
       model.traverse((child) => {
         if (child.isMesh) {
@@ -156,13 +157,11 @@ export const useViewer3D = () => {
     
     clearMeasurements();
     
-    // Dispose renderer
     if (renderer.value) {
       renderer.value.dispose();
       renderer.value = null;
     }
     
-    // Clear references
     scene.value = null;
     camera.value = null;
     controls.value = null;
@@ -210,6 +209,6 @@ export const useViewer3D = () => {
     removeMeasurement,
 
     // Cleanup
-    cleanup
+    cleanup,
   };
-};
+});

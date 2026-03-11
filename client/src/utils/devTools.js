@@ -73,13 +73,4 @@ export function devAssert(condition, message) {
   }
 }
 
-/**
- * Warn about deprecated features
- * @param {string} feature - Feature name
- * @param {string} alternative - Alternative to use
- */
-export function deprecationWarning(feature, alternative) {
-  logger.warn('Deprecation', `${feature} is deprecated. Use ${alternative} instead.`);
-}
-
-export default { enableDevMode, logLifecycle, devAssert, deprecationWarning };
+export default { enableDevMode, logLifecycle, devAssert };

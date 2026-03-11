@@ -20,6 +20,8 @@ export default defineConfig(({ mode }) => {
     define: {
       // This creates a global constant available everywhere
       __APP_DEBUG__: env.VITE_DEBUG_MODE === "true",
+      __APP_VERSION__: JSON.stringify(process.env.npm_package_version || "dev"),
+      __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     },
   };
 });

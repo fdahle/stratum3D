@@ -1,58 +1,40 @@
 import { defineStore } from "pinia";
 import { ref, watch } from "vue";
 
+/**
+ * Create a persisted ref that auto-syncs with localStorage
+ * @param {string} key - localStorage key
+ * @param {any} defaultValue - Default value if nothing stored
+ * @returns {import('vue').Ref} Reactive ref that persists to localStorage
+ */
+function persistedRef(key, defaultValue) {
+  const stored = localStorage.getItem(key);
+  let initial = defaultValue;
+  if (stored !== null) {
+    try {
+      initial = JSON.parse(stored);
+    } catch {
+      initial = stored;
+    }
+  }
+  const state = ref(initial);
+  watch(state, (val) => localStorage.setItem(key, JSON.stringify(val)));
+  return state;
+}
+
 export const useSettingsStore = defineStore("settings", () => {
-  // 1. STATE (Initialize from localStorage if available)
-  const storedInfoBar = localStorage.getItem("settings_showInfoBar");
-  const storedSelectionColor = localStorage.getItem("settings_selectionColor");
-  const storedTheme = localStorage.getItem("settings_theme");
-  
-  // Default to true if nothing is stored
-  const showInfoBar = ref(storedInfoBar !== null ? JSON.parse(storedInfoBar) : true);
-  const selectionColor = ref(storedSelectionColor || "#FFFF00");
-  const theme = ref(storedTheme || "dark");
-  
-  // Arrow buttons for layer ordering (default: hidden, use drag & drop)
-  const storedShowArrowButtons = localStorage.getItem("settings_showArrowButtons");
-  const showArrowButtons = ref(storedShowArrowButtons !== null ? JSON.parse(storedShowArrowButtons) : false);
+  // 1. STATE (auto-persisted to localStorage)
+  const showInfoBar = persistedRef("settings_showInfoBar", true);
+  const selectionColor = persistedRef("settings_selectionColor", "#FFFF00");
+  const theme = persistedRef("settings_theme", "dark");
+  const showArrowButtons = persistedRef("settings_showArrowButtons", false);
 
   // 2. ACTIONS
-  const toggleInfoBar = () => {
-    showInfoBar.value = !showInfoBar.value;
-  };
-
-  const setSelectionColor = (color) => {
-    selectionColor.value = color;
-  };
-
-  const toggleTheme = () => {
-    theme.value = theme.value === "dark" ? "light" : "dark";
-  };
-
-  const setTheme = (newTheme) => {
-    theme.value = newTheme;
-  };
-  
-  const toggleArrowButtons = () => {
-    showArrowButtons.value = !showArrowButtons.value;
-  };
-
-  // 3. PERSISTENCE (Automatically save changes)
-  watch(showInfoBar, (newValue) => {
-    localStorage.setItem("settings_showInfoBar", JSON.stringify(newValue));
-  });
-
-  watch(selectionColor, (newValue) => {
-    localStorage.setItem("settings_selectionColor", newValue);
-  });
-
-  watch(theme, (newValue) => {
-    localStorage.setItem("settings_theme", newValue);
-  });
-  
-  watch(showArrowButtons, (newValue) => {
-    localStorage.setItem("settings_showArrowButtons", JSON.stringify(newValue));
-  });
+  const toggleInfoBar = () => { showInfoBar.value = !showInfoBar.value; };
+  const setSelectionColor = (color) => { selectionColor.value = color; };
+  const toggleTheme = () => { theme.value = theme.value === "dark" ? "light" : "dark"; };
+  const setTheme = (newTheme) => { theme.value = newTheme; };
+  const toggleArrowButtons = () => { showArrowButtons.value = !showArrowButtons.value; };
 
   return {
     showInfoBar,

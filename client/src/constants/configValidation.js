@@ -77,17 +77,19 @@ function validateBaseLayers(baseLayers) {
 function validateOverlayLayers(overlayLayers) {
   if (!overlayLayers) return; // Optional
 
+  const supportedOverlayTypes = ['geojson', 'geotiff'];
+
   overlayLayers.forEach((layer, index) => {
     const prefix = `overlay_layers[${index}] (${layer.name || "unnamed"})`;
 
-    if (layer.type !== "geojson") {
+    if (!supportedOverlayTypes.includes(layer.type)) {
       throw new Error(
-        `${prefix}: Currently only 'geojson' is supported for overlays.`
+        `${prefix}: Unsupported type '${layer.type}'. Allowed: ${supportedOverlayTypes.join(", ")}`
       );
     }
 
-    const requiredGeoJson = CONFIG_SCHEMA.layerTypes.geojson.required;
-    requiredGeoJson.forEach((field) => {
+    const requiredFields = CONFIG_SCHEMA.layerTypes[layer.type]?.required || [];
+    requiredFields.forEach((field) => {
       if (!layer[field]) {
         throw new Error(`${prefix}: Missing required field '${field}'.`);
       }

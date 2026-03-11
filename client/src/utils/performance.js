@@ -109,26 +109,4 @@ export function createPerformanceObserver(entryTypes, callback) {
   return observer;
 }
 
-/**
- * Track component render time
- * @param {string} componentName - Name of the component
- * @returns {Function} Cleanup function
- */
-export function trackComponentRender(componentName) {
-  const mark = `${componentName}-render-start`;
-  performance.mark(mark);
-  
-  return () => {
-    const endMark = `${componentName}-render-end`;
-    performance.mark(endMark);
-    performance.measure(`${componentName}-render`, mark, endMark);
-    
-    const measure = performance.getEntriesByName(`${componentName}-render`)[0];
-    if (measure) {
-      recordMetric(`Component: ${componentName}`, measure.duration);
-      performance.clearMarks(mark);
-      performance.clearMarks(endMark);
-      performance.clearMeasures(`${componentName}-render`);
-    }
-  };
-}
+

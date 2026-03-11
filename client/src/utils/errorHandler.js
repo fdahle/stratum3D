@@ -71,22 +71,6 @@ export function handleError(error, context = 'Unknown', showToUser = false) {
 }
 
 /**
- * Wrap async functions with error handling
- * @param {Function} fn - Async function to wrap
- * @param {string} context - Context for error messages
- * @returns {Function} Wrapped function
- */
-export function withErrorHandling(fn, context) {
-  return async (...args) => {
-    try {
-      return await fn(...args);
-    } catch (error) {
-      throw handleError(error, context);
-    }
-  };
-}
-
-/**
  * Create an error from a fetch response
  * @param {Response} response - Fetch response
  * @param {string} context - Context information

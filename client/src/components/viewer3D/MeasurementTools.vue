@@ -64,20 +64,24 @@
 
 <script setup>
 import { computed } from 'vue';
-import { useViewer3D } from '@/composables/useViewer3D.js';
+import { useViewer3DStore } from '@/stores/viewer3dStore';
+import { storeToRefs } from 'pinia';
 
 const emit = defineEmits(['measurement-started', 'measurement-complete', 'measurement-cancelled']);
 
+const viewer3DStore = useViewer3DStore();
 const {
   measurementMode,
   measurements,
   measurementPoints,
+} = storeToRefs(viewer3DStore);
+const {
   startMeasurement,
   completeMeasurement: completeInComposable,
   cancelMeasurement: cancelInComposable,
   clearMeasurements,
-  removeMeasurement: removeInComposable
-} = useViewer3D();
+  removeMeasurement: removeInComposable,
+} = viewer3DStore;
 
 const measurementModeLabel = computed(() => {
   switch (measurementMode.value) {

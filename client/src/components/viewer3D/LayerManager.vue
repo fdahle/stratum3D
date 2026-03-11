@@ -47,7 +47,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, markRaw } from 'vue';
 import ContextMenu3D from '../contextMenus/ContextMenu3D.vue';
 import {
   ICON_3D_MODEL,
@@ -75,7 +75,7 @@ const getLayerIcon = (type) => {
 };
 
 const addLayer = (layer) => {
-  layers.value.push(layer);
+  layers.value.push({ ...layer, object: layer.object ? markRaw(layer.object) : null });
   if (layers.value.length === 1) {
     selectedLayerId.value = layer.id;
   }

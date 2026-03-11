@@ -8,7 +8,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
-import { useViewer3D } from '@/composables/useViewer3D.js';
+import { useViewer3DStore } from '@/stores/viewer3dStore';
 import { useSettingsStore } from '@/stores/settingsStore.js';
 import { storeToRefs } from 'pinia';
 
@@ -40,11 +40,16 @@ const fileLoadedCount = ref(0); // Track number of models loaded from files
 const settingsStore = useSettingsStore();
 const { theme } = storeToRefs(settingsStore);
 
+const viewer3DStore = useViewer3DStore();
 const {
   scene,
   camera,
   renderer,
   controls,
+  measurementMode,
+  measurementPoints,
+} = storeToRefs(viewer3DStore);
+const {
   setScene,
   setCamera,
   setRenderer,
@@ -52,11 +57,9 @@ const {
   addModel,
   storeInitialCamera,
   resetCamera,
-  measurementMode,
   addMeasurementPoint,
-  measurementPoints,
-  cleanup
-} = useViewer3D();
+  cleanup,
+} = viewer3DStore;
 
 let animationFrameId = null;
 const raycaster = new THREE.Raycaster();

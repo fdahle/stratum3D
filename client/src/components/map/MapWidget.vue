@@ -16,11 +16,11 @@ import View from "ol/View";
 import { fromLonLat } from "ol/proj";
 import { defaults as defaultControls } from "ol/control";
 
-import { registerCustomProjections } from "../../constants/crs";
+import { registerCustomProjections } from "../../utils/crs";
 import { useMapStore } from "../../stores/map/mapStore";
 import { useLayerStore } from "../../stores/map/layerStore";
 import { useLayerManager } from "../../composables/useLayerManager";
-import ContextMenuMap from "../contextMenus/contextMenuMap.vue";
+import ContextMenuMap from "../contextMenus/ContextMenuMap.vue";
 
 const configRef = inject("config");
 const config = configRef.value;

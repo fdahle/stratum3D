@@ -129,8 +129,8 @@ const processShapes = async () => {
       geojson.features = geojson.features.map((feature) => {
         if (!feature.properties) feature.properties = {};
         
-        // Generate unique feature ID early (used for file naming)
-        const featureId = uuidv4().split('-')[0]; // Use short ID (8 chars)
+        // Generate unique feature ID (used for file naming and client-side identification)
+        const featureId = uuidv4();
         feature.properties._featureId = featureId;
 
         // A. Apply Join
@@ -226,13 +226,13 @@ const processShapes = async () => {
           feature = turf.simplify(feature, {
             tolerance: CONFIG.simplifyTolerance,
             highQuality: true,
-        // Feature ID was already set at the beginning of the loop
           });
         } catch (e) {
           /* keep original on fail */
         }
 
-        feature.properties._featureId = uuidv4();
+        // Restore feature ID (turf.simplify may drop custom properties)
+        feature.properties._featureId = featureId;
         return feature;
       });
 

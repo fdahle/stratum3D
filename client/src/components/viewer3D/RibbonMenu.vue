@@ -131,7 +131,8 @@
 
 <script setup>
 import { ref } from 'vue';
-import { useViewer3D } from '@/composables/useViewer3D.js';
+import { useViewer3DStore } from '@/stores/viewer3dStore';
+import { storeToRefs } from 'pinia';
 import {
   ICON_3D_MODEL,
   ICON_POINT_CLOUD,
@@ -175,7 +176,9 @@ const emit = defineEmits([
   'measure-area'
 ]);
 
-const { showGrid, showWireframe, showBoundingBox, toggleWireframe, toggleBoundingBox, toggleGrid } = useViewer3D();
+const viewer3DStore = useViewer3DStore();
+const { showGrid, showWireframe, showBoundingBox } = storeToRefs(viewer3DStore);
+const { toggleWireframe, toggleBoundingBox, toggleGrid } = viewer3DStore;
 
 const activeTab = ref('insert');
 const modelInput = ref(null);

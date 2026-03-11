@@ -125,7 +125,7 @@ import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
 import { useSelectionStore } from "../../stores/map/selectionStore";
 import { useLayerStore } from "../../stores/map/layerStore";
-import { formatKey } from "../../composables/utils";
+import { formatKey } from "../../utils/helpers";
 import { logger } from "../../utils/logger";
 
 const router = useRouter();

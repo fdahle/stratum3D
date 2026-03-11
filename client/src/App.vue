@@ -95,6 +95,8 @@ const reloadApp = () => window.location.reload();
 </script>
 
 <style>
+@import './assets/error-screen.css';
+
 /* Global Styles */
 html,
 body {
@@ -132,45 +134,5 @@ body.theme-light {
 
 .theme-light .loading {
   color: #999;
-}
-
-.error-screen {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  height: 100%;
-  background: #f3f4f6;
-}
-
-.theme-dark .error-screen {
-  background: #2a2a2a;
-}
-
-.error-modal {
-  background: white;
-  padding: 2rem;
-  border-radius: 8px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-  text-align: center;
-}
-
-.theme-dark .error-modal {
-  background: #3a3a3a;
-  color: #e0e0e0;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
-}
-
-.retry-btn {
-  background: #3b82f6;
-  color: white;
-  padding: 0.75rem 1.5rem;
-  border-radius: 6px;
-  border: none;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.retry-btn:hover {
-  background: #2563eb;
 }
 </style>

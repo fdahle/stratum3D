@@ -61,26 +61,6 @@ export async function get(path, options = {}) {
 }
 
 /**
- * POST request
- * @param {string} path - API path or full URL
- * @param {any} data - Request body
- * @param {RequestInit} options - Fetch options
- * @returns {Promise<any>}
- */
-export async function post(path, data, options = {}) {
-  const url = path.startsWith('http') ? path : getApiUrl(path);
-  logger.debug('HTTP', `POST ${url}`);
-  
-  const response = await fetchWithErrorHandling(url, {
-    ...options,
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-  
-  return response.json();
-}
-
-/**
  * Fetch with retry logic
  * @param {string} path - API path or full URL
  * @param {RequestInit} options - Fetch options
@@ -177,7 +157,6 @@ export async function isUrlAccessible(url) {
 
 export default {
   get,
-  post,
   fetchJSON,
   fetchText,
   fetchWithProgress,

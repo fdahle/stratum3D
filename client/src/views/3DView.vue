@@ -7,9 +7,6 @@
       @load-model="handleLoadModel"
       @load-pointcloud="handleLoadPointCloud"
       @load-cameras="handleLoadCameras"
-      @toggle-wireframe="onToggleWireframe"
-      @toggle-bounding-box="onToggleBoundingBox"
-      @toggle-grid="onToggleGrid"
       @reset-camera="onResetCamera"
       @fit-to-scene="onFitToScene"
       @view-top="onViewTop"
@@ -90,7 +87,9 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { useRoute } from 'vue-router';
-import { useViewer3D } from '@/composables/useViewer3D.js';
+import { storeToRefs } from 'pinia';
+import { useViewer3DStore } from '@/stores/viewer3dStore';
+import { logger } from '@/utils/logger';
 import Viewer3DCanvas from '@/components/viewer3D/Canvas.vue';
 import RibbonMenu from '@/components/viewer3D/RibbonMenu.vue';
 import LayerManager from '@/components/viewer3D/LayerManager.vue';
@@ -106,7 +105,8 @@ const loadingTitle = ref('Loading...');
 const isParsing = computed(() => loadingStatus.value.includes('Parsing'));
 const errorMessage = ref(null);
 
-const { cleanup, startMeasurement } = useViewer3D();
+const viewer3DStore = useViewer3DStore();
+const { cleanup, startMeasurement } = viewer3DStore;
 
 // Measurement state
 const isMeasurementModalVisible = ref(false);
@@ -132,7 +132,7 @@ const coordinates = computed(() => ({
 
 // Scene events
 const onSceneReady = () => {
-  console.log('3D scene initialized and ready');
+  logger.info('3DView', '3D scene initialized and ready');
   if (modelUrls.value.length > 0) {
     isLoading.value = true;
     loadingTitle.value = 'Loading 3D Model...';
@@ -191,8 +191,8 @@ const onBuildingGeometry = ({ index, stage, vertices, faces, triangles }) => {
 };
 
 const onModelLoaded = ({ url, index, object }) => {
-  console.log(`Model loaded: ${url}${modelUrls.value.length > 0 ? ` (${index + 1}/${modelUrls.value.length})` : ''}`);
-  console.log('Object:', object, 'LayerManager ref:', layerManagerRef.value);
+  logger.info('3DView', `Model loaded: ${url}${modelUrls.value.length > 0 ? ` (${index + 1}/${modelUrls.value.length})` : ''}`);
+  logger.debug('3DView', 'Object:', object, 'LayerManager ref:', layerManagerRef.value);
   
   // Add to layer manager
   if (layerManagerRef.value && object) {
@@ -205,7 +205,7 @@ const onModelLoaded = ({ url, index, object }) => {
       layerName = `${layerName} (${object.userData.cameraCount} cameras)`;
     }
     
-    console.log(`Adding to layer manager: ${layerName} (type: ${layerType})`);
+    logger.debug('3DView', `Adding to layer manager: ${layerName} (type: ${layerType})`);
     
     layerManagerRef.value.addLayer({
       id: object.uuid,
@@ -215,7 +215,7 @@ const onModelLoaded = ({ url, index, object }) => {
       object: object
     });
   } else {
-    console.warn('Could not add to layer manager:', { layerManagerRef: layerManagerRef.value, object });
+    logger.warn('3DView', 'Could not add to layer manager:', { layerManagerRef: layerManagerRef.value, object });
   }
   
   // For URL-based loading, hide loading indicator when all models are loaded
@@ -236,7 +236,7 @@ const onModelLoaded = ({ url, index, object }) => {
 };
 
 const onLoadingError = ({ url, error }) => {
-  console.error('Loading error:', error);
+  logger.error('3DView', 'Loading error:', error);
   errorMessage.value = `Failed to load: ${error}`;
   isLoading.value = false;
   loadingProgress.value = 0;
@@ -248,10 +248,7 @@ const onLoadingError = ({ url, error }) => {
   }, 5000);
 };
 
-// View toggle events
-const onToggleWireframe = () => {};
-const onToggleBoundingBox = () => {};
-const onToggleGrid = () => {};
+// View toggle events (handled directly by RibbonMenu via the Pinia store)
 
 const onResetCamera = () => {
   if (canvasRef.value && canvasRef.value.resetToInitialCamera) {

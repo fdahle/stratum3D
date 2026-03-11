@@ -162,23 +162,8 @@ const layerManager = inject("layerManager"); // ref — access via .value
 const { overlayLayers } = storeToRefs(layerStore);
 const contextMenuRef = ref(null);
 
-const getIconType = (layerType) => {
-  return getGeometryIcon(layerType);
-};
-
-const getGeometryIconSVG = (layerType) => {
-  const iconType = getIconType(layerType);
-  switch (iconType) {
-    case 'point':
-      return ICON_POINT;
-    case 'line':
-      return ICON_LINE;
-    case 'raster':
-      return ICON_RASTER;
-    default:
-      return ICON_POLYGON;
-  }
-};
+// getGeometryIcon now returns SVG markup directly
+const getGeometryIconSVG = (layerType) => getGeometryIcon(layerType);
 
 const handleRightClick = (event, layer) => {
   if (layer.status !== "ready") return;

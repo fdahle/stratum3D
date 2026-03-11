@@ -1,4 +1,5 @@
-// client/src/composables/utils.js
+// client/src/utils/helpers.js
+// Shared pure utility functions (no Vue reactivity)
 
 /**
  * Capitalize the first letter of a string
@@ -29,4 +30,22 @@ export function generateUUID() {
     const v = c === "x" ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
+}
+
+/**
+ * Debounce a function call
+ * @param {Function} func - Function to debounce
+ * @param {number} wait - Delay in milliseconds
+ * @returns {Function} Debounced function
+ */
+export function debounce(func, wait) {
+  let timeout;
+  return function executedFunction(...args) {
+    const later = () => {
+      clearTimeout(timeout);
+      func(...args);
+    };
+    clearTimeout(timeout);
+    timeout = setTimeout(later, wait);
+  };
 }
