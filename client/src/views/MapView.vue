@@ -133,7 +133,9 @@ const showNotification = (message, type = "info") => {
   }, 4000);
 };
 
-const handleDragOver = () => {
+const handleDragOver = (event) => {
+  // Only show the drop overlay for external file drags, not internal layer reordering
+  if (!event.dataTransfer?.types?.includes('Files')) return;
   isDragging.value = true;
 };
 

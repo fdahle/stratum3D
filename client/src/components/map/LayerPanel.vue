@@ -4,20 +4,16 @@
       <h3>Map Layers</h3>
     </div>
 
-    <div class="layer-list">
-      <template
-        v-for="(layer, index) in overlayLayers"
-        :key="layer._layerId"
-      >
-        <!-- Drop placeholder: opens space before this layer while dragging -->
+    <div
+      class="layer-list"
+      :class="{ 'is-dragging': isDragging }"
+      @dragover.prevent="handleListDragOver"
+      @drop.prevent="executeDrop"
+    >
+      <TransitionGroup name="layers">
         <div
-          v-if="isDragging && dropIndicatorIndex === index && draggedLayerId !== layer._layerId"
-          class="drop-placeholder"
-          @dragover.prevent="dropIndicatorIndex = index"
-          @drop.prevent="executeDrop(index)"
-        ></div>
-
-        <div
+          v-for="layer in displayLayers"
+          :key="layer._layerId"
           class="layer-row"
           :class="{
             active: layer.active,
@@ -28,8 +24,8 @@
           draggable="true"
           @dragstart="handleDragStart($event, layer)"
           @dragend="handleDragEnd"
-          @dragover.prevent="handleDragOver($event, layer, index)"
-          @drop.prevent="executeDrop(dropIndicatorIndex)"
+          @dragover.prevent.stop="handleDragOver($event, layer)"
+          @drop.prevent.stop="executeDrop"
           @touchstart="handleTouchStart($event, layer)"
           @touchmove="handleTouchMove($event)"
           @touchend="handleTouchEnd($event)"
@@ -121,15 +117,7 @@
           </div>
         </label>
         </div>
-
-        <!-- Drop placeholder after the last layer -->
-        <div
-          v-if="isDragging && index === overlayLayers.length - 1 && dropIndicatorIndex === overlayLayers.length"
-          class="drop-placeholder"
-          @dragover.prevent="dropIndicatorIndex = overlayLayers.length"
-          @drop.prevent="executeDrop(overlayLayers.length)"
-        ></div>
-      </template>
+      </TransitionGroup>
 
       <div v-if="overlayLayers.length === 0" class="empty-state">
         {{ STRINGS.map.noLayers }}
@@ -152,7 +140,7 @@
 </template>
 
 <script setup>
-import { ref, inject } from "vue";
+import { ref, inject, computed } from "vue";
 import { storeToRefs } from "pinia";
 import { useLayerStore } from "../../stores/map/layerStore";
 import { useMapStore } from "../../stores/map/mapStore";
@@ -283,6 +271,22 @@ const touchDraggedElement = ref(null);
 const touchScrollStartY = ref(0);
 const isDraggingTouch = ref(false);
 
+// Rearranges layers visually during drag for live preview — no jump on drop
+const displayLayers = computed(() => {
+  if (!isDragging.value || dropIndicatorIndex.value === null || !draggedLayerId.value) {
+    return overlayLayers.value;
+  }
+  const draggedIdx = overlayLayers.value.findIndex(l => l._layerId === draggedLayerId.value);
+  if (draggedIdx === -1) return overlayLayers.value;
+  const target = dropIndicatorIndex.value;
+  // Same position — no visual change needed
+  if (target === draggedIdx || target === draggedIdx + 1) return overlayLayers.value;
+  const arr = [...overlayLayers.value];
+  const [dragged] = arr.splice(draggedIdx, 1);
+  arr.splice(target > draggedIdx ? target - 1 : target, 0, dragged);
+  return arr;
+});
+
 const handleDragStart = (event, layer) => {
   draggedLayerId.value = layer._layerId;
   isDragging.value = true;
@@ -296,24 +300,29 @@ const handleDragEnd = () => {
   isDragging.value = false;
 };
 
-const handleDragOver = (event, layer, index) => {
+const handleDragOver = (event, layer) => {
   if (!draggedLayerId.value || draggedLayerId.value === layer._layerId) return;
+  // Always look up by ID in the original array so positions are stable
+  const originalIndex = overlayLayers.value.findIndex(l => l._layerId === layer._layerId);
+  if (originalIndex === -1) return;
   const rect = event.currentTarget.getBoundingClientRect();
-  dropIndicatorIndex.value = event.clientY < rect.top + rect.height / 2 ? index : index + 1;
+  dropIndicatorIndex.value = event.clientY < rect.top + rect.height / 2 ? originalIndex : originalIndex + 1;
 };
 
-const executeDrop = (targetIndex) => {
-  const draggedId = draggedLayerId.value;
-  if (!draggedId || targetIndex === null) return;
+// Fallback: fires when cursor is over empty space below the last row
+const handleListDragOver = () => {
+  if (isDragging.value) dropIndicatorIndex.value = overlayLayers.value.length;
+};
 
+const executeDrop = () => {
+  const draggedId = draggedLayerId.value;
+  if (!draggedId || dropIndicatorIndex.value === null) return;
   const draggedIndex = overlayLayers.value.findIndex(l => l._layerId === draggedId);
   if (draggedIndex === -1) return;
-
-  const clamped = Math.max(0, Math.min(targetIndex, overlayLayers.value.length));
+  const clamped = Math.max(0, Math.min(dropIndicatorIndex.value, overlayLayers.value.length));
   if (draggedIndex !== clamped && draggedIndex + 1 !== clamped) {
     layerStore.reorderLayer(draggedId, clamped);
   }
-
   draggedLayerId.value = null;
   dropIndicatorIndex.value = null;
   isDragging.value = false;
@@ -482,24 +491,17 @@ const handleTouchEnd = (event) => {
   overscroll-behavior: contain;
 }
 
-.drop-placeholder {
-  height: 36px;
-  border: 2px dashed #007bff;
-  border-radius: 4px;
-  background: rgba(0, 123, 255, 0.06);
-  margin-bottom: 5px;
-  transition: all 0.15s ease;
-  animation: placeholder-pulse 0.8s ease-in-out infinite;
+/* Smooth reorder animation */
+.layers-move {
+  transition: transform 0.2s ease;
 }
 
-.theme-dark .drop-placeholder {
-  border-color: #4d9fff;
-  background: rgba(77, 159, 255, 0.08);
+/* Suppress hover highlight while dragging */
+.is-dragging .layer-row:hover:not(.layer-error) {
+  background: inherit;
 }
-
-@keyframes placeholder-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+.theme-dark .is-dragging .layer-row:hover:not(.layer-error) {
+  background: inherit;
 }
 
 .layer-row {
