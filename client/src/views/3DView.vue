@@ -7,6 +7,7 @@
       @load-model="handleLoadModel"
       @load-pointcloud="handleLoadPointCloud"
       @load-cameras="handleLoadCameras"
+      @load-markers="handleLoadMarkers"
       @reset-camera="onResetCamera"
       @fit-to-scene="onFitToScene"
       @view-top="onViewTop"
@@ -237,6 +238,12 @@ const onModelLoaded = ({ url, index, object }) => {
       loadingStatus.value = '';
       loadingTitle.value = 'Loading...';
     }, 500);
+  }
+};
+
+const handleLoadMarkers = (file) => {
+  if (canvasRef.value?.loadMarkersFile) {
+    canvasRef.value.loadMarkersFile(file);
   }
 };
 

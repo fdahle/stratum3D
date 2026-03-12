@@ -1,21 +1,21 @@
-# ==========================================
-#  HIST MAP — Main Configuration File
-# ==========================================
-# This is the SINGLE configuration file for your Hist Map instance.
-# All user-facing settings are controlled here.
+# =====================================================================
+#  HIST MAP — Configuration File
+# =====================================================================
 #
 # Sections:
-#   1. website    — Page title, favicon, search defaults
-#   2. view       — Initial map center, zoom, extent constraints
-#   3. crs        — Coordinate Reference System (EPSG code + optional custom projection)
-#   4. base_layers    — Background map tiles (only one visible at a time)
-#   5. overlay_layers — Data layers (GeoJSON, GeoTIFF) rendered on top
+#   1. website         — Page title, favicon, search defaults
+#   2. view            — Initial map center, zoom, extent constraints
+#   3. crs             — Coordinate Reference System (EPSG code)
+#   4. base_layers     — Background map tiles (one visible at a time)
+#   5. overlay_layers  — Data layers (GeoJSON, GeoTIFF) rendered on top
 #
-# For a full example see: examples/config_london.yaml
-# ==========================================
+# Rules:
+#   - Exactly ONE base layer must have `visible: true`.
+#   - Layer orders within base_layers / overlay_layers must be unique.
+#   - For a full configuration reference see: examples/config_london.yaml
+# =====================================================================
 
-# Website settings (title and favicon). Place favicon file in the `public/` folder
-# Example: favicon: "/favicon.ico" or "/assets/my-favicon.png"
+# --- 1. Website ---
 website:
   title: "Hist Map"
   favicon: "/vite.svg"
@@ -23,23 +23,28 @@ website:
     placeholder: "Search..."
     defaultQuery: ""
 
-# 1. Map View Settings
+# --- 2. Map View ---
 view:
-  center: [-2000000, 1000000] # [Longitude, Latitude] format - South Pole
+  center: [-2000000, 1000000]   # map centre in projected coordinates
   zoom: 7
-  extent: [-4194304, -4194304, 4194304, 4194304] # extent for the view
+  extent: [-4194304, -4194304, 4194304, 4194304]
   minZoom: 0
   maxZoom: 16
 
-# 2. Coordinate Reference System
+# --- 3. Coordinate Reference System ---
+# Use any EPSG code. Add projection_params for non-standard CRS.
 crs: "EPSG:3031"
 projection_params:
   proj_string: "+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
   extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185]
 
-# 3. Base Map Layers (Using GBIF Polar Tiles)
-# GBIF tile resolutions for EPSG:3031: https://tile.gbif.org/ui/
+# --- 4. Base Layers ---
+#
+# YAML anchor: define the GBIF tile grid once and reuse it with `*gbif_3031`.
+# GBIF tile resolutions reference: https://tile.gbif.org/ui/
+#
 base_layers:
+
   - name: "OSM"
     type: "tile"
     url: "https://tile.gbif.org/3031/omt/{z}/{x}/{y}@1x.png?style=osm-bright-en"
@@ -47,21 +52,27 @@ base_layers:
     order: 0
     tileSize: 512
     attribution: "© OpenStreetMap contributors"
-    crs_options:
-      extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185] # projection extent
-      resolutions:
-        [
-          67733.46880027094,
-          33866.73440013547,
-          16933.367200067736,
-          8466.683600033868,
-          4233.341800016934,
-          2116.670900008467,
-          1058.3354500042335,
-          529.1677250021167,
-          264.5838625010584,
-          132.2919312505292,
-        ]
+    crs_options: &gbif_3031
+      extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185]
+      resolutions: [67733.469, 33866.734, 16933.367, 8466.684, 4233.342, 2116.671, 1058.335, 529.168, 264.584, 132.292]
+
+  - name: "Geyser"
+    type: "tile"
+    url: "https://tile.gbif.org/3031/omt/{z}/{x}/{y}@1x.png?style=gbif-geyser"
+    visible: false
+    order: 1
+    tileSize: 512
+    attribution: "© GBIF, OpenStreetMap contributors"
+    crs_options: *gbif_3031
+
+  - name: "Classic"
+    type: "tile"
+    url: "https://tile.gbif.org/3031/omt/{z}/{x}/{y}@1x.png?style=gbif-classic"
+    visible: false
+    order: 2
+    tileSize: 512
+    attribution: "© GBIF, OpenStreetMap contributors"
+    crs_options: *gbif_3031
 
   - name: "MODIS"
     type: "wmts"
@@ -70,23 +81,27 @@ base_layers:
     matrixSet: "250m"
     format: "image/jpeg"
     visible: false
-    order: 1
+    order: 3
     attribution: "NASA Global Imagery Browse Services (GIBS)"
     crs_options:
       extent: [-4194304, -4194304, 4194304, 4194304]
       resolutions: [16384, 8192, 4096, 2048, 1024, 512, 256, 128, 64]
 
+  # ⚠ Sentinel-2 (matrixSet "WGS84") does not support EPSG:3031.
+  #   The map will detect this automatically and mark the layer as unavailable.
   - name: "Sentinel-2"
     type: "wmts"
     url: "https://tiles.maps.eox.at/wmts/1.0.0/"
-    layer: "s2cloudless-2020"    # Note: Removed "_3857" suffix
+    layer: "s2cloudless-2020"
     style: "default"
-    matrixSet: "WGS84"           # Note: Changed from GoogleMapsCompatible
+    matrixSet: "WGS84"
     format: "image/jpeg"
     visible: false
     order: 4
     attribution: "Sentinel-2 cloudless by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2020)"
 
+  # WMS layers cannot be probed from the browser due to CORS restrictions.
+  # Set `crs_support: false` to explicitly mark a layer as incompatible.
   - name: "ESRI"
     type: "wms"
     url: "https://services.arcgisonline.com/arcgis/services/World_Imagery/MapServer/WMSServer"
@@ -96,62 +111,19 @@ base_layers:
     transparent: false
     visible: false
     order: 5
+    crs_support: false
     attribution: "Esri, Maxar, Earthstar Geographics, CNES/Airbus DS, USGS, AeroGRID, IGN, and the GIS User Community"
 
-  - name: "Geyser"
-    type: "tile"
-    url: "https://tile.gbif.org/3031/omt/{z}/{x}/{y}@1x.png?style=gbif-geyser"
-    visible: false
-    order: 2
-    tileSize: 512
-    attribution: "© GBIF, OpenStreetMap contributors"
-    crs_options:
-      extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185]
-      resolutions:
-        [
-          67733.46880027094,
-          33866.73440013547,
-          16933.367200067736,
-          8466.683600033868,
-          4233.341800016934,
-          2116.670900008467,
-          1058.3354500042335,
-          529.1677250021167,
-          264.5838625010584,
-          132.2919312505292,
-        ]
-
-  - name: "Classic"
-    type: "tile"
-    url: "https://tile.gbif.org/3031/omt/{z}/{x}/{y}@1x.png?style=gbif-classic"
-    visible: false
-    order: 3
-    tileSize: 512
-    attribution: "© GBIF, OpenStreetMap contributors"
-    crs_options:
-      extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185]
-      resolutions:
-        [
-          67733.46880027094,
-          33866.73440013547,
-          16933.367200067736,
-          8466.683600033868,
-          4233.341800016934,
-          2116.670900008467,
-          1058.3354500042335,
-          529.1677250021167,
-          264.5838625010584,
-          132.2919312505292,
-        ]
-
-# 4. Overlay Layers
+# --- 5. Overlay Layers ---
 overlay_layers:
+
   - name: "Georef Sat"
     type: "geojson"
     url: "http://localhost:3000/data/layers/georef_sat.geojson"
     visible: true
     color: "#ff6600"
     search_fields: ["image_id"]
+
   - name: "Research Stations"
     type: "geojson"
     url: "http://localhost:3000/data/layers/stations.geojson"
@@ -159,12 +131,14 @@ overlay_layers:
     color: "#0066ff"
     pointType: "circle"
     search_fields: ["id", "station_name"]
+
   - name: "Glaciers"
     type: "geojson"
     url: "http://localhost:3000/data/layers/glaciers.geojson"
     visible: false
     color: "#00ccff"
     search_fields: ["glac_name"]
+
   - name: "TMA Flight Lines"
     type: "geojson"
     url: "http://localhost:3000/data/layers/tma_lines.geojson"

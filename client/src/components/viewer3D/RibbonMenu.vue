@@ -28,6 +28,10 @@
               <span class="btn-icon" v-html="ICON_CAMERA"></span>
               <span class="btn-label">Cameras</span>
             </button>
+            <button @click="openFileDialog('markers')" class="ribbon-btn">
+              <span class="btn-icon" v-html="ICON_MARKER_FLAG"></span>
+              <span class="btn-label">Markers</span>
+            </button>
           </div>
           <span class="group-label">Data</span>
         </div>
@@ -126,6 +130,13 @@
       @change="handleCamerasFile" 
       style="display: none"
     />
+    <input
+      ref="markersInput"
+      type="file"
+      accept=".xml"
+      @change="handleMarkersFile"
+      style="display: none"
+    />
   </div>
 </template>
 
@@ -137,6 +148,7 @@ import {
   ICON_3D_MODEL,
   ICON_POINT_CLOUD,
   ICON_CAMERA,
+  ICON_MARKER_FLAG,
   ICON_GRID,
   ICON_RESET,
   ICON_FIT,
@@ -164,6 +176,7 @@ const emit = defineEmits([
   'load-model',
   'load-pointcloud',
   'load-cameras',
+  'load-markers',
   'toggle-wireframe',
   'toggle-bounding-box',
   'toggle-grid',
@@ -184,6 +197,7 @@ const activeTab = ref('insert');
 const modelInput = ref(null);
 const pointcloudInput = ref(null);
 const camerasInput = ref(null);
+const markersInput = ref(null);
 
 const tabs = [
   { id: 'insert', label: 'Insert' },
@@ -193,15 +207,10 @@ const tabs = [
 
 const openFileDialog = (type) => {
   switch(type) {
-    case 'model':
-      modelInput.value?.click();
-      break;
-    case 'pointcloud':
-      pointcloudInput.value?.click();
-      break;
-    case 'cameras':
-      camerasInput.value?.click();
-      break;
+    case 'model':       modelInput.value?.click();    break;
+    case 'pointcloud':  pointcloudInput.value?.click(); break;
+    case 'cameras':     camerasInput.value?.click();  break;
+    case 'markers':     markersInput.value?.click();  break;
   }
 };
 
@@ -240,6 +249,14 @@ const handleCamerasFile = (event) => {
   const file = event.target.files[0];
   if (file) {
     emit('load-cameras', file);
+    event.target.value = '';
+  }
+};
+
+const handleMarkersFile = (event) => {
+  const file = event.target.files[0];
+  if (file) {
+    emit('load-markers', file);
     event.target.value = '';
   }
 };

@@ -1647,6 +1647,134 @@ const cancelCurrentMeasurement = () => {
   }
 };
 
+// ---------------------------------------------------------------------------
+// Metashape XML Marker / GCP loading
+// ---------------------------------------------------------------------------
+
+const loadMarkersFile = (file) => {
+  const reader = new FileReader();
+
+  reader.onload = (e) => {
+    try {
+      parseMarkersXML(e.target.result, file.name);
+    } catch (err) {
+      emit('loading-error', { url: file.name, error: err.message });
+    }
+  };
+
+  reader.onerror = () => {
+    emit('loading-error', { url: file.name, error: 'Failed to read file' });
+  };
+
+  reader.readAsText(file);
+};
+
+const parseMarkersXML = (xmlText, fileName) => {
+  const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
+  if (doc.querySelector('parsererror')) {
+    throw new Error('Invalid XML file — could not parse.');
+  }
+
+  // Collect enabled markers (skip marker-level enabled="false" OR reference enabled="false")
+  const markerElements = Array.from(doc.querySelectorAll('marker'));
+  const markers = [];
+
+  for (const el of markerElements) {
+    if (el.getAttribute('enabled') === 'false') continue;
+    const label = el.getAttribute('label') || `Marker ${el.getAttribute('id')}`;
+    const ref = el.querySelector('reference');
+    if (!ref || ref.getAttribute('enabled') === 'false') continue;
+
+    const x = parseFloat(ref.getAttribute('x'));
+    const y = parseFloat(ref.getAttribute('y'));
+    const z = parseFloat(ref.getAttribute('z'));
+    if (isNaN(x) || isNaN(y) || isNaN(z)) continue;
+
+    markers.push({ label, x, y, z });
+  }
+
+  if (markers.length === 0) {
+    throw new Error('No enabled markers found in the file.');
+  }
+
+  // Derive a sensible flag height: 1/50 of the GCP bounding-box diagonal,
+  // with a minimum so a single marker is still visible.
+  const xs = markers.map(m => m.x);
+  const ys = markers.map(m => m.y);
+  const zs = markers.map(m => m.z);
+  const dx = Math.max(...xs) - Math.min(...xs);
+  const dy = Math.max(...ys) - Math.min(...ys);
+  const dz = Math.max(...zs) - Math.min(...zs);
+  const diagonal = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  const flagH = Math.max(10, diagonal / 50);
+
+  const POLE_COLOR  = 0xdddddd;
+  const FLAG_COLOR  = 0xe63946; // red
+
+  const group = new THREE.Group();
+  group.name = fileName;
+  group.userData.type = 'markers';
+  group.userData.markerCount = markers.length;
+
+  for (const m of markers) {
+    // Convert Z-up (EPSG:3031) → Y-up (Three.js)
+    const sceneX =  m.x;
+    const sceneY =  m.z;   // altitude → Three.js Y
+    const sceneZ = -m.y;   // northing → Three.js -Z
+
+    const flagGroup = new THREE.Group();
+    flagGroup.position.set(sceneX, sceneY, sceneZ);
+    flagGroup.name = m.label;
+
+    // Pole — thin cylinder from ground to flag top
+    const poleGeo = new THREE.CylinderGeometry(flagH * 0.015, flagH * 0.015, flagH, 6);
+    const poleMat = new THREE.MeshBasicMaterial({ color: POLE_COLOR });
+    const pole = new THREE.Mesh(poleGeo, poleMat);
+    pole.position.y = flagH / 2;
+    flagGroup.add(pole);
+
+    // Flag triangle: top of pole → right → lower right
+    const fw = flagH * 0.55;  // horizontal extent
+    const fh = flagH * 0.35;  // vertical extent
+    const flagGeo = new THREE.BufferGeometry();
+    flagGeo.setAttribute('position', new THREE.Float32BufferAttribute([
+      0,       flagH,        0,   // top of pole
+      fw,      flagH - fh * 0.4, 0,   // tip of flag
+      0,       flagH - fh,   0,   // foot of flag on pole
+    ], 3));
+    flagGeo.setIndex([0, 1, 2, 0, 2, 1]); // double-sided via two winding orders
+    flagGeo.computeVertexNormals();
+    const flagMat = new THREE.MeshBasicMaterial({ color: FLAG_COLOR, side: THREE.DoubleSide });
+    flagGroup.add(new THREE.Mesh(flagGeo, flagMat));
+
+    // Label sprite
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 56;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = 'rgba(255,255,255,0.88)';
+    ctx.beginPath();
+    ctx.roundRect(3, 3, canvas.width - 6, canvas.height - 6, 7);
+    ctx.fill();
+    ctx.fillStyle = '#222';
+    ctx.font = 'bold 22px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(m.label, canvas.width / 2, canvas.height / 2);
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(canvas) })
+    );
+    sprite.position.set(fw * 0.5, flagH * 1.25, 0);
+    sprite.scale.set(flagH * 1.4, flagH * 0.32, 1);
+    flagGroup.add(sprite);
+
+    group.add(flagGroup);
+  }
+
+  scene.value.add(group);
+  emit('model-loaded', { url: fileName, index: 0, object: group });
+};
+
 // Watch for model URL changes
 watch(() => props.modelUrls, (newUrls) => {
   if (newUrls && newUrls.length > 0) {
@@ -1698,6 +1826,7 @@ watch(theme, (newTheme) => {
 // Expose methods for parent component
 defineExpose({
   loadUserObjFile,
+  loadMarkersFile,
   loadModelFromUrl,
   loadPointCloudFile,
   loadCamerasFile,

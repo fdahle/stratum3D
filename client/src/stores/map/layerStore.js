@@ -76,6 +76,8 @@ export const useLayerStore = defineStore("layers", () => {
       zIndex,
       searchFields,
       metadata: metadata,
+      // null = not yet checked, true = compatible, false = incompatible with current map CRS
+      crsCompatible: null,
     };
     layers.value.push(layerObj);
     // Index must point to the reactive proxy that Vue created, not the raw object.
@@ -118,6 +120,11 @@ export const useLayerStore = defineStore("layers", () => {
   const setLayerStatus = (layerId, status) => {
     const layer = layerIndex.get(layerId);
     if (layer) layer.status = status;
+  };
+
+  const setCrsCompatibility = (layerId, compatible) => {
+    const layer = layerIndex.get(layerId);
+    if (layer) layer.crsCompatible = compatible;
   };
 
   const setLayerError = (layerId, errorMessage) => {
@@ -329,6 +336,7 @@ export const useLayerStore = defineStore("layers", () => {
     setLayerProgress,
     setLayerStatus,
     setLayerError,
+    setCrsCompatibility,
     updateLayerColor,
     retryLayer,
     cancelLayerLoad,

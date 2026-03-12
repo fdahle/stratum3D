@@ -53,6 +53,7 @@ import {
   ICON_3D_MODEL,
   ICON_POINT_CLOUD,
   ICON_CAMERA,
+  ICON_MARKER_FLAG,
   ICON_PACKAGE,
   ICON_EYE,
   ICON_EYE_OFF,
@@ -67,10 +68,11 @@ const contextMenuRef = ref(null);
 
 const getLayerIcon = (type) => {
   switch(type) {
-    case 'model': return ICON_3D_MODEL;
+    case 'model':      return ICON_3D_MODEL;
     case 'pointcloud': return ICON_POINT_CLOUD;
-    case 'camera': return ICON_CAMERA;
-    default: return ICON_PACKAGE;
+    case 'camera':     return ICON_CAMERA;
+    case 'markers':    return ICON_MARKER_FLAG;
+    default:           return ICON_PACKAGE;
   }
 };
 

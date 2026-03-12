@@ -83,6 +83,105 @@ export function useLayerManager(map) {
     },
   );
 
+  // ---------------------------------------------------------------------------
+  // CRS Compatibility Check — probes WMS/WMTS capabilities asynchronously
+  // and marks each base layer as compatible (true), incompatible (false), or
+  // unchecked (null) so the UI can warn users about mismatched projections.
+  // ---------------------------------------------------------------------------
+  const checkCrsCompatibility = async (layerConf, layerId) => {
+    const mapCrs = map.getView().getProjection().getCode(); // e.g. "EPSG:3031"
+    const epsgCode = mapCrs.split(":")[1]; // e.g. "3031"
+
+    // Allow the config to hard-code compatibility rather than probing the network.
+    // `crs_support: false`              → always incompatible
+    // `crs_support: ["EPSG:3031", ...]` → compatible only when mapCrs is in the list
+    // omitted                           → probe the network (type-dependent below)
+    if (layerConf.crs_support !== undefined) {
+      if (layerConf.crs_support === false) {
+        layerStore.setCrsCompatibility(layerId, false);
+      } else if (Array.isArray(layerConf.crs_support)) {
+        const upper = layerConf.crs_support.map((c) => String(c).toUpperCase());
+        layerStore.setCrsCompatibility(layerId, upper.includes(mapCrs.toUpperCase()));
+      }
+      return;
+    }
+
+    try {
+      // Tile layers: compatible only when crs_options is explicitly defined,
+      // meaning the user has configured the tile grid for the current CRS.
+      if (layerConf.type === "tile") {
+        layerStore.setCrsCompatibility(layerId, !!layerConf.crs_options);
+        return;
+      }
+
+      if (layerConf.type === "wmts") {
+        // Normalize the base URL: replace load-balancing templates (e.g. {a-c})
+        // and strip query parameters before building the capabilities URL.
+        let baseUrl = layerConf.url
+          .replace(/\{[a-z]-[a-z]\}/g, layerConf.url.match(/\{([a-z])-[a-z]\}/)?.[1] ?? "a")
+          .replace(/[?#].*$/, "")
+          .replace(/\/$/, "");
+
+        // Try KVP format first (works for CGI endpoints like GIBS), then REST fallback.
+        const candidates = [
+          `${baseUrl}?SERVICE=WMTS&REQUEST=GetCapabilities`,
+          `${baseUrl}/WMTSCapabilities.xml`,
+        ];
+
+        let doc = null;
+        for (const capUrl of candidates) {
+          try {
+            const res = await fetch(capUrl, { signal: AbortSignal.timeout(8000) });
+            if (!res.ok) continue;
+            const xml = await res.text();
+            doc = new DOMParser().parseFromString(xml, "text/xml");
+            // A parsed error document has a <parsererror> root element.
+            if (doc.querySelector("parsererror")) { doc = null; continue; }
+            break;
+          } catch { continue; }
+        }
+
+        if (!doc) {
+          // Couldn't fetch capabilities — leave as null (unknown).
+          layerStore.setCrsCompatibility(layerId, null);
+          return;
+        }
+
+        // Find the TileMatrixSet element whose <Identifier> matches matrixSet.
+        const sets = doc.querySelectorAll("TileMatrixSet");
+        for (const set of sets) {
+          const id = set.querySelector(":scope > Identifier, :scope > ows\\:Identifier")?.textContent?.trim();
+          if (id !== layerConf.matrixSet) continue;
+          const supportedCrs =
+            set.querySelector(":scope > SupportedCRS, :scope > ows\\:SupportedCRS")?.textContent?.trim() ?? "";
+          const compatible =
+            supportedCrs.includes(epsgCode) ||
+            supportedCrs.toUpperCase().includes(mapCrs.toUpperCase());
+          layerStore.setCrsCompatibility(layerId, compatible);
+          return;
+        }
+
+        // matrixSet was not found in capabilities — mark as incompatible.
+        layerStore.setCrsCompatibility(layerId, false);
+        return;
+      }
+
+      if (layerConf.type === "wms") {
+        // Browser-side WMS GetCapabilities is blocked by CORS on virtually all
+        // public WMS servers (the server must opt-in with CORS headers, and most
+        // don't). Attempting the fetch would always produce a browser CORS error
+        // in the console even though our catch() handles the exception. Instead
+        // we leave crsCompatible as null (unknown) for WMS layers; users can
+        // work around this by adding `crs_support: false` to the layer config.
+        layerStore.setCrsCompatibility(layerId, null);
+        return;
+      }
+    } catch (e) {
+      // Network errors etc. — leave crsCompatible as null so the UI stays neutral.
+      logger.warn("LayerManager", `CRS check failed for "${layerConf.name}":`, e.message);
+    }
+  };
+
   const processLayer = async (layerConf, category) => {
     const layerId = layerConf._layerId || generateUUID();
     const zIndex = category === LAYER_CATEGORY.BASE ? Z_INDEX.BASE : Z_INDEX.OVERLAY;
@@ -120,6 +219,11 @@ export function useLayerManager(map) {
       layerStore.setLayerStatus(layerId, LAYER_STATUS.READY);
       // Update z-indexes to respect current layer ordering
       layerStore.updateLayerZIndexes();
+    }
+
+    // Fire-and-forget CRS probe for base layers — doesn't block map init.
+    if (category === LAYER_CATEGORY.BASE) {
+      checkCrsCompatibility(layerConf, layerId);
     }
 
     return layerConfig;
