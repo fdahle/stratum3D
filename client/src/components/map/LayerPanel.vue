@@ -5,35 +5,36 @@
     </div>
 
     <div class="layer-list">
-      <!-- Drop indicator line -->
-      <div 
-        v-if="dropIndicatorIndex !== null" 
-        class="drop-indicator"
-        :style="{ top: getDropIndicatorPosition(dropIndicatorIndex) + 'px' }"
-      ></div>
-      
-      <div
-        v-for="layer in overlayLayers"
+      <template
+        v-for="(layer, index) in overlayLayers"
         :key="layer._layerId"
-        class="layer-row"
-        :class="{
-          active: layer.active,
-          'is-idle': layer.status === 'idle',
-          'layer-error': layer.status === 'error',
-          'dragging': draggedLayerId === layer._layerId,
-          'drag-over': dragOverLayerId === layer._layerId,
-        }"
-        draggable="true"
-        @dragstart="handleDragStart($event, layer)"
-        @dragend="handleDragEnd"
-        @dragover.prevent="handleDragOver($event, layer)"
-        @dragleave="handleDragLeave"
-        @drop="handleDrop($event, layer)"
-        @touchstart="handleTouchStart($event, layer)"
-        @touchmove="handleTouchMove($event)"
-        @touchend="handleTouchEnd($event)"
-        @contextmenu.prevent="handleRightClick($event, layer)"
       >
+        <!-- Drop placeholder: opens space before this layer while dragging -->
+        <div
+          v-if="isDragging && dropIndicatorIndex === index && draggedLayerId !== layer._layerId"
+          class="drop-placeholder"
+          @dragover.prevent="dropIndicatorIndex = index"
+          @drop.prevent="executeDrop(index)"
+        ></div>
+
+        <div
+          class="layer-row"
+          :class="{
+            active: layer.active,
+            'is-idle': layer.status === 'idle',
+            'layer-error': layer.status === 'error',
+            'dragging': draggedLayerId === layer._layerId,
+          }"
+          draggable="true"
+          @dragstart="handleDragStart($event, layer)"
+          @dragend="handleDragEnd"
+          @dragover.prevent="handleDragOver($event, layer, index)"
+          @drop.prevent="executeDrop(dropIndicatorIndex)"
+          @touchstart="handleTouchStart($event, layer)"
+          @touchmove="handleTouchMove($event)"
+          @touchend="handleTouchEnd($event)"
+          @contextmenu.prevent="handleRightClick($event, layer)"
+        >
         <div
           v-if="['downloading', 'processing', 'loading-details'].includes(layer.status)"
           class="progress-bg"
@@ -119,7 +120,16 @@
             </div>
           </div>
         </label>
-      </div>
+        </div>
+
+        <!-- Drop placeholder after the last layer -->
+        <div
+          v-if="isDragging && index === overlayLayers.length - 1 && dropIndicatorIndex === overlayLayers.length"
+          class="drop-placeholder"
+          @dragover.prevent="dropIndicatorIndex = overlayLayers.length"
+          @drop.prevent="executeDrop(overlayLayers.length)"
+        ></div>
+      </template>
 
       <div v-if="overlayLayers.length === 0" class="empty-state">
         {{ STRINGS.map.noLayers }}
@@ -263,8 +273,8 @@ const isLastLayer = (layerId) => {
 
 // Drag and drop state
 const draggedLayerId = ref(null);
-const dragOverLayerId = ref(null);
 const dropIndicatorIndex = ref(null);
+const isDragging = ref(false);
 
 // Touch drag state
 const touchStartY = ref(0);
@@ -274,89 +284,39 @@ const touchScrollStartY = ref(0);
 const isDraggingTouch = ref(false);
 
 const handleDragStart = (event, layer) => {
-  // Allow dragging for all layers now
   draggedLayerId.value = layer._layerId;
+  isDragging.value = true;
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('text/plain', layer._layerId);
-  
-  // Add a slight delay to allow the drag image to be created
-  setTimeout(() => {
-    event.target.style.opacity = '0.5';
-  }, 0);
 };
 
-const handleDragEnd = (event) => {
-  event.target.style.opacity = '1';
+const handleDragEnd = () => {
   draggedLayerId.value = null;
-  dragOverLayerId.value = null;
   dropIndicatorIndex.value = null;
+  isDragging.value = false;
 };
 
-const handleDragOver = (event, layer) => {
+const handleDragOver = (event, layer, index) => {
   if (!draggedLayerId.value || draggedLayerId.value === layer._layerId) return;
-  
-  event.preventDefault();
-  event.dataTransfer.dropEffect = 'move';
-  
-  // Calculate which side of the layer we're hovering over
   const rect = event.currentTarget.getBoundingClientRect();
-  const midpoint = rect.top + rect.height / 2;
-  const targetIndex = overlayLayers.value.findIndex(l => l._layerId === layer._layerId);
-  
-  if (targetIndex === -1) return;
-  
-  // Find the index of the dragged layer
-  const draggedIndex = overlayLayers.value.findIndex(l => l._layerId === draggedLayerId.value);
-  
-  // Show drop indicator above or below based on mouse position
-  if (event.clientY < midpoint) {
-    // Drop above this layer (before it)
-    dropIndicatorIndex.value = targetIndex;
-  } else {
-    // Drop below this layer (after it)
-    dropIndicatorIndex.value = targetIndex + 1;
-  }
-  
-  dragOverLayerId.value = layer._layerId;
+  dropIndicatorIndex.value = event.clientY < rect.top + rect.height / 2 ? index : index + 1;
 };
 
-const handleDragLeave = () => {
-  // Don't clear immediately as we might be moving between elements
-  // The dragover event will update it correctly
-};
+const executeDrop = (targetIndex) => {
+  const draggedId = draggedLayerId.value;
+  if (!draggedId || targetIndex === null) return;
 
-const handleDrop = (event, targetLayer) => {
-  event.preventDefault();
-  
-  const draggedId = event.dataTransfer.getData('text/plain');
-  if (!draggedId) {
-    dropIndicatorIndex.value = null;
-    return;
-  }
-  
-  // Get the dragged layer's current index in overlays
   const draggedIndex = overlayLayers.value.findIndex(l => l._layerId === draggedId);
-  
-  if (draggedIndex === -1 || dropIndicatorIndex.value === null) {
-    dropIndicatorIndex.value = null;
-    return;
+  if (draggedIndex === -1) return;
+
+  const clamped = Math.max(0, Math.min(targetIndex, overlayLayers.value.length));
+  if (draggedIndex !== clamped && draggedIndex + 1 !== clamped) {
+    layerStore.reorderLayer(draggedId, clamped);
   }
-  
-  // dropIndicatorIndex represents where to insert in the current array
-  // reorderLayer will handle the adjustment after removal
-  const targetIndex = dropIndicatorIndex.value;
-  
-  // Clamp to valid range
-  const clampedTargetIndex = Math.max(0, Math.min(targetIndex, overlayLayers.value.length));
-  
-  // Only reorder if position actually changed
-  if (draggedIndex !== clampedTargetIndex && draggedIndex + 1 !== clampedTargetIndex) {
-    layerStore.reorderLayer(draggedId, clampedTargetIndex);
-  }
-  
-  // Clear drag state
-  dragOverLayerId.value = null;
+
+  draggedLayerId.value = null;
   dropIndicatorIndex.value = null;
+  isDragging.value = false;
 };
 
 // Touch event handlers for mobile
@@ -435,7 +395,6 @@ const handleTouchEnd = (event) => {
   if (!draggedLayerId.value || !isDraggingTouch.value) {
     // If we didn't actually drag, just clear state
     draggedLayerId.value = null;
-    dragOverLayerId.value = null;
     touchDraggedElement.value = null;
     isDraggingTouch.value = false;
     return;
@@ -464,44 +423,12 @@ const handleTouchEnd = (event) => {
   
   // Clear all touch drag state
   draggedLayerId.value = null;
-  dragOverLayerId.value = null;
   dropIndicatorIndex.value = null;
+  isDragging.value = false;
   touchDraggedElement.value = null;
   isDraggingTouch.value = false;
   touchStartY.value = 0;
   touchCurrentY.value = 0;
-};
-
-// Calculate drop indicator position
-const getDropIndicatorPosition = (index) => {
-  // Get the layer list element
-  const layerList = document.querySelector('.layer-list');
-  if (!layerList) return 0;
-  
-  const layers = Array.from(layerList.querySelectorAll('.layer-row'));
-  
-  if (index === 0) {
-    // Position at the top
-    return 0;
-  } else if (index >= layers.length) {
-    // Position at the bottom
-    const lastLayer = layers[layers.length - 1];
-    if (lastLayer) {
-      const rect = lastLayer.getBoundingClientRect();
-      const listRect = layerList.getBoundingClientRect();
-      return rect.bottom - listRect.top + layerList.scrollTop;
-    }
-  } else {
-    // Position between layers
-    const targetLayer = layers[index];
-    if (targetLayer) {
-      const rect = targetLayer.getBoundingClientRect();
-      const listRect = layerList.getBoundingClientRect();
-      return rect.top - listRect.top + layerList.scrollTop;
-    }
-  }
-  
-  return 0;
 };
 </script>
 
@@ -555,28 +482,24 @@ const getDropIndicatorPosition = (index) => {
   overscroll-behavior: contain;
 }
 
-.drop-indicator {
-  position: absolute;
-  left: 10px;
-  right: 10px;
-  height: 3px;
-  background: #007bff;
-  border-radius: 2px;
-  box-shadow: 0 0 8px rgba(0, 123, 255, 0.6);
-  pointer-events: none;
-  z-index: 1000;
-  animation: pulse 0.8s ease-in-out infinite;
+.drop-placeholder {
+  height: 36px;
+  border: 2px dashed #007bff;
+  border-radius: 4px;
+  background: rgba(0, 123, 255, 0.06);
+  margin-bottom: 5px;
+  transition: all 0.15s ease;
+  animation: placeholder-pulse 0.8s ease-in-out infinite;
 }
 
-@keyframes pulse {
-  0%, 100% {
-    opacity: 1;
-    transform: scaleY(1);
-  }
-  50% {
-    opacity: 0.7;
-    transform: scaleY(1.2);
-  }
+.theme-dark .drop-placeholder {
+  border-color: #4d9fff;
+  background: rgba(77, 159, 255, 0.08);
+}
+
+@keyframes placeholder-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 .layer-row {
@@ -588,19 +511,14 @@ const getDropIndicatorPosition = (index) => {
   background: white;
   border: 1px solid #eee;
   border-radius: 4px;
-  transition: all 0.2s;
+  transition: opacity 0.15s ease;
   overflow: hidden;
   cursor: grab;
 }
 
 .layer-row.dragging {
-  opacity: 0.5;
+  opacity: 0.35;
   cursor: grabbing;
-}
-
-.layer-row.drag-over {
-  /* Subtle highlight - main indicator is the line */
-  background-color: rgba(0, 123, 255, 0.05);
 }
 
 .theme-dark .layer-row {

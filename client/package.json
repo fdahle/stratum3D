@@ -14,7 +14,9 @@
   },
   "dependencies": {
     "@giro3d/giro3d": "^1.0.0",
+    "copc": "^0.0.8",
     "js-yaml": "^4.1.1",
+    "laz-perf": "^0.0.7",
     "lodash": "^4.17.23",
     "ol": "^10.7.0",
     "pinia": "^3.0.4",

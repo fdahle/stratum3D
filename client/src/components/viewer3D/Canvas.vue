@@ -540,9 +540,9 @@ const loadLASFile = async (file) => {
       import('laz-perf'),
     ]);
 
-    // Initialize laz-perf with the WASM file served from /public/
+    // Initialize laz-perf with the WASM file served from /public/wasm/
     const lazPerf = await createLazPerf({
-      locateFile: (file) => `/${file}`,
+      locateFile: (file) => `/wasm/${file}`,
     });
 
     // Parse header
