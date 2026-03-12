@@ -28,6 +28,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const selectionColor = persistedRef("settings_selectionColor", "#FFFF00");
   const theme = persistedRef("settings_theme", "dark");
   const showArrowButtons = persistedRef("settings_showArrowButtons", false);
+  const showMapRibbon = persistedRef("settings_showMapRibbon", true);
 
   // 2. ACTIONS
   const toggleInfoBar = () => { showInfoBar.value = !showInfoBar.value; };
@@ -35,6 +36,7 @@ export const useSettingsStore = defineStore("settings", () => {
   const toggleTheme = () => { theme.value = theme.value === "dark" ? "light" : "dark"; };
   const setTheme = (newTheme) => { theme.value = newTheme; };
   const toggleArrowButtons = () => { showArrowButtons.value = !showArrowButtons.value; };
+  const toggleMapRibbon = () => { showMapRibbon.value = !showMapRibbon.value; };
 
   return {
     showInfoBar,
@@ -46,5 +48,7 @@ export const useSettingsStore = defineStore("settings", () => {
     setTheme,
     showArrowButtons,
     toggleArrowButtons,
+    showMapRibbon,
+    toggleMapRibbon,
   };
 });

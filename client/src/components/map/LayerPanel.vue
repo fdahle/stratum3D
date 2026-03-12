@@ -1,6 +1,6 @@
 <template>
   <div class="layerpanel">
-    <div class="header">
+    <div v-if="!settingsStore.showMapRibbon" class="header">
       <h3>Map Layers</h3>
     </div>
 

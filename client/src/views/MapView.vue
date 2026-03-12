@@ -1,33 +1,43 @@
 <template>
   <div class="app-layout">
-    <button class="menu-toggle" @click="isLayerPanelOpen = !isLayerPanelOpen">
-      ☰
-    </button>
+    <MapRibbonMenu
+      v-if="settingsStore.showMapRibbon"
+      :is-measuring-distance="isMeasurementModalVisible && activeMeasurementType === 'distance'"
+      :is-measuring-area="isMeasurementModalVisible && activeMeasurementType === 'area'"
+      @add-files="handleRibbonFiles"
+      @measure-distance="onMeasureDistance"
+      @measure-area="onMeasureArea"
+    />
 
-    <div
-      class="main-layerpanel-wrap"
-      :class="{ open: isLayerPanelOpen }"
-      :style="{ width: layerPanelWidth + 'px' }"
-    >
-      <LayerPanel
-        class="main-layerpanel"
-        @open-settings="isSettingsOpen = true"
-      />
-      <div class="layerpanel-resize-handle" @mousedown="startLayerPanelResize"></div>
-    </div>
+    <div class="content-row">
+      <button class="menu-toggle" @click="isLayerPanelOpen = !isLayerPanelOpen">
+        ☰
+      </button>
 
-    <div
-      v-if="isLayerPanelOpen"
-      class="layerpanel-overlay"
-      @click="isLayerPanelOpen = false"
-    ></div>
+      <div
+        class="main-layerpanel-wrap"
+        :class="{ open: isLayerPanelOpen }"
+        :style="{ width: layerPanelWidth + 'px' }"
+      >
+        <LayerPanel
+          class="main-layerpanel"
+          @open-settings="isSettingsOpen = true"
+        />
+        <div class="layerpanel-resize-handle" @mousedown="startLayerPanelResize"></div>
+      </div>
 
-    <div
-      class="map-area"
-      @dragover.prevent="handleDragOver"
-      @dragleave="handleDragLeave"
-      @drop.prevent="handleDrop"
-    >
+      <div
+        v-if="isLayerPanelOpen"
+        class="layerpanel-overlay"
+        @click="isLayerPanelOpen = false"
+      ></div>
+
+      <div
+        class="map-area"
+        @dragover.prevent="handleDragOver"
+        @dragleave="handleDragLeave"
+        @drop.prevent="handleDrop"
+      >
       <MapWidget />
       <SearchBar />
       <div
@@ -63,14 +73,35 @@
           {{ notification.message }}
         </div>
       </Transition>
+      </div>
     </div>
 
     <Settings :is-open="isSettingsOpen" @close="isSettingsOpen = false" />
+
+    <MeasurementModal
+      :is-visible="isMeasurementModalVisible"
+      :measurement-type="activeMeasurementType"
+      :measurements="measurements"
+      :points-count="measurementPointsCount"
+      :current-value="currentMeasurementValue"
+      @close="closeMeasurementModal"
+      @reset="resetMeasurements"
+      @remove-measurement="removeMeasurement"
+      @save-current="saveCurrentMeasurement"
+      @undo-point="undoLastPoint"
+      @cancel-measurement="cancelCurrentMeasurement"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, inject } from "vue";
+import { ref, inject, markRaw, onUnmounted } from "vue";
+import Draw from "ol/interaction/Draw";
+import VectorLayer from "ol/layer/Vector";
+import VectorSource from "ol/source/Vector";
+import { getLength, getArea } from "ol/sphere";
+import { Stroke, Style, Fill, Circle as CircleStyle } from "ol/style";
+import { unByKey } from "ol/Observable";
 import { useMapStore } from "../stores/map/mapStore";
 import AttributePanel from "../components/map/AttributePanel.vue";
 import BaseMapSwitcher from "../components/map/BaseMapSwitcher.vue";
@@ -78,6 +109,8 @@ import InformationBar from "../components/map/InformationBar.vue";
 import MapWidget from "../components/map/MapWidget.vue";
 import SearchBar from "../components/map/SearchBar.vue";
 import LayerPanel from "../components/map/LayerPanel.vue";
+import MapRibbonMenu from "../components/map/MapRibbonMenu.vue";
+import MeasurementModal from "../components/modals/MeasurementModal.vue";
 import Settings from "../components/modals/Settings.vue";
 import { useSettingsStore } from "../stores/settingsStore";
 
@@ -153,6 +186,183 @@ const handleDrop = (event) => {
     processDroppedFile(file);
   }
 };
+
+const handleRibbonFiles = (files) => {
+  for (const file of files) {
+    processDroppedFile(file);
+  }
+};
+
+// ─── Measurement ─────────────────────────────────────────────────────────────
+const isMeasurementModalVisible = ref(false);
+const activeMeasurementType = ref('distance');
+const measurements = ref([]);
+const measurementPointsCount = ref(0);
+const currentMeasurementValue = ref(null);
+
+let measureSource = null;
+let measureLayer = null;
+let measureDraw = null;
+let measureGeomKey = null;
+
+const measureStyle = new Style({
+  fill: new Fill({ color: 'rgba(59, 130, 246, 0.12)' }),
+  stroke: new Stroke({ color: '#3b82f6', width: 2, lineDash: [6, 4] }),
+  image: new CircleStyle({
+    radius: 5,
+    fill: new Fill({ color: '#3b82f6' }),
+    stroke: new Stroke({ color: '#fff', width: 1.5 }),
+  }),
+});
+
+const formatLength = (geom, projection) => {
+  const len = getLength(geom, { projection });
+  return len >= 1000 ? (len / 1000).toFixed(2) + ' km' : Math.round(len) + ' m';
+};
+
+const formatArea = (geom, projection) => {
+  const area = getArea(geom, { projection });
+  return area >= 1_000_000
+    ? (area / 1_000_000).toFixed(2) + ' km\u00b2'
+    : Math.round(area) + ' m\u00b2';
+};
+
+const stopMeasureMode = () => {
+  const map = mapStore.getMap();
+  if (measureGeomKey) { unByKey(measureGeomKey); measureGeomKey = null; }
+  if (measureDraw && map) { map.removeInteraction(measureDraw); measureDraw = null; }
+  if (measureLayer && map) { map.removeLayer(measureLayer); measureLayer = null; }
+  measureSource = null;
+  measurements.value = [];
+  measurementPointsCount.value = 0;
+  currentMeasurementValue.value = null;
+};
+
+const startMeasureMode = (type) => {
+  const map = mapStore.getMap();
+  if (!map) return;
+  // Stop current draw interaction (keep saved features on layer)
+  if (measureGeomKey) { unByKey(measureGeomKey); measureGeomKey = null; }
+  if (measureDraw) { map.removeInteraction(measureDraw); measureDraw = null; }
+  // Reuse existing layer or create fresh one
+  if (!measureLayer) {
+    const source = new VectorSource();
+    measureSource = source;
+    measureLayer = markRaw(new VectorLayer({ source, style: measureStyle, zIndex: 9999 }));
+    map.addLayer(measureLayer);
+  }
+  const projection = map.getView().getProjection();
+  const geomType = type === 'distance' ? 'LineString' : 'Polygon';
+  const draw = new Draw({ source: measureSource, type: geomType, style: measureStyle });
+
+  draw.on('drawstart', (evt) => {
+    measurementPointsCount.value = 0;
+    currentMeasurementValue.value = null;
+    measureGeomKey = evt.feature.getGeometry().on('change', (e) => {
+      const geom = e.target;
+      if (type === 'distance') {
+        const coords = geom.getCoordinates();
+        // Last coord is the live cursor — not a committed click
+        const count = Math.max(0, coords.length - 1);
+        measurementPointsCount.value = count;
+        if (count >= 2) currentMeasurementValue.value = formatLength(geom, projection);
+      } else {
+        const ring = geom.getCoordinates()[0];
+        // Polygon ring during drawing: [p1,...,pN, cursor, p1(close)] → n+2 length
+        const count = Math.max(0, ring.length - 2);
+        measurementPointsCount.value = count;
+        if (count >= 3) currentMeasurementValue.value = formatArea(geom, projection);
+      }
+    });
+  });
+
+  draw.on('drawend', (evt) => {
+    if (measureGeomKey) { unByKey(measureGeomKey); measureGeomKey = null; }
+    const geom = evt.feature.getGeometry();
+    const value = type === 'distance'
+      ? formatLength(geom, projection)
+      : formatArea(geom, projection);
+    measurements.value.push({
+      type,
+      value,
+      feature: markRaw(evt.feature),
+      timestamp: new Date().toISOString(),
+    });
+    measurementPointsCount.value = 0;
+    currentMeasurementValue.value = null;
+  });
+
+  measureDraw = draw;
+  map.addInteraction(draw);
+};
+
+const onMeasureDistance = () => {
+  if (isMeasurementModalVisible.value && activeMeasurementType.value === 'distance') {
+    closeMeasurementModal();
+  } else {
+    if (isMeasurementModalVisible.value) {
+      if (measureDraw) measureDraw.abortDrawing();
+      measurementPointsCount.value = 0;
+      currentMeasurementValue.value = null;
+    }
+    activeMeasurementType.value = 'distance';
+    isMeasurementModalVisible.value = true;
+    startMeasureMode('distance');
+  }
+};
+
+const onMeasureArea = () => {
+  if (isMeasurementModalVisible.value && activeMeasurementType.value === 'area') {
+    closeMeasurementModal();
+  } else {
+    if (isMeasurementModalVisible.value) {
+      if (measureDraw) measureDraw.abortDrawing();
+      measurementPointsCount.value = 0;
+      currentMeasurementValue.value = null;
+    }
+    activeMeasurementType.value = 'area';
+    isMeasurementModalVisible.value = true;
+    startMeasureMode('area');
+  }
+};
+
+const closeMeasurementModal = () => {
+  isMeasurementModalVisible.value = false;
+  stopMeasureMode();
+};
+
+const resetMeasurements = () => {
+  measurements.value = [];
+  if (measureSource) measureSource.clear();
+  measurementPointsCount.value = 0;
+  currentMeasurementValue.value = null;
+  if (measureDraw) measureDraw.abortDrawing();
+};
+
+const removeMeasurement = (index) => {
+  const m = measurements.value[index];
+  if (m?.feature && measureSource) measureSource.removeFeature(m.feature);
+  measurements.value.splice(index, 1);
+};
+
+const saveCurrentMeasurement = () => {
+  const minPts = activeMeasurementType.value === 'distance' ? 2 : 3;
+  if (measureDraw && measurementPointsCount.value >= minPts) {
+    measureDraw.finishDrawing();
+  }
+};
+
+const undoLastPoint = () => {
+  if (measureDraw) measureDraw.removeLastPoint();
+};
+
+const cancelCurrentMeasurement = () => {
+  if (measureDraw) measureDraw.abortDrawing();
+  measurementPointsCount.value = 0;
+  currentMeasurementValue.value = null;
+};
+
+onUnmounted(stopMeasureMode);
 
 /**
  * Spawn a short-lived Web Worker that uses geotiff.js fromBlob() (efficient
@@ -285,9 +495,17 @@ const processDroppedFile = async (file) => {
 /* --- DEFAULT DESKTOP STYLES --- */
 .app-layout {
   display: flex;
+  flex-direction: column;
   height: 100vh;
   width: 100%;
   overflow: hidden;
+}
+
+.content-row {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  position: relative;
 }
 
 .main-layerpanel-wrap {
@@ -321,6 +539,7 @@ const processDroppedFile = async (file) => {
   flex: 1;
   position: relative;
   min-width: 0;
+  overflow: hidden;
 }
 
 .menu-toggle {

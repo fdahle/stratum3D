@@ -61,9 +61,28 @@
 
               <div class="setting-row">
                 <div class="setting-info">
+                  <label for="map-ribbon-toggle">Show Map Ribbon</label>
+                  <p class="setting-desc">
+                    Display the ribbon toolbar at the top of the map view.
+                  </p>
+                </div>
+
+                <div class="toggle-switch">
+                  <input
+                    id="map-ribbon-toggle"
+                    type="checkbox"
+                    :checked="showMapRibbon"
+                    @change="toggleMapRibbon"
+                  />
+                  <label for="map-ribbon-toggle" class="slider"></label>
+                </div>
+              </div>
+
+              <div class="setting-row">
+                <div class="setting-info">
                   <label for="arrow-buttons-toggle">Show Layer Order Arrows</label>
                   <p class="setting-desc">
-                    Display ▲▼ buttons for layer ordering. Drag & drop always available.
+                    Display ▲▼ buttons for layer ordering. Drag &amp; drop always available.
                   </p>
                 </div>
 
@@ -127,10 +146,8 @@ const openAcknowledgments = () => {
 };
 
 // Extract State (Must use storeToRefs to keep it reactive!)
-const { showInfoBar, showArrowButtons, theme } = storeToRefs(settingsStore);
-
-// Extract Actions (Can be destructured directly)
-const { toggleInfoBar, toggleArrowButtons, toggleTheme } = settingsStore;
+const { showInfoBar, showArrowButtons, showMapRibbon, theme } = storeToRefs(settingsStore);
+const { toggleInfoBar, toggleArrowButtons, toggleMapRibbon, toggleTheme } = settingsStore;
 </script>
 
 <style scoped>

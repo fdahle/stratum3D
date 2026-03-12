@@ -6,7 +6,7 @@
 
         <!-- ── Multi-selection overview ── -->
         <template v-if="isMultiSelect">
-          <div class="panel-header">
+          <div v-if="!settingsStore.showMapRibbon" class="panel-header">
             <h3>{{ selectedFeatures.length }} features selected</h3>
             <button @click="clearSelection" class="close-btn">×</button>
           </div>
@@ -41,7 +41,7 @@
 
         <!-- ── Single feature detail ── -->
         <template v-else>
-          <div class="panel-header">
+          <div v-if="!settingsStore.showMapRibbon" class="panel-header">
             <div class="header-left">
               <button v-if="activeDetailFeature" @click="selectionStore.clearActiveDetail()" class="back-btn" title="Back to selection">‹</button>
               <h3>Feature Details</h3>
@@ -168,12 +168,14 @@ import { storeToRefs } from "pinia";
 import { useRouter } from "vue-router";
 import { useSelectionStore } from "../../stores/map/selectionStore";
 import { useLayerStore } from "../../stores/map/layerStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 import { formatKey } from "../../utils/helpers";
 import { logger } from "../../utils/logger";
 
 const router = useRouter();
 const selectionStore = useSelectionStore();
 const layerStore = useLayerStore();
+const settingsStore = useSettingsStore();
 const { selectedFeature, selectedFeatures, activeDetailFeature } = storeToRefs(selectionStore);
 const { clearSelection } = selectionStore;
 
