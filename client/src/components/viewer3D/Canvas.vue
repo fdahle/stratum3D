@@ -63,6 +63,23 @@ const {
 
 let animationFrameId = null;
 const raycaster = new THREE.Raycaster();
+
+// Cancellation support
+const loadingCancelled = ref(false);
+const activeReaders = new Set();
+let activeStreamReader = null;
+
+const cancelLoading = () => {
+  loadingCancelled.value = true;
+  for (const reader of activeReaders) {
+    try { reader.abort(); } catch (_) {}
+  }
+  activeReaders.clear();
+  if (activeStreamReader) {
+    try { activeStreamReader.cancel(); } catch (_) {}
+    activeStreamReader = null;
+  }
+};
 const mouse = new THREE.Vector2();
 const measurementMarkers = [];
 
@@ -148,6 +165,7 @@ const handleResize = () => {
 };
 
 const loadModelFromUrl = async (url, modelIndex = 0) => {
+  loadingCancelled.value = false;
   try {
     const fullUrl = url.startsWith('http') ? url : `http://localhost:3000/${url}`;
     console.log(`Loading model ${modelIndex + 1}/${props.modelUrls.length}:`, fullUrl);
@@ -163,9 +181,15 @@ const loadModelFromUrl = async (url, modelIndex = 0) => {
     let loaded = 0;
     
     const reader = response.body.getReader();
+    activeStreamReader = reader;
     const chunks = [];
     
     while (true) {
+      if (loadingCancelled.value) {
+        reader.cancel();
+        activeStreamReader = null;
+        return;
+      }
       const { done, value } = await reader.read();
       
       if (done) break;
@@ -203,6 +227,9 @@ const loadModelFromUrl = async (url, modelIndex = 0) => {
       status: 'decoding'
     });
     
+    activeStreamReader = null;
+    if (loadingCancelled.value) return;
+
     const text = new TextDecoder('utf-8').decode(chunksAll);
     
     // Emit parsing started
@@ -211,11 +238,16 @@ const loadModelFromUrl = async (url, modelIndex = 0) => {
     // Use setTimeout to allow UI to update before heavy parsing
     await new Promise(resolve => setTimeout(resolve, 100));
     
+    if (loadingCancelled.value) return;
+
     // Parse the loaded text (now async with progress)
     const object = await loadObjFromText(text, modelIndex);
     
-    emit('model-loaded', { url, index: modelIndex, object });
+    if (!loadingCancelled.value) {
+      emit('model-loaded', { url, index: modelIndex, object });
+    }
   } catch (error) {
+    if (loadingCancelled.value) return;
     console.error('Error loading model from URL:', error);
     emit('loading-error', { url, error: error.message });
   }
@@ -287,6 +319,7 @@ const parseObjWithProgress = async (text, modelIndex) => {
   
   // Process lines in chunks
   for (let i = 0; i < totalLines; i += chunkSize) {
+    if (loadingCancelled.value) throw new Error('cancelled');
     const end = Math.min(i + chunkSize, totalLines);
     const chunk = lines.slice(i, end);
     
@@ -451,7 +484,9 @@ const adjustCameraToModel = (object, size, center) => {
 };
 
 const loadUserObjFile = async (file) => {
+  loadingCancelled.value = false;
   const reader = new FileReader();
+  activeReaders.add(reader);
   const currentIndex = fileLoadedCount.value;
   const fileSize = file.size;
   
@@ -473,18 +508,23 @@ const loadUserObjFile = async (file) => {
   };
   
   reader.onload = async (e) => {
+    activeReaders.delete(reader);
+    if (loadingCancelled.value) return;
     emit('parsing-started', { url: file.name, index: currentIndex, size: fileSize });
     
     const object = await loadObjFromText(e.target.result, currentIndex);
     
-    if (object) {
+    if (object && !loadingCancelled.value) {
       object.userData.type = 'model';
       fileLoadedCount.value++;
       emit('model-loaded', { url: file.name, index: currentIndex, object });
     }
   };
   
+  reader.onabort = () => { activeReaders.delete(reader); };
+
   reader.onerror = () => {
+    activeReaders.delete(reader);
     emit('loading-error', { url: file.name, error: 'Failed to read file' });
   };
   
@@ -492,7 +532,11 @@ const loadUserObjFile = async (file) => {
 };
 
 // Point cloud loading
-const loadPointCloudFile = async (file) => {
+const loadPointCloudFile = (file) => {
+  loadingCancelled.value = false;
+  _loadPointCloudFileInner(file);
+};
+const _loadPointCloudFileInner = async (file) => {
   const lower = file.name.toLowerCase();
 
   if (lower.endsWith('.ply')) {
@@ -528,6 +572,8 @@ const loadLASFile = async (file) => {
     emit('loading-error', { url: file.name, error: 'Failed to read file' });
     return;
   }
+
+  if (loadingCancelled.value) return;
 
   emit('loading-progress', {
     url: file.name, index: currentIndex,
@@ -586,10 +632,13 @@ const loadLASFile = async (file) => {
       getB = view.getter('Blue');
     }
 
+    if (loadingCancelled.value) return;
+
     const positions = new Float32Array(pointCount * 3);
     const colors = new Float32Array(pointCount * 3);
 
     for (let i = 0; i < pointCount; i++) {
+      if (i % 100000 === 0 && loadingCancelled.value) return;
       const x = getX(i) * scale[0] + offset[0];
       const y = getY(i) * scale[1] + offset[1];
       const z = getZ(i) * scale[2] + offset[2];
@@ -649,6 +698,7 @@ const loadLASFile = async (file) => {
 
 const loadPLYFile = (file) => {
   const reader = new FileReader();
+  activeReaders.add(reader);
   const currentIndex = fileLoadedCount.value;
   const fileSize = file.size;
   
@@ -667,7 +717,11 @@ const loadPLYFile = (file) => {
     }
   };
   
+  reader.onabort = () => { activeReaders.delete(reader); };
+
   reader.onload = (e) => {
+    activeReaders.delete(reader);
+    if (loadingCancelled.value) return;
     emit('loading-progress', {
       url: file.name,
       index: currentIndex,
@@ -679,6 +733,7 @@ const loadPLYFile = (file) => {
     
     // Use setTimeout to allow UI to update before synchronous parsing
     setTimeout(() => {
+      if (loadingCancelled.value) return;
       const loader = new PLYLoader();
       try {
         const geometry = loader.parse(e.target.result);
@@ -744,6 +799,7 @@ const loadPLYFile = (file) => {
   };
   
   reader.onerror = () => {
+    activeReaders.delete(reader);
     emit('loading-error', { url: file.name, error: 'Failed to read file' });
   };
   
@@ -752,7 +808,9 @@ const loadPLYFile = (file) => {
 
 // Camera frustum visualization
 const loadCamerasFile = async (file) => {
+  loadingCancelled.value = false;
   const reader = new FileReader();
+  activeReaders.add(reader);
   const fileSize = file.size;
   
   // Track progress
@@ -770,7 +828,11 @@ const loadCamerasFile = async (file) => {
     }
   };
   
+  reader.onabort = () => { activeReaders.delete(reader); };
+
   reader.onload = (e) => {
+    activeReaders.delete(reader);
+    if (loadingCancelled.value) return;
     emit('loading-progress', {
       url: file.name,
       index: 0,
@@ -782,6 +844,7 @@ const loadCamerasFile = async (file) => {
     
     // Use setTimeout to allow UI to update before synchronous parsing
     setTimeout(() => {
+      if (loadingCancelled.value) return;
       try {
         const content = e.target.result;
         const cameras = parseCamerasTxt(content);
@@ -821,6 +884,7 @@ const loadCamerasFile = async (file) => {
   };
   
   reader.onerror = () => {
+    activeReaders.delete(reader);
     emit('loading-error', { url: file.name, error: 'Failed to read file' });
   };
   
@@ -1825,6 +1889,7 @@ watch(theme, (newTheme) => {
 
 // Expose methods for parent component
 defineExpose({
+  cancelLoading,
   loadUserObjFile,
   loadMarkersFile,
   loadModelFromUrl,

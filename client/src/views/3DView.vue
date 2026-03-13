@@ -57,6 +57,7 @@
               ></div>
             </div>
             <p class="loading-status">{{ loadingStatus }}</p>
+            <button class="stop-btn" @click="handleStopLoading">&#9632; Stop</button>
           </div>
         </div>
 
@@ -476,6 +477,16 @@ const showError = (msg) => {
   errorMessage.value = msg;
   setTimeout(() => { errorMessage.value = null; }, 3000);
 };
+
+const handleStopLoading = () => {
+  if (canvasRef.value?.cancelLoading) {
+    canvasRef.value.cancelLoading();
+  }
+  isLoading.value = false;
+  loadingProgress.value = 0;
+  loadingStatus.value = '';
+  loadingTitle.value = 'Loading...';
+};
 </script>
 
 <style scoped>
@@ -604,6 +615,32 @@ const showError = (msg) => {
 
 .theme-light .loading-status {
   color: rgba(0, 0, 0, 0.6);
+}
+
+.stop-btn {
+  margin-top: 16px;
+  padding: 7px 20px;
+  background: rgba(220, 53, 69, 0.85);
+  color: white;
+  border: 1px solid rgba(220, 53, 69, 0.6);
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: "Segoe UI", sans-serif;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.stop-btn:hover {
+  background: #dc3545;
+  transform: scale(1.03);
+}
+
+.stop-btn:active {
+  transform: scale(0.97);
+}
+
+.theme-light .stop-btn {
+  background: rgba(220, 53, 69, 0.9);
 }
 
 .error-toast {
