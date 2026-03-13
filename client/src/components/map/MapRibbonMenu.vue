@@ -71,6 +71,20 @@
           </div>
           <span class="group-label">Measure</span>
         </div>
+        <div class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <button
+              class="ribbon-btn"
+              :class="{ active: isElevationOpen }"
+              @click="$emit('elevation-profile')"
+              title="Sample elevation along a drawn line"
+            >
+              <span class="btn-icon" v-html="ICON_ELEVATION"></span>
+              <span class="btn-label">Elevation</span>
+            </button>
+          </div>
+          <span class="group-label">Analyse</span>
+        </div>
       </div>
     </div>
 
@@ -91,14 +105,15 @@ import { ref } from 'vue';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useMapStore } from '@/stores/map/mapStore';
 import { useLayerStore } from '@/stores/map/layerStore';
-import { ICON_FIT, ICON_DISTANCE, ICON_AREA } from '@/constants/icons.js';
+import { ICON_FIT, ICON_DISTANCE, ICON_AREA, ICON_ELEVATION } from '@/constants/icons.js';
 
 const props = defineProps({
   isMeasuringDistance: { type: Boolean, default: false },
   isMeasuringArea:     { type: Boolean, default: false },
+  isElevationOpen:     { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['add-files', 'measure-distance', 'measure-area']);
+const emit = defineEmits(['add-files', 'measure-distance', 'measure-area', 'elevation-profile']);
 
 const settingsStore = useSettingsStore();
 const mapStore = useMapStore();

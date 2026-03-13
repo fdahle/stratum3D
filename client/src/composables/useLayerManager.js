@@ -201,6 +201,15 @@ export function useLayerManager(map) {
         break;
       case "geotiff":
         layerConfig = createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId);
+        layerConfig.metadata = {
+          bands:           layerConf.bandCount       ?? null,
+          dataMin:         layerConf.dataMin         ?? null,
+          dataMax:         layerConf.dataMax         ?? null,
+          noDataValue:     layerConf.noDataValue     ?? null,
+          extent:          layerConf.extent          ?? null,
+          tiffProjection:  layerConf.tiffProjection  ?? null,
+          file:            layerConf.file            ?? null,
+        };
         break;
       case "geojson":
         layerConfig = createGeoJSONLayerConfig(layerConf, layerId);
@@ -416,6 +425,7 @@ export function useLayerManager(map) {
       condition: click,
       toggleCondition: shiftKeyOnly, // shift+click adds/removes from selection
       style: selectionStyleFunction,
+      filter: (feature) => feature.get('_layerId') != null, // exclude measurement/temp features
     });
 
     selectInteraction.on("select", (e) => {
@@ -461,6 +471,12 @@ export function useLayerManager(map) {
     map.addInteraction(selectInteraction);
   };
 
+  const setSelectionActive = (active) => {
+    if (selectInteraction) selectInteraction.setActive(active);
+    if (dragBoxInteraction) dragBoxInteraction.setActive(active);
+    if (!active) selectionStore.clearSelection();
+  };
+
   const cleanup = () => {
     activeWorkers.forEach((w) => w.terminate());
     activeWorkers.clear();
@@ -475,5 +491,5 @@ export function useLayerManager(map) {
     }
   };
 
-  return { processLayer, cleanup, applyLayerColor, searchIndex, setupSelection };
+  return { processLayer, cleanup, applyLayerColor, searchIndex, setupSelection, setSelectionActive };
 }

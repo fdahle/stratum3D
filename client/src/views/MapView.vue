@@ -4,9 +4,11 @@
       v-if="settingsStore.showMapRibbon"
       :is-measuring-distance="isMeasurementModalVisible && activeMeasurementType === 'distance'"
       :is-measuring-area="isMeasurementModalVisible && activeMeasurementType === 'area'"
+      :is-elevation-open="isElevationModalVisible"
       @add-files="handleRibbonFiles"
       @measure-distance="onMeasureDistance"
       @measure-area="onMeasureArea"
+      @elevation-profile="onElevationProfile"
     />
 
     <div class="content-row">
@@ -91,6 +93,15 @@
       @undo-point="undoLastPoint"
       @cancel-measurement="cancelCurrentMeasurement"
     />
+
+    <ElevationModal
+      :is-visible="isElevationModalVisible"
+      :is-drawing="isElevationDrawing"
+      :is-loading="isElevationLoading"
+      :profile-data="elevationProfile"
+      @close="closeElevationModal"
+      @toggle-draw="onToggleElevationDraw"
+    />
   </div>
 </template>
 
@@ -98,11 +109,14 @@
 import { ref, inject, markRaw, onUnmounted } from "vue";
 import Draw from "ol/interaction/Draw";
 import VectorLayer from "ol/layer/Vector";
+import { transform as olTransform, get as getOlProjection } from "ol/proj";
+import { fromBlob, fromUrl } from "geotiff";
 import VectorSource from "ol/source/Vector";
 import { getLength, getArea } from "ol/sphere";
 import { Stroke, Style, Fill, Circle as CircleStyle } from "ol/style";
 import { unByKey } from "ol/Observable";
 import { useMapStore } from "../stores/map/mapStore";
+import { useLayerStore } from "../stores/map/layerStore";
 import AttributePanel from "../components/map/AttributePanel.vue";
 import BaseMapSwitcher from "../components/map/BaseMapSwitcher.vue";
 import InformationBar from "../components/map/InformationBar.vue";
@@ -111,12 +125,13 @@ import SearchBar from "../components/map/SearchBar.vue";
 import LayerPanel from "../components/map/LayerPanel.vue";
 import MapRibbonMenu from "../components/map/MapRibbonMenu.vue";
 import MeasurementModal from "../components/modals/MeasurementModal.vue";
+import ElevationModal from "../components/modals/ElevationModal.vue";
 import Settings from "../components/modals/Settings.vue";
 import { useSettingsStore } from "../stores/settingsStore";
-
 // Re-setup the local state
 const settingsStore = useSettingsStore();
 const mapStore = useMapStore();
+const layerStore = useLayerStore();
 const isSettingsOpen = ref(false);
 const isLayerPanelOpen = ref(false);
 
@@ -300,6 +315,7 @@ const onMeasureDistance = () => {
   if (isMeasurementModalVisible.value && activeMeasurementType.value === 'distance') {
     closeMeasurementModal();
   } else {
+    layerManagerRef.value?.setSelectionActive(false);
     if (isMeasurementModalVisible.value) {
       if (measureDraw) measureDraw.abortDrawing();
       measurementPointsCount.value = 0;
@@ -315,6 +331,7 @@ const onMeasureArea = () => {
   if (isMeasurementModalVisible.value && activeMeasurementType.value === 'area') {
     closeMeasurementModal();
   } else {
+    layerManagerRef.value?.setSelectionActive(false);
     if (isMeasurementModalVisible.value) {
       if (measureDraw) measureDraw.abortDrawing();
       measurementPointsCount.value = 0;
@@ -329,6 +346,7 @@ const onMeasureArea = () => {
 const closeMeasurementModal = () => {
   isMeasurementModalVisible.value = false;
   stopMeasureMode();
+  layerManagerRef.value?.setSelectionActive(true);
 };
 
 const resetMeasurements = () => {
@@ -363,6 +381,206 @@ const cancelCurrentMeasurement = () => {
 };
 
 onUnmounted(stopMeasureMode);
+
+// ─── Elevation Profile ────────────────────────────────────────────────────────
+const isElevationModalVisible = ref(false);
+const isElevationDrawing = ref(false);
+const isElevationLoading = ref(false);
+const elevationProfile = ref(null);
+
+let elevationDrawInteraction = null;
+let elevationDrawLayer = null;
+let elevationDrawSource = null;
+
+const elevationLineStyle = new Style({
+  stroke: new Stroke({ color: '#f59e0b', width: 2, lineDash: [6, 4] }),
+  image: new CircleStyle({
+    radius: 4,
+    fill: new Fill({ color: '#f59e0b' }),
+    stroke: new Stroke({ color: '#fff', width: 1.5 }),
+  }),
+});
+
+const stopElevationDraw = () => {
+  const map = mapStore.getMap();
+  if (elevationDrawInteraction && map) {
+    map.removeInteraction(elevationDrawInteraction);
+    elevationDrawInteraction = null;
+  }
+  if (elevationDrawLayer && map) {
+    map.removeLayer(elevationDrawLayer);
+    elevationDrawLayer = null;
+    elevationDrawSource = null;
+  }
+  isElevationDrawing.value = false;
+};
+
+const onElevationProfile = () => {
+  if (isElevationModalVisible.value) {
+    closeElevationModal();
+  } else {
+    layerManagerRef.value?.setSelectionActive(false);
+    isElevationModalVisible.value = true;
+  }
+};
+
+const closeElevationModal = () => {
+  isElevationModalVisible.value = false;
+  stopElevationDraw();
+  elevationProfile.value = null;
+  layerManagerRef.value?.setSelectionActive(true);
+};
+
+const onToggleElevationDraw = (layerId) => {
+  if (isElevationDrawing.value) {
+    stopElevationDraw();
+    return;
+  }
+  const map = mapStore.getMap();
+  if (!map || !layerId) return;
+
+  isElevationDrawing.value = true;
+  elevationProfile.value = null;
+
+  elevationDrawSource = new VectorSource();
+  elevationDrawLayer = markRaw(new VectorLayer({
+    source: elevationDrawSource,
+    style: elevationLineStyle,
+    zIndex: 9998,
+  }));
+  map.addLayer(elevationDrawLayer);
+
+  const draw = new Draw({ source: elevationDrawSource, type: 'LineString', style: elevationLineStyle, maxPoints: 50 });
+  draw.on('drawend', async (evt) => {
+    map.removeInteraction(elevationDrawInteraction);
+    elevationDrawInteraction = null;
+    isElevationDrawing.value = false;
+
+    const geom = evt.feature.getGeometry();
+    isElevationLoading.value = true;
+    try {
+      elevationProfile.value = await computeElevationProfile(layerId, geom);
+    } catch (e) {
+      console.error('Elevation profile failed:', e.message);
+    } finally {
+      isElevationLoading.value = false;
+    }
+  });
+
+  elevationDrawInteraction = draw;
+  map.addInteraction(draw);
+};
+
+const _sampleLinePoints = (coords, numSamples) => {
+  if (coords.length < 2) return coords.slice();
+  const segs = [];
+  let totalLen = 0;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const dx = coords[i + 1][0] - coords[i][0];
+    const dy = coords[i + 1][1] - coords[i][1];
+    const len = Math.sqrt(dx * dx + dy * dy);
+    segs.push({ s: coords[i], e: coords[i + 1], cumLen: totalLen, len });
+    totalLen += len;
+  }
+  if (totalLen === 0) return [coords[0]];
+  const pts = [];
+  for (let i = 0; i <= numSamples; i++) {
+    const t = (i / numSamples) * totalLen;
+    let seg = segs[segs.length - 1];
+    for (const s of segs) {
+      if (s.cumLen + s.len >= t - 1e-10) { seg = s; break; }
+    }
+    const u = seg.len > 0 ? Math.min(1, (t - seg.cumLen) / seg.len) : 0;
+    pts.push([seg.s[0] + u * (seg.e[0] - seg.s[0]), seg.s[1] + u * (seg.e[1] - seg.s[1])]);
+  }
+  return pts;
+};
+
+const _bilinear = (data, w, h, fx, fy, noData) => {
+  const x0 = Math.max(0, Math.min(w - 1, Math.floor(fx)));
+  const x1 = Math.min(w - 1, x0 + 1);
+  const y0 = Math.max(0, Math.min(h - 1, Math.floor(fy)));
+  const y1 = Math.min(h - 1, y0 + 1);
+  const wx = fx - x0, wy = fy - y0;
+  const vs = [data[y0 * w + x0], data[y0 * w + x1], data[y1 * w + x0], data[y1 * w + x1]];
+  if (vs.some(v => !isFinite(v) || (noData !== null && noData !== undefined && v === noData))) return NaN;
+  return vs[0] * (1 - wx) * (1 - wy) + vs[1] * wx * (1 - wy) + vs[2] * (1 - wx) * wy + vs[3] * wx * wy;
+};
+
+const computeElevationProfile = async (layerId, lineGeom) => {
+  const layerObj = layerStore.getLayerById(layerId);
+  if (!layerObj) throw new Error('Layer not found');
+
+  const meta = layerObj.metadata ?? {};
+  const { file, extent, tiffProjection, noDataValue } = meta;
+  const mapCRS = mapStore.getMap().getView().getProjection().getCode();
+  const totalLength = getLength(lineGeom, { projection: mapCRS });
+
+  const NUM_SAMPLES = 300;
+  const mapCoords = lineGeom.getCoordinates();
+  const samplePts = _sampleLinePoints(mapCoords, NUM_SAMPLES);
+
+  // Transform sample points from map CRS to tiff CRS (if necessary)
+  let tiffPts = samplePts;
+  if (tiffProjection && tiffProjection !== mapCRS) {
+    const fromProj = getOlProjection(mapCRS);
+    const toProj   = getOlProjection(tiffProjection);
+    if (fromProj && toProj) {
+      tiffPts = samplePts.map(pt => olTransform(pt, mapCRS, tiffProjection));
+    }
+  }
+
+  // Bounding box of sample points with padding
+  const xs = tiffPts.map(p => p[0]);
+  const ys = tiffPts.map(p => p[1]);
+  const pad = 1e-6;
+  const bbox = [
+    Math.min(...xs) - pad, Math.min(...ys) - pad,
+    Math.max(...xs) + pad, Math.max(...ys) + pad,
+  ];
+
+  // Open the tiff (prefer File blob for local drag-dropped files)
+  let tiff;
+  if (file) {
+    tiff = await fromBlob(file);
+  } else if (layerObj.url) {
+    tiff = await fromUrl(layerObj.url);
+  } else {
+    throw new Error('No data source available for this layer');
+  }
+
+  const image = await tiff.getImage();
+  const imgW = image.getWidth();
+  const imgH = image.getHeight();
+
+  // Determine read resolution: cap at 1024, scale proportionally to bbox aspect ratio
+  const bboxW = bbox[2] - bbox[0];
+  const bboxH = bbox[3] - bbox[1];
+  const aspect = bboxW > 0 && bboxH > 0 ? bboxW / bboxH : 1;
+  const MAX_RES = 1024;
+  const readW = Math.max(4, Math.min(MAX_RES, Math.round(aspect >= 1 ? MAX_RES : MAX_RES * aspect), imgW));
+  const readH = Math.max(4, Math.min(MAX_RES, Math.round(aspect >= 1 ? MAX_RES / aspect : MAX_RES), imgH));
+
+  const [raster] = await image.readRasters({
+    bbox,
+    width: readW,
+    height: readH,
+    samples: [0],
+    resampleMethod: 'bilinear',
+  });
+
+  // Sample elevations along the profile
+  const elevations = tiffPts.map(([x, y]) => {
+    const fx = ((x - bbox[0]) / (bbox[2] - bbox[0])) * (readW - 1);
+    const fy = ((bbox[3] - y) / (bbox[3] - bbox[1])) * (readH - 1);
+    if (fx < 0 || fx > readW - 1 || fy < 0 || fy > readH - 1) return NaN;
+    return _bilinear(raster, readW, readH, fx, fy, noDataValue);
+  });
+
+  return { elevations, totalLength };
+};
+
+onUnmounted(stopElevationDraw);
 
 /**
  * Spawn a short-lived Web Worker that uses geotiff.js fromBlob() (efficient
@@ -461,6 +679,8 @@ const processDroppedFile = async (file) => {
           bandCount: metadata.bands,
           dataMin: metadata.dataMin,
           dataMax: metadata.dataMax,
+          extent: metadata.extent,
+          tiffProjection: metadata.projection,
         },
         "overlay",
       );
