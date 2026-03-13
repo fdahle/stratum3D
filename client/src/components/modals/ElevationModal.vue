@@ -11,9 +11,19 @@
         <span v-html="ICON_ELEVATION"></span>
         Elevation Profile
       </h3>
-      <button @click="$emit('close')" class="header-btn" title="Close">
-        <span v-html="ICON_CLOSE"></span>
-      </button>
+      <div class="header-actions">
+        <button
+          @click.stop="showSettings = !showSettings"
+          class="header-btn"
+          :class="{ active: showSettings }"
+          title="Settings"
+        >
+          <span v-html="ICON_SETTINGS"></span>
+        </button>
+        <button @click="$emit('close')" class="header-btn" title="Close">
+          <span v-html="ICON_CLOSE"></span>
+        </button>
+      </div>
     </div>
 
     <div class="modal-body">
@@ -41,12 +51,33 @@
         Drop a single-band GeoTIFF (DEM / elevation raster) onto the map to enable this tool.
       </div>
 
+      <!-- Settings panel -->
+      <div v-if="showSettings" class="settings-panel">
+        <div class="settings-row">
+          <label class="settings-label">No-data value</label>
+          <input
+            v-model="noDataInput"
+            type="number"
+            class="nodata-input"
+            placeholder="e.g. -9999"
+            step="any"
+          />
+          <button
+            v-if="noDataInput !== ''"
+            @click="noDataInput = ''"
+            class="nodata-clear"
+            title="Clear override"
+          >✕</button>
+        </div>
+        <div class="settings-hint">Pixels equal to this value will be treated as missing data and excluded from the profile.</div>
+      </div>
+
       <!-- Draw / cancel button -->
       <button
         class="draw-btn"
         :class="{ active: isDrawing, 'btn-disabled': !internalLayerId || isLoading }"
         :disabled="!internalLayerId || isLoading"
-        @click="$emit('toggle-draw', internalLayerId)"
+        @click="$emit('toggle-draw', internalLayerId, noDataOverride)"
         title="Click then draw a line on the map"
       >
         <span class="btn-icon" v-html="isDrawing ? ICON_CLOSE : ICON_DRAW"></span>
@@ -143,6 +174,7 @@ import { ICON_CLOSE } from '@/constants/icons';
 
 const ICON_ELEVATION = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 7 10 11 14 15 7 21 17"/><line x1="3" y1="20" x2="21" y2="20"/></svg>`;
 const ICON_DRAW = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17L9 11L13 15L20 7"/><circle cx="3" cy="17" r="1.5" fill="currentColor"/><circle cx="20" cy="7" r="1.5" fill="currentColor"/></svg>`;
+const ICON_SETTINGS = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
 
 const props = defineProps({
   isVisible:   { type: Boolean, default: false },
@@ -157,6 +189,16 @@ const { layers } = storeToRefs(layerStore);
 
 // Internal layer selection (emitted via toggle-draw)
 const internalLayerId = ref(null);
+
+// Settings panel
+const showSettings = ref(false);
+const noDataInput = ref('');
+const noDataOverride = computed(() => {
+  const v = noDataInput.value.trim();
+  if (v === '') return undefined;
+  const n = parseFloat(v);
+  return isFinite(n) ? n : undefined;
+});
 
 // Only single-band raster layers
 const singleBandLayers = computed(() =>
@@ -390,6 +432,14 @@ onUnmounted(() => {
 }
 .header-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
 .theme-light .header-btn:hover { background: rgba(0,0,0,0.06); color: #333; }
+.header-btn.active { background: rgba(74,158,255,0.18); color: #4a9eff; }
+.theme-light .header-btn.active { background: rgba(37,99,235,0.1); color: #2563eb; }
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 
 /* ── Body ── */
 .modal-body {
@@ -440,6 +490,73 @@ onUnmounted(() => {
   line-height: 1.4;
 }
 .theme-light .no-layer-hint { color: #888; }
+
+/* ── Settings panel ── */
+.settings-panel {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid #3a3a3a;
+  border-radius: 5px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.theme-light .settings-panel {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: #e0e0e0;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-label {
+  font-size: 12px;
+  color: #aaa;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.theme-light .settings-label { color: #666; }
+.nodata-input {
+  flex: 1;
+  background: #1e1e1e;
+  color: #e0e0e0;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+  min-width: 0;
+}
+.theme-light .nodata-input {
+  background: #fff;
+  color: #333;
+  border-color: #ccc;
+}
+.nodata-input:focus { outline: none; border-color: #4a9eff; }
+.theme-light .nodata-input:focus { border-color: #2563eb; }
+.nodata-input::-webkit-inner-spin-button,
+.nodata-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.nodata-input[type=number] { -moz-appearance: textfield; }
+.nodata-clear {
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.nodata-clear:hover { background: rgba(255,255,255,0.08); color: #ccc; }
+.theme-light .nodata-clear:hover { background: rgba(0,0,0,0.06); color: #333; }
+.settings-hint {
+  font-size: 10px;
+  color: #666;
+  font-style: italic;
+  line-height: 1.3;
+}
+.theme-light .settings-hint { color: #999; }
 
 /* ── Draw button ── */
 .draw-btn {

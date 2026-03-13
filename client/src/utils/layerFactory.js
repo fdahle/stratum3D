@@ -193,29 +193,24 @@ export function createGeoJSONLayerConfig(layerConf, layerId) {
  * @returns {Object} Layer configuration object
  */
 export function createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId) {
-  // For a single-band file, build a grayscale style with proper range stretching.
-  // With normalize:true OL assumes a 16-bit range (0–65535) when no metadata is
-  // present, so values like 6–2000 (a typical DEM) appear nearly black.
+  // For a single-band file (DEM etc.) build a simple grayscale style.
+  // Always use normalize:true so OL maps the band to [0,1] in the GPU shader.
+  // When we know the real data range (from the worker scan), pass it as
+  // source-level min/max so OL normalises against the *actual* terrain range
+  // instead of the full type range (0–65535 for uint16 → DEMs appear black).
+  //
+  // Avoid normalize:false + manual WebGL clamp expressions: that path fails
+  // silently for Float32 rasters in some OL/WebGL configurations.
   const isSingleBand = layerConf.bandCount === 1;
   const dataMin = layerConf.dataMin ?? null;
   const dataMax = layerConf.dataMax ?? null;
   const hasRange = isSingleBand && dataMin !== null && dataMax !== null && dataMax > dataMin;
 
-  // When we know the real range, turn off OL normalization and stretch manually.
-  // When we don't know the range, keep normalize:true + grayscale (best effort).
   let resolvedStyle;
-  let normalize = layerConf.normalize !== undefined ? layerConf.normalize : true;
-
   if (layerConf.style) {
     resolvedStyle = layerConf.style;
-  } else if (hasRange) {
-    normalize = false;
-    // Linear stretch: clamp((val - min) / (max - min), 0, 1) → grayscale
-    const range = dataMax - dataMin;
-    const stretched = ['clamp', ['/', ['-', ['band', 1], dataMin], range], 0, 1];
-    resolvedStyle = { color: ['array', stretched, stretched, stretched, 1] };
   } else if (isSingleBand) {
-    // Fallback grayscale — works when normalize:true maps band to [0,1]
+    // With normalize:true the band arrives already in [0,1] → direct grayscale.
     resolvedStyle = { color: ['array', ['band', 1], ['band', 1], ['band', 1], 1] };
   } else {
     resolvedStyle = undefined;
@@ -229,9 +224,12 @@ export function createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId) {
         ...(layerConf.file ? { blob: layerConf.file } : { url: layerConf.url }),
         // Only restrict bands if explicitly configured; otherwise render all bands
         ...(layerConf.bands ? { bands: layerConf.bands } : {}),
+        // When we know the real data range, tell OL to normalise against it.
+        // OL maps [min, max] → [0, 1]; values outside are clamped.
+        ...(hasRange ? { min: dataMin, max: dataMax } : {}),
       }
     ],
-    normalize,
+    normalize: layerConf.normalize !== undefined ? layerConf.normalize : true,
   };
 
   // Add optional overviews for better performance with large GeoTIFFs

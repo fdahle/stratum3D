@@ -62,10 +62,15 @@ self.onmessage = async (e) => {
     const noDataValue = image.getGDALNoData();
 
     if (samplesPerPixel === 1) {
-      // 1. Cheapest: TIFF MinSampleValue / MaxSampleValue tags
+      // 1. Cheapest: TIFF MinSampleValue / MaxSampleValue tags.
+      //    These are file-wide statistics that can include the nodata sentinel
+      //    (e.g. -9999) as the global minimum, so skip any value that matches
+      //    the nodata value to avoid a distorted stretch range.
       const fileDir = image.getFileDirectory();
-      if (fileDir.MinSampleValue?.[0] != null) dataMin = fileDir.MinSampleValue[0];
-      if (fileDir.MaxSampleValue?.[0] != null) dataMax = fileDir.MaxSampleValue[0];
+      const tagMin = fileDir.MinSampleValue?.[0];
+      const tagMax = fileDir.MaxSampleValue?.[0];
+      if (tagMin != null && (noDataValue === null || tagMin !== noDataValue)) dataMin = tagMin;
+      if (tagMax != null && (noDataValue === null || tagMax !== noDataValue)) dataMax = tagMax;
 
       // 2. GDAL statistics embedded as XML in GDAL_METADATA tag
       if ((dataMin === null || dataMax === null) && fileDir.GDAL_METADATA) {
@@ -76,8 +81,9 @@ self.onmessage = async (e) => {
         if (maxMatch) dataMax = parseFloat(maxMatch[1]);
       }
 
-      // 3. Fallback: read the smallest overview (or full image if small) to
-      //    compute actual min/max off the main thread
+      // 3. Fallback: request a ≤512×512 downsampled thumbnail directly from
+      //    geotiff.js so the scan is fast for any image size — no pixel cap.
+      //    Using 'nearest' resampling avoids blending nodata into valid pixels.
       if (dataMin === null || dataMax === null) {
         try {
           self.postMessage({ type: "PROGRESS", layerId, progress: 85, message: "Analysing data range…" });
@@ -86,22 +92,31 @@ self.onmessage = async (e) => {
           const sampleW = sampleImg.getWidth();
           const sampleH = sampleImg.getHeight();
 
-          // Cap scan at 1 M pixels to keep it fast
-          if (sampleW * sampleH < 1_000_000) {
-            const [raster] = await sampleImg.readRasters({ samples: [0] });
-            let mn = Infinity, mx = -Infinity;
-            for (let i = 0; i < raster.length; i++) {
-              const v = raster[i];
-              // Skip nodata, NaN, and ±Infinity
-              if (!isFinite(v)) continue;
-              if (noDataValue !== null && v === noDataValue) continue;
-              if (v < mn) mn = v;
-              if (v > mx) mx = v;
-            }
-            if (isFinite(mn) && isFinite(mx) && mn < mx) {
-              dataMin = mn;
-              dataMax = mx;
-            }
+          const maxSide = 512;
+          const scale = Math.min(1, maxSide / Math.max(sampleW, sampleH, 1));
+          const scanW = Math.max(1, Math.round(sampleW * scale));
+          const scanH = Math.max(1, Math.round(sampleH * scale));
+
+          const [raster] = await sampleImg.readRasters({
+            samples: [0],
+            width: scanW,
+            height: scanH,
+            resampleMethod: 'nearest',
+          });
+
+          // Tolerance-based nodata check to handle float32 precision differences
+          const ndTol = noDataValue !== null ? Math.max(0.5, Math.abs(noDataValue) * 1e-6) : 0;
+          let mn = Infinity, mx = -Infinity;
+          for (let i = 0; i < raster.length; i++) {
+            const v = raster[i];
+            if (!isFinite(v)) continue;
+            if (noDataValue !== null && Math.abs(v - noDataValue) <= ndTol) continue;
+            if (v < mn) mn = v;
+            if (v > mx) mx = v;
+          }
+          if (isFinite(mn) && isFinite(mx) && mn < mx) {
+            dataMin = mn;
+            dataMax = mx;
           }
         } catch (_) {
           // Non-fatal — layer will still render, just potentially flat

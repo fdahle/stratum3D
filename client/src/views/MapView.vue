@@ -431,7 +431,7 @@ const closeElevationModal = () => {
   layerManagerRef.value?.setSelectionActive(true);
 };
 
-const onToggleElevationDraw = (layerId) => {
+const onToggleElevationDraw = (layerId, noDataOverride) => {
   if (isElevationDrawing.value) {
     stopElevationDraw();
     return;
@@ -441,6 +441,13 @@ const onToggleElevationDraw = (layerId) => {
 
   isElevationDrawing.value = true;
   elevationProfile.value = null;
+
+  // Remove any previous elevation line from the map before drawing a new one
+  if (elevationDrawLayer) {
+    map.removeLayer(elevationDrawLayer);
+    elevationDrawLayer = null;
+    elevationDrawSource = null;
+  }
 
   elevationDrawSource = new VectorSource();
   elevationDrawLayer = markRaw(new VectorLayer({
@@ -459,7 +466,7 @@ const onToggleElevationDraw = (layerId) => {
     const geom = evt.feature.getGeometry();
     isElevationLoading.value = true;
     try {
-      elevationProfile.value = await computeElevationProfile(layerId, geom);
+      elevationProfile.value = await computeElevationProfile(layerId, geom, noDataOverride);
     } catch (e) {
       console.error('Elevation profile failed:', e.message);
     } finally {
@@ -507,7 +514,7 @@ const _bilinear = (data, w, h, fx, fy, noData) => {
   return vs[0] * (1 - wx) * (1 - wy) + vs[1] * wx * (1 - wy) + vs[2] * (1 - wx) * wy + vs[3] * wx * wy;
 };
 
-const computeElevationProfile = async (layerId, lineGeom) => {
+const computeElevationProfile = async (layerId, lineGeom, noDataOverride) => {
   const layerObj = layerStore.getLayerById(layerId);
   if (!layerObj) throw new Error('Layer not found');
 
@@ -553,6 +560,12 @@ const computeElevationProfile = async (layerId, lineGeom) => {
   const imgW = image.getWidth();
   const imgH = image.getHeight();
 
+  // Resolve nodata: user override > layer metadata > GeoTIFF's own GDAL nodata tag
+  const gdalNoData = image.getGDALNoData();
+  const effectiveNoData = noDataOverride !== undefined ? noDataOverride
+    : (noDataValue !== undefined && noDataValue !== null) ? noDataValue
+    : gdalNoData;
+
   // Determine read resolution: cap at 1024, scale proportionally to bbox aspect ratio
   const bboxW = bbox[2] - bbox[0];
   const bboxH = bbox[3] - bbox[1];
@@ -561,20 +574,37 @@ const computeElevationProfile = async (layerId, lineGeom) => {
   const readW = Math.max(4, Math.min(MAX_RES, Math.round(aspect >= 1 ? MAX_RES : MAX_RES * aspect), imgW));
   const readH = Math.max(4, Math.min(MAX_RES, Math.round(aspect >= 1 ? MAX_RES / aspect : MAX_RES), imgH));
 
-  const [raster] = await image.readRasters({
+  const [rawRaster] = await image.readRasters({
     bbox,
     width: readW,
     height: readH,
     samples: [0],
-    resampleMethod: 'bilinear',
+    // nearest-neighbor preserves exact nodata values; bilinear would blend
+    // a -9999 pixel with its neighbours, producing intermediate values that
+    // no longer match the nodata threshold.
+    resampleMethod: 'nearest',
   });
+
+  // Copy into a plain Float64Array so we can safely write NaN.
+  // Integer TypedArrays (Int16Array etc.) coerce NaN → 0, which would turn
+  // nodata cells into valid 0 m readings instead of gaps.
+  const data = new Float64Array(rawRaster);
+
+  // Stamp nodata pixels as NaN – use a small tolerance to absorb any
+  // float32 precision differences when the raster was stored as Float32.
+  if (effectiveNoData !== null && effectiveNoData !== undefined) {
+    const tol = Math.max(0.5, Math.abs(effectiveNoData) * 1e-6);
+    for (let i = 0; i < data.length; i++) {
+      if (Math.abs(data[i] - effectiveNoData) <= tol) data[i] = NaN;
+    }
+  }
 
   // Sample elevations along the profile
   const elevations = tiffPts.map(([x, y]) => {
     const fx = ((x - bbox[0]) / (bbox[2] - bbox[0])) * (readW - 1);
     const fy = ((bbox[3] - y) / (bbox[3] - bbox[1])) * (readH - 1);
     if (fx < 0 || fx > readW - 1 || fy < 0 || fy > readH - 1) return NaN;
-    return _bilinear(raster, readW, readH, fx, fy, noDataValue);
+    return _bilinear(data, readW, readH, fx, fy, null); // nodata already NaN'd
   });
 
   return { elevations, totalLength };
