@@ -9,6 +9,7 @@
       @measure-distance="onMeasureDistance"
       @measure-area="onMeasureArea"
       @elevation-profile="onElevationProfile"
+      @share-scene="isShareSceneOpen = true"
     />
 
     <div class="content-row">
@@ -80,6 +81,8 @@
 
     <Settings :is-open="isSettingsOpen" @close="isSettingsOpen = false" />
 
+    <ShareSceneModal :is-open="isShareSceneOpen" @close="isShareSceneOpen = false" />
+
     <MeasurementModal
       :is-visible="isMeasurementModalVisible"
       :measurement-type="activeMeasurementType"
@@ -126,6 +129,7 @@ import LayerPanel from "../components/map/LayerPanel.vue";
 import MapRibbonMenu from "../components/map/MapRibbonMenu.vue";
 import MeasurementModal from "../components/modals/MeasurementModal.vue";
 import ElevationModal from "../components/modals/ElevationModal.vue";
+import ShareSceneModal from "../components/modals/ShareSceneModal.vue";
 import Settings from "../components/modals/Settings.vue";
 import { useSettingsStore } from "../stores/settingsStore";
 // Re-setup the local state
@@ -134,6 +138,7 @@ const mapStore = useMapStore();
 const layerStore = useLayerStore();
 const isSettingsOpen = ref(false);
 const isLayerPanelOpen = ref(false);
+const isShareSceneOpen = ref(false);
 
 // Layer panel resize
 const LP_MIN = 180, LP_MAX = 480, LP_DEFAULT = 280;

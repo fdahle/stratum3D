@@ -98,6 +98,19 @@
           </div>
           <span class="group-label">Views</span>
         </div>
+        <div class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <button
+              class="ribbon-btn"
+              @click="$emit('share-scene')"
+              title="Share or load a saved map scene"
+            >
+              <span class="btn-icon" v-html="ICON_SHARE"></span>
+              <span class="btn-label">Share</span>
+            </button>
+          </div>
+          <span class="group-label">Collaborate</span>
+        </div>
       </div>
     </div>
 
@@ -118,7 +131,7 @@ import { ref } from 'vue';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useMapStore } from '@/stores/map/mapStore';
 import { useLayerStore } from '@/stores/map/layerStore';
-import { ICON_FIT, ICON_DISTANCE, ICON_AREA, ICON_ELEVATION, ICON_3D } from '@/constants/icons.js';
+import { ICON_FIT, ICON_DISTANCE, ICON_AREA, ICON_ELEVATION, ICON_3D, ICON_SHARE } from '@/constants/icons.js';
 
 const props = defineProps({
   isMeasuringDistance: { type: Boolean, default: false },
@@ -126,7 +139,7 @@ const props = defineProps({
   isElevationOpen:     { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['add-files', 'measure-distance', 'measure-area', 'elevation-profile']);
+const emit = defineEmits(['add-files', 'measure-distance', 'measure-area', 'elevation-profile', 'share-scene']);
 
 const settingsStore = useSettingsStore();
 const mapStore = useMapStore();
