@@ -19,6 +19,7 @@ export const useViewer3DStore = defineStore('viewer3d', () => {
   const showWireframe = ref(false);
   const showBoundingBox = ref(true);
   const showGrid = ref(true);
+  const showAxes = ref(true);
 
   // Measurement state
   const measurementMode = ref(null); // null, 'distance', 'area'
@@ -98,9 +99,15 @@ export const useViewer3DStore = defineStore('viewer3d', () => {
     showGrid.value = !showGrid.value;
     if (scene.value) {
       const grid = scene.value.getObjectByName('gridHelper');
-      const axes = scene.value.getObjectByName('axesHelper');
       if (grid) grid.visible = showGrid.value;
-      if (axes) axes.visible = showGrid.value;
+    }
+  };
+
+  const toggleAxes = () => {
+    showAxes.value = !showAxes.value;
+    if (scene.value) {
+      const axes = scene.value.getObjectByName('axesHelper');
+      if (axes) axes.visible = showAxes.value;
     }
   };
 
@@ -193,9 +200,11 @@ export const useViewer3DStore = defineStore('viewer3d', () => {
     showWireframe,
     showBoundingBox,
     showGrid,
+    showAxes,
     toggleWireframe,
     toggleBoundingBox,
     toggleGrid,
+    toggleAxes,
 
     // Measurements
     measurementMode,

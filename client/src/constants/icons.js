@@ -76,6 +76,7 @@ export const EMOJI_ICONS = {
   get INFO() { return ICON_INFO; },
   CHECK: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
   CROSS: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+  TRASH: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>`,
 };
 
 /** Info icon */
@@ -98,7 +99,7 @@ export const ICON_RASTER = `
  */
 export function getGeometryIcon(geometryType) {
   switch (geometryType) {
-    case 'point':
+    case 'Point':
       return ICON_POINT;
     case 'line':
       return ICON_LINE;
@@ -126,6 +127,7 @@ export const ICON_CAMERA = `<svg viewBox="0 0 24 24" width="20" height="20" fill
 
 /** Grid */
 export const ICON_GRID = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 3v18h18"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/><path d="M15 3v18"/></svg>`;
+export const ICON_AXES = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><line x1="12" y1="12" x2="22" y2="12" stroke="#f55"/><line x1="12" y1="12" x2="12" y2="2" stroke="#5c5"/><line x1="12" y1="12" x2="5" y2="19" stroke="#55f"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/></svg>`;
 
 /** Reset view (circular arrow) */
 export const ICON_RESET = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>`;
@@ -151,8 +153,14 @@ export const ICON_VIEW_TOP = `<svg viewBox="0 0 24 24" width="20" height="20" fi
 /** Front view */
 export const ICON_VIEW_FRONT = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="14" rx="1"/><circle cx="12" cy="13" r="3"/><line x1="12" y1="3" x2="12" y2="6"/><polygon points="10,3 12,1 14,3" fill="currentColor" stroke="none"/></svg>`;
 
+/** Back view */
+export const ICON_VIEW_BACK = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="1"/><circle cx="12" cy="11" r="3"/><line x1="12" y1="18" x2="12" y2="21"/><polygon points="10,21 12,23 14,21" fill="currentColor" stroke="none"/></svg>`;
+
 /** Side view (right) */
 export const ICON_VIEW_RIGHT = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="3" width="14" height="18" rx="1"/><circle cx="13" cy="12" r="3"/><line x1="3" y1="12" x2="6" y2="12"/><polygon points="3,10 1,12 3,14" fill="currentColor" stroke="none"/></svg>`;
+
+/** Side view (left) */
+export const ICON_VIEW_LEFT = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="14" height="18" rx="1"/><circle cx="11" cy="12" r="3"/><line x1="21" y1="12" x2="18" y2="12"/><polygon points="21,10 23,12 21,14" fill="currentColor" stroke="none"/></svg>`;
 
 /** GCP / survey flag marker */
 export const ICON_MARKER_FLAG = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="3" x2="7" y2="21"/><path d="M7 3 L19 8 L7 13" fill="currentColor" stroke="none" opacity="0.9"/><path d="M7 3 L19 8 L7 13"/></svg>`;
@@ -171,3 +179,6 @@ export const ICON_PACKAGE = `<svg viewBox="0 0 24 24" width="16" height="16" fil
 
 /** Elevation profile (mountain silhouette with baseline) */
 export const ICON_ELEVATION = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 7 10 11 14 15 7 21 17"/><line x1="3" y1="20" x2="21" y2="20"/></svg>`;
+
+/** 3D cube / 3D viewer */
+export const ICON_3D = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l8 4.5v11L12 22l-8-4.5v-11L12 2z"/><path d="M12 22V11"/><path d="M20 6.5L12 11 4 6.5"/></svg>`;

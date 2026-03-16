@@ -45,6 +45,7 @@ export const useLayerStore = defineStore("layers", () => {
     url = null,
     searchFields = [],
     metadata = {},
+    isUserAdded = false,
   }) => {
     if (layers.value.some((l) => l._layerId === layerId)) return;
 
@@ -78,11 +79,19 @@ export const useLayerStore = defineStore("layers", () => {
       metadata: metadata,
       // null = not yet checked, true = compatible, false = incompatible with current map CRS
       crsCompatible: null,
+      isUserAdded,
     };
     layers.value.push(layerObj);
     // Index must point to the reactive proxy that Vue created, not the raw object.
     // The proxy is the last element after push.
     layerIndex.set(layerId, layers.value[layers.value.length - 1]);
+  };
+
+  const removeLayer = (layerId) => {
+    const idx = layers.value.findIndex((l) => l._layerId === layerId);
+    if (idx === -1) return;
+    layers.value.splice(idx, 1);
+    layerIndex.delete(layerId);
   };
 
   const reset = () => {
@@ -330,6 +339,7 @@ export const useLayerStore = defineStore("layers", () => {
     baseLayers,
     overlayLayers,
     addLayer,
+    removeLayer,
     reset,
     getLayerById,
     toggleLayer,

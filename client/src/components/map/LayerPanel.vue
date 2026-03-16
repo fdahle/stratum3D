@@ -113,6 +113,16 @@
                   ▼
                 </button>
               </div>
+
+              <!-- Remove button (only for runtime-added layers) -->
+              <button
+                v-if="layer.isUserAdded && layer.status === 'ready'"
+                class="action-btn remove-btn"
+                title="Remove layer"
+                @click.stop="handleRemove(layer._layerId)"
+                v-html="EMOJI_ICONS.TRASH"
+              >
+              </button>
             </div>
           </div>
         </label>
@@ -170,6 +180,12 @@ const handleRightClick = (event, layer) => {
 
 const handleMenuAction = ({ type, layer }) => {
   if (!layer.layerInstance) return;
+
+  // --- REMOVE ACTION ---
+  if (type === "remove") {
+    if (layerManager.value) layerManager.value.removeLayer(layer._layerId);
+    return;
+  }
 
   // --- ZOOM ACTION (OpenLayers) ---
   if (type === "zoom") {
@@ -240,6 +256,10 @@ const handleColorChange = ({ color, layer }) => {
 
 const handleCancel = (layerId) => {
   layerStore.cancelLayerLoad(layerId);
+};
+
+const handleRemove = (layerId) => {
+  if (layerManager.value) layerManager.value.removeLayer(layerId);
 };
 
 const moveLayerUp = (layerId) => {
@@ -687,6 +707,24 @@ label {
 .cancel-btn {
   color: #f44336;
   font-weight: bold;
+}
+
+.remove-btn {
+  color: #dc2626;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.layer-row:hover .remove-btn {
+  opacity: 1;
+}
+
+.theme-dark .remove-btn:hover {
+  background-color: #3a1a1a;
+}
+
+.remove-btn:hover {
+  background-color: #fee2e2;
 }
 
 .empty-state {

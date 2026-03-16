@@ -53,9 +53,17 @@ export function createVectorStyle(
 /**
  * Create a selection style with complementary color for contrast
  * @param {string} baseColor - Original feature color
+ * @param {string} [geomType] - Geometry type string from feature.getGeometry().getType()
  * @returns {Style} OpenLayers Style object for selection
  */
-export function createSelectionStyle(baseColor = DEFAULT_COLOR) {
+export function createSelectionStyle(baseColor = DEFAULT_COLOR, geomType = '') {
+  if (geomType === GEOMETRY_TYPE.POINT || geomType === GEOMETRY_TYPE.MULTI_POINT) {
+    const complementaryColor = getComplementaryColor(baseColor);
+    const style = createPinStyle(complementaryColor);
+    style.setZIndex(Z_INDEX.SELECTION);
+    return style;
+  }
+
   const complementaryColor = getComplementaryColor(baseColor);
   const alphaHex = Math.round(DEFAULT_SELECTION_OPACITY * 255).toString(16).padStart(2, '0');
   
@@ -118,7 +126,8 @@ export function createSelectionStyleFunction(getLayerById) {
     const layerId = feature.get("_layerId");
     const layerObj = getLayerById(layerId);
     const baseColor = layerObj?.color || DEFAULT_COLOR;
+    const geomType = feature.getGeometry().getType();
     
-    return createSelectionStyle(baseColor);
+    return createSelectionStyle(baseColor, geomType);
   };
 }

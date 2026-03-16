@@ -1118,10 +1118,8 @@ const setCameraPreset = (preset) => {
   if (!camera.value || !controls.value) return;
   
   const bounds = getSceneBounds();
-  if (!bounds) return;
-  
-  const { center, maxDim } = bounds;
-  const distance = maxDim * 1.8;
+  const center = bounds ? bounds.center : new THREE.Vector3(0, 0, 0);
+  const distance = bounds ? bounds.maxDim * 1.8 : 100;
   
   switch (preset) {
     case 'top':
@@ -1134,6 +1132,14 @@ const setCameraPreset = (preset) => {
       break;
     case 'right':
       camera.value.position.set(center.x + distance, center.y, center.z);
+      camera.value.up.set(0, 1, 0);
+      break;
+    case 'left':
+      camera.value.position.set(center.x - distance, center.y, center.z);
+      camera.value.up.set(0, 1, 0);
+      break;
+    case 'back':
+      camera.value.position.set(center.x, center.y, center.z - distance);
       camera.value.up.set(0, 1, 0);
       break;
   }

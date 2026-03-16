@@ -22,6 +22,9 @@
       <button @click="handleToggleGrid" class="toggle-btn" :class="{ active: showGrid }">
         {{ showGrid ? '⊞ Hide Grid' : '⊞ Show Grid' }}
       </button>
+      <button @click="handleToggleAxes" class="toggle-btn" :class="{ active: showAxes }">
+        {{ showAxes ? '⌖ Hide Axes' : '⌖ Show Axes' }}
+      </button>
     </div>
 
     <div class="action-buttons">
@@ -53,15 +56,16 @@ const props = defineProps({
 
 const emit = defineEmits([
   'toggle-wireframe',
-  'toggle-bounding-box', 
+  'toggle-bounding-box',
   'toggle-grid',
+  'toggle-axes',
   'reset-camera',
   'back-to-map'
 ]);
 
 const viewer3DStore = useViewer3DStore();
-const { showWireframe, showBoundingBox, showGrid } = storeToRefs(viewer3DStore);
-const { toggleWireframe, toggleBoundingBox, toggleGrid, resetCamera } = viewer3DStore;
+const { showWireframe, showBoundingBox, showGrid, showAxes } = storeToRefs(viewer3DStore);
+const { toggleWireframe, toggleBoundingBox, toggleGrid, toggleAxes, resetCamera } = viewer3DStore;
 
 const coordinatesText = computed(() => {
   return `${props.coordinates.x.toFixed(2)}, ${props.coordinates.y.toFixed(2)}`;
@@ -80,6 +84,11 @@ const handleToggleBoundingBox = () => {
 const handleToggleGrid = () => {
   toggleGrid();
   emit('toggle-grid', showGrid.value);
+};
+
+const handleToggleAxes = () => {
+  toggleAxes();
+  emit('toggle-axes', showAxes.value);
 };
 
 const handleResetCamera = () => {

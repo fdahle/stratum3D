@@ -15,6 +15,7 @@
         <template v-if="payload?.type !== 'geotiff'">
           <li class="separator"></li>
           <li class="color-picker">
+
             <span>🎨 Color:</span>
             <div class="colors">
               <button
@@ -43,6 +44,10 @@
               </label>
             </div>
           </li>
+        </template>
+        <template v-if="payload?.isUserAdded">
+          <li class="separator"></li>
+          <li class="danger" @click="emitAction('remove')">🗑️ Remove Layer</li>
         </template>
       </ul>
     </div>
@@ -151,6 +156,22 @@ li:hover {
 
 .theme-dark .separator {
   background: #444;
+}
+
+li.danger {
+  color: #dc2626;
+}
+
+.theme-dark li.danger {
+  color: #f87171;
+}
+
+li.danger:hover {
+  background: #fee2e2;
+}
+
+.theme-dark li.danger:hover {
+  background: #3a1a1a;
 }
 
 .colors {

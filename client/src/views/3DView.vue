@@ -8,11 +8,14 @@
       @load-pointcloud="handleLoadPointCloud"
       @load-cameras="handleLoadCameras"
       @load-markers="handleLoadMarkers"
+      @unsupported-file="({ ext, expected }) => showError(`Unsupported file format: .${ext} — expected ${expected}`)"
       @reset-camera="onResetCamera"
       @fit-to-scene="onFitToScene"
       @view-top="onViewTop"
       @view-front="onViewFront"
+      @view-back="onViewBack"
       @view-right="onViewRight"
+      @view-left="onViewLeft"
       @measure-distance="onMeasureDistance"
       @measure-area="onMeasureArea"
     />
@@ -282,9 +285,21 @@ const onViewFront = () => {
   }
 };
 
+const onViewBack = () => {
+  if (canvasRef.value && canvasRef.value.setCameraPreset) {
+    canvasRef.value.setCameraPreset('back');
+  }
+};
+
 const onViewRight = () => {
   if (canvasRef.value && canvasRef.value.setCameraPreset) {
     canvasRef.value.setCameraPreset('right');
+  }
+};
+
+const onViewLeft = () => {
+  if (canvasRef.value && canvasRef.value.setCameraPreset) {
+    canvasRef.value.setCameraPreset('left');
   }
 };
 

@@ -706,6 +706,7 @@ const processDroppedFile = async (file) => {
       await layerManagerRef.value.processLayer(
         {
           type: "geotiff", url: blobUrl, file: file, name: layerName, visible: true,
+          isUserAdded: true,
           bandCount: metadata.bands,
           dataMin: metadata.dataMin,
           dataMax: metadata.dataMax,
@@ -732,11 +733,29 @@ const processDroppedFile = async (file) => {
     } catch (e) {
       showNotification(`Failed to load ${layerName}: ${e.message}`, "error");
     }
+  } else if (nameLower.endsWith(".geojson") || nameLower.endsWith(".json")) {
+    if (!layerManagerRef?.value) {
+      showNotification("Map is not yet initialized. Try again in a moment.", "error");
+      return;
+    }
+    const layerName = file.name.replace(/\.[^.]+$/, "");
+    showNotification(`Loading ${layerName}…`, "info");
+    await new Promise((r) => requestAnimationFrame(r));
+    try {
+      const blobUrl = URL.createObjectURL(file);
+      await layerManagerRef.value.processLayer(
+        { type: "geojson", url: blobUrl, name: layerName, visible: true, isUserAdded: true },
+        "overlay",
+      );
+      showNotification(`Added layer: ${layerName}`, "success");
+    } catch (e) {
+      showNotification(`Failed to load ${layerName}: ${e.message}`, "error");
+    }
   } else {
     const ext = file.name.includes(".")
       ? file.name.split(".").pop().toUpperCase()
-      : "Unknown";
-    showNotification(`.${ext} files are not supported yet.`, "warning");
+      : "unknown";
+    showNotification(`Unsupported file format: .${ext.toLowerCase()}`, "error");
   }
 };
 </script>

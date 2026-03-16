@@ -53,6 +53,10 @@
               <span class="btn-icon" v-html="ICON_GRID"></span>
               <span class="btn-label">Grid</span>
             </button>
+            <button @click="handleToggleAxes" class="ribbon-btn" :class="{ active: showAxes }">
+              <span class="btn-icon" v-html="ICON_AXES"></span>
+              <span class="btn-label">Axes</span>
+            </button>
           </div>
           <span class="group-label">Display</span>
         </div>
@@ -63,14 +67,26 @@
               <span class="btn-icon" v-html="ICON_VIEW_TOP"></span>
               <span class="btn-label">Top</span>
             </button>
-            <button @click="emit('view-front')" class="ribbon-btn">
-              <span class="btn-icon" v-html="ICON_VIEW_FRONT"></span>
-              <span class="btn-label">Front</span>
-            </button>
-            <button @click="emit('view-right')" class="ribbon-btn">
-              <span class="btn-icon" v-html="ICON_VIEW_RIGHT"></span>
-              <span class="btn-label">Right</span>
-            </button>
+            <div class="btn-pair">
+              <button @click="emit('view-front')" class="ribbon-btn ribbon-btn-sm">
+                <span class="btn-icon" v-html="ICON_VIEW_FRONT"></span>
+                <span class="btn-label">Front</span>
+              </button>
+              <button @click="emit('view-back')" class="ribbon-btn ribbon-btn-sm">
+                <span class="btn-icon" v-html="ICON_VIEW_BACK"></span>
+                <span class="btn-label">Back</span>
+              </button>
+            </div>
+            <div class="btn-pair">
+              <button @click="emit('view-right')" class="ribbon-btn ribbon-btn-sm">
+                <span class="btn-icon" v-html="ICON_VIEW_RIGHT"></span>
+                <span class="btn-label">Right</span>
+              </button>
+              <button @click="emit('view-left')" class="ribbon-btn ribbon-btn-sm">
+                <span class="btn-icon" v-html="ICON_VIEW_LEFT"></span>
+                <span class="btn-label">Left</span>
+              </button>
+            </div>
           </div>
           <span class="group-label">Camera Presets</span>
         </div>
@@ -150,6 +166,7 @@ import {
   ICON_CAMERA,
   ICON_MARKER_FLAG,
   ICON_GRID,
+  ICON_AXES,
   ICON_RESET,
   ICON_FIT,
   ICON_WIREFRAME,
@@ -158,7 +175,9 @@ import {
   ICON_AREA,
   ICON_VIEW_TOP,
   ICON_VIEW_FRONT,
-  ICON_VIEW_RIGHT
+  ICON_VIEW_BACK,
+  ICON_VIEW_RIGHT,
+  ICON_VIEW_LEFT
 } from '@/constants/icons.js';
 
 const props = defineProps({
@@ -177,21 +196,25 @@ const emit = defineEmits([
   'load-pointcloud',
   'load-cameras',
   'load-markers',
+  'unsupported-file',
   'toggle-wireframe',
   'toggle-bounding-box',
   'toggle-grid',
+  'toggle-axes',
   'reset-camera',
   'fit-to-scene',
   'view-top',
   'view-front',
+  'view-back',
   'view-right',
+  'view-left',
   'measure-distance',
   'measure-area'
 ]);
 
 const viewer3DStore = useViewer3DStore();
-const { showGrid, showWireframe, showBoundingBox } = storeToRefs(viewer3DStore);
-const { toggleWireframe, toggleBoundingBox, toggleGrid } = viewer3DStore;
+const { showGrid, showAxes, showWireframe, showBoundingBox } = storeToRefs(viewer3DStore);
+const { toggleWireframe, toggleBoundingBox, toggleGrid, toggleAxes } = viewer3DStore;
 
 const activeTab = ref('insert');
 const modelInput = ref(null);
@@ -229,36 +252,51 @@ const handleToggleGrid = () => {
   emit('toggle-grid', showGrid.value);
 };
 
+const handleToggleAxes = () => {
+  toggleAxes();
+  emit('toggle-axes', showAxes.value);
+};
+
+const SUPPORTED = {
+  model:      ['.obj', '.ply', '.stl'],
+  pointcloud: ['.copc.laz', '.laz', '.las', '.ply'],
+  cameras:    ['.txt'],
+  markers:    ['.xml'],
+};
+
+const checkExtension = (file, type) => {
+  const lower = file.name.toLowerCase();
+  return SUPPORTED[type].some((ext) => lower.endsWith(ext));
+};
+
+const emitOrReject = (file, type, loadEvent, event) => {
+  if (checkExtension(file, type)) {
+    emit(loadEvent, file);
+  } else {
+    const ext = file.name.includes('.') ? file.name.split('.').pop() : 'unknown';
+    emit('unsupported-file', { ext, expected: SUPPORTED[type].join(', ') });
+  }
+  event.target.value = '';
+};
+
 const handleModelFile = (event) => {
   const file = event.target.files[0];
-  if (file) {
-    emit('load-model', file);
-    event.target.value = '';
-  }
+  if (file) emitOrReject(file, 'model', 'load-model', event);
 };
 
 const handlePointCloudFile = (event) => {
   const file = event.target.files[0];
-  if (file) {
-    emit('load-pointcloud', file);
-    event.target.value = '';
-  }
+  if (file) emitOrReject(file, 'pointcloud', 'load-pointcloud', event);
 };
 
 const handleCamerasFile = (event) => {
   const file = event.target.files[0];
-  if (file) {
-    emit('load-cameras', file);
-    event.target.value = '';
-  }
+  if (file) emitOrReject(file, 'cameras', 'load-cameras', event);
 };
 
 const handleMarkersFile = (event) => {
   const file = event.target.files[0];
-  if (file) {
-    emit('load-markers', file);
-    event.target.value = '';
-  }
+  if (file) emitOrReject(file, 'markers', 'load-markers', event);
 };
 </script>
 
@@ -453,5 +491,36 @@ const handleMarkersFile = (event) => {
   background: transparent;
   border-color: transparent;
   box-shadow: none;
+}
+
+.btn-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ribbon-btn-sm {
+  min-width: 40px;
+  height: 21px;
+  padding: 2px 5px;
+  gap: 0;
+  flex-direction: row;
+  justify-content: flex-start;
+}
+
+.ribbon-btn-sm .btn-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.ribbon-btn-sm .btn-icon :deep(svg) {
+  width: 12px;
+  height: 12px;
+}
+
+.ribbon-btn-sm .btn-label {
+  font-size: 9px;
+  margin-left: 3px;
 }
 </style>

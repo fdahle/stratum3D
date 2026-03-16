@@ -1,5 +1,5 @@
 // client/src/composables/useLayerManager.js
-import { watch } from "vue";
+import { watch, markRaw } from "vue";
 import { useLayerStore } from "../stores/map/layerStore";
 import { useSelectionStore } from "../stores/map/selectionStore";
 import { useSettingsStore } from "../stores/settingsStore";
@@ -220,7 +220,7 @@ export function useLayerManager(map) {
     }
 
     // Add layer to store with category
-    layerStore.addLayer({ ...layerConfig, category });
+    layerStore.addLayer({ ...layerConfig, category, isUserAdded: layerConf.isUserAdded ?? false });
 
     // For raster layers (tile, wms, wmts), add to map immediately
     if (layerConfig.layerInstance) {
@@ -357,7 +357,7 @@ export function useLayerManager(map) {
       (l) => l._layerId === layer._layerId,
     );
     if (storeLayer) {
-      storeLayer.layerInstance = olLayer;
+      storeLayer.layerInstance = markRaw(olLayer);
       storeLayer.geometryType = detectedGeomType;
       storeLayer.status = LAYER_STATUS.READY;
       storeLayer.metadata = geoJsonData._metadata || {};
@@ -477,6 +477,29 @@ export function useLayerManager(map) {
     if (!active) selectionStore.clearSelection();
   };
 
+  const removeLayer = (layerId) => {
+    const layer = layerStore.getLayerById(layerId);
+    if (!layer) return;
+    // Remove OL layer instance from the map
+    if (layer.layerInstance) {
+      map.removeLayer(layer.layerInstance);
+    }
+    // Revoke blob URL if one was used (prevents memory leak)
+    if (layer.url && layer.url.startsWith('blob:')) {
+      URL.revokeObjectURL(layer.url);
+    }
+    // Clean up search index
+    searchIndex.delete(layerId);
+    // Terminate any active worker for this layer
+    const worker = activeWorkers.get(layerId);
+    if (worker) {
+      worker.terminate();
+      activeWorkers.delete(layerId);
+    }
+    // Remove from store
+    layerStore.removeLayer(layerId);
+  };
+
   const cleanup = () => {
     activeWorkers.forEach((w) => w.terminate());
     activeWorkers.clear();
@@ -491,5 +514,5 @@ export function useLayerManager(map) {
     }
   };
 
-  return { processLayer, cleanup, applyLayerColor, searchIndex, setupSelection, setSelectionActive };
+  return { processLayer, removeLayer, cleanup, applyLayerColor, searchIndex, setupSelection, setSelectionActive };
 }

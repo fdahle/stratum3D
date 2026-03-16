@@ -85,6 +85,19 @@
           </div>
           <span class="group-label">Analyse</span>
         </div>
+        <div class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <button
+              class="ribbon-btn"
+              @click="open3DViewer"
+              title="Open the 3D viewer in a new tab"
+            >
+              <span class="btn-icon" v-html="ICON_3D"></span>
+              <span class="btn-label">3D Scene</span>
+            </button>
+          </div>
+          <span class="group-label">Views</span>
+        </div>
       </div>
     </div>
 
@@ -105,7 +118,7 @@ import { ref } from 'vue';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useMapStore } from '@/stores/map/mapStore';
 import { useLayerStore } from '@/stores/map/layerStore';
-import { ICON_FIT, ICON_DISTANCE, ICON_AREA, ICON_ELEVATION } from '@/constants/icons.js';
+import { ICON_FIT, ICON_DISTANCE, ICON_AREA, ICON_ELEVATION, ICON_3D } from '@/constants/icons.js';
 
 const props = defineProps({
   isMeasuringDistance: { type: Boolean, default: false },
@@ -171,6 +184,8 @@ const zoomOut = () => {
 };
 
 // ---- File input ----
+const open3DViewer = () => window.open('/viewer', '_blank');
+
 const handleFileInput = (event) => {
   const files = Array.from(event.target.files ?? []);
   if (files.length) emit('add-files', files);

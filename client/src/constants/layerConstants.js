@@ -26,9 +26,9 @@ export const LAYER_CATEGORY = {
 };
 
 // Geometry types
-// Custom types use lowercase; OL-native types use their original casing for direct comparison
+// All values match OL-native casing for direct comparison with feature.getGeometry().getType()
 export const GEOMETRY_TYPE = {
-  POINT: 'point',               // Custom simplified type
+  POINT: 'Point',               // OL-native
   MULTI_POINT: 'MultiPoint',    // OL-native
   LINE: 'line',                 // Custom simplified type
   LINE_STRING: 'LineString',    // OL-native
