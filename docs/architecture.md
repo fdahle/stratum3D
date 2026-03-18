@@ -21,7 +21,7 @@ hist_map/
 │
 ├── server/
 │   ├── data/                # ✨ Processed & optimized data (served to web)
-│   │   ├── layers/         # Optimized GeoJSON files
+│   │   ├── shapes/         # Optimized GeoJSON files
 │   │   ├── 3D/             # Decimated 3D models
 │   │   ├── pointclouds/    # COPC point clouds
 │   │   └── geotiffs/       # Cloud Optimized GeoTIFFs (COG)
@@ -89,7 +89,7 @@ In `client/public/config.yaml`, reference the processed files:
 overlay_layers:
   - name: "My Layer"
     type: geojson
-    url: "http://localhost:3000/data/layers/mydata.geojson"
+    url: "http://localhost:3000/data/shapes/mydata.geojson"
     visible: true
 ```
 
@@ -273,6 +273,6 @@ app.use('/data', express.static(path.join(__dirname, 'data')));
 
 // Access via:
 // http://localhost:3000/data/geotiffs/satellite.tif
-// http://localhost:3000/data/layers/coastline.geojson
+// http://localhost:3000/data/shapes/coastline.geojson
 // http://localhost:3000/data/3D/glacier.obj
 ```

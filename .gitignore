@@ -62,7 +62,7 @@ server/.env.production
 
 # Keep processed data if small, or regenerate
 # Uncomment to ignore processed data:
-# server/data/layers/
+# server/data/shapes/
 # server/data/3D/
 # server/data/pointclouds/
 # server/data/geotiffs/

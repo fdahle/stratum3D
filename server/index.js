@@ -5,6 +5,7 @@
 import express from 'express';
 import path from 'path';
 import cors from 'cors';
+import compression from 'compression';
 import { fileURLToPath } from 'url';
 import config, { isDevelopment } from './config.js';
 import logger from './logger.js';
@@ -34,6 +35,7 @@ const corsOptions = {
 
 // Middleware
 app.use(cors(corsOptions));
+app.use(compression());        // gzip/deflate — shrinks large GeoJSON responses ~85-90%
 app.use(express.json());
 
 // Security headers

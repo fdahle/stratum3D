@@ -177,10 +177,15 @@ export function createGeoJSONLayerConfig(layerConf, layerId) {
     layerInstance: null, // Will be created after download
     type: "geojson",
     visible: layerConf.visible,
-    color: layerConf.color,
+    // color is the UI badge color; falls back to stroke_color if only that is provided
+    color: layerConf.color ?? layerConf.stroke_color,
+    strokeColor: layerConf.stroke_color ?? null,
+    fillColor: layerConf.fill_color ?? null,
+    renderMode: layerConf.render_mode ?? 'vector',
     url: layerConf.url,
     searchFields: layerConf.search_fields || [],
     metadata: layerConf._metadata || {},
+    groupBy: layerConf.group_by ?? null,
   };
 }
 

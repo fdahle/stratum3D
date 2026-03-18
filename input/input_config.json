@@ -1,4 +1,17 @@
 {
+  "shapes/approx_images.geojson": {
+    "metadata": {
+      "hasThumbnails": false,
+      "hasDownloadLinks": false,
+      "headerAttribute": "image_id"
+    },
+    "attributes": {
+      "attributesFile": "attributes/images.csv",
+      "attributesKey": "image_id",
+      "attributesDelimiter": ";",
+      "ownKey": "image_id"
+    }
+  },
   "shapes/georef_sat.geojson": {
     "metadata": {
       "hasThumbnails": true,

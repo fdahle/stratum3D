@@ -46,9 +46,10 @@ export const STRINGS = {
     ready: 'Ready',
     error: 'Failed to load layer',
     idle: 'Not loaded',
-    dl: 'DL',
-    proc: 'Proc',
-    load: 'Load',
+    dl: 'Downloading',
+    proc: 'Processing',
+    load: 'Loading',
+    groupByMissing: (field) => `group_by field "${field}" not found in data`,
   },
 
   // Search

@@ -61,8 +61,8 @@ export const CONFIG_SCHEMA = {
       optional: ["version", "transparent"],
     },
     geojson: {
-      required: ["url", "color"],
-      optional: ["search_fields", "pointType"],
+      required: ["url"],
+      optional: ["color", "stroke_color", "fill_color", "render_mode", "search_fields", "pointType", "group_by"],
     },
     geotiff: {
       required: ["url"],

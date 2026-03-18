@@ -23,6 +23,19 @@
           </div>
           <span class="group-label">Import</span>
         </div>
+        <div class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <button
+              class="ribbon-btn"
+              @click="$emit('share-scene')"
+              title="Share or load a saved map scene"
+            >
+              <span class="btn-icon" v-html="ICON_SHARE"></span>
+              <span class="btn-label">Share</span>
+            </button>
+          </div>
+          <span class="group-label">Collaborate</span>
+        </div>
       </div>
 
       <!-- View Tab -->
@@ -43,6 +56,19 @@
             </button>
           </div>
           <span class="group-label">Navigate</span>
+        </div>
+        <div class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <button
+              class="ribbon-btn"
+              @click="open3DViewer"
+              title="Open the 3D viewer in a new tab"
+            >
+              <span class="btn-icon" v-html="ICON_3D"></span>
+              <span class="btn-label">3D Scene</span>
+            </button>
+          </div>
+          <span class="group-label">Views</span>
         </div>
       </div>
 
@@ -89,27 +115,14 @@
           <div class="ribbon-group-buttons">
             <button
               class="ribbon-btn"
-              @click="open3DViewer"
-              title="Open the 3D viewer in a new tab"
+              @click="$emit('extended-search')"
+              title="Search through all attributes of a layer"
             >
-              <span class="btn-icon" v-html="ICON_3D"></span>
-              <span class="btn-label">3D Scene</span>
+              <span class="btn-icon" v-html="ICON_SEARCH_ADVANCED"></span>
+              <span class="btn-label">Ext. Search</span>
             </button>
           </div>
-          <span class="group-label">Views</span>
-        </div>
-        <div class="ribbon-group">
-          <div class="ribbon-group-buttons">
-            <button
-              class="ribbon-btn"
-              @click="$emit('share-scene')"
-              title="Share or load a saved map scene"
-            >
-              <span class="btn-icon" v-html="ICON_SHARE"></span>
-              <span class="btn-label">Share</span>
-            </button>
-          </div>
-          <span class="group-label">Collaborate</span>
+          <span class="group-label">Search</span>
         </div>
       </div>
     </div>
@@ -139,7 +152,7 @@ const props = defineProps({
   isElevationOpen:     { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['add-files', 'measure-distance', 'measure-area', 'elevation-profile', 'share-scene']);
+const emit = defineEmits(['add-files', 'measure-distance', 'measure-area', 'elevation-profile', 'share-scene', 'extended-search']);
 
 const settingsStore = useSettingsStore();
 const mapStore = useMapStore();
@@ -158,6 +171,7 @@ const tabs = [
 const ICON_ADD_LAYER = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/><circle cx="19" cy="5" r="4" fill="#28a745" stroke="none"/><path d="M17 5h4M19 3v4" stroke="white" stroke-width="1.8"/></svg>`;
 const ICON_ZOOM_IN   = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>`;
 const ICON_ZOOM_OUT  = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>`;
+const ICON_SEARCH_ADVANCED = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/><line x1="11" y1="8" x2="11" y2="14"/><circle cx="17" cy="6" r="3" fill="#3b82f6" stroke="none"/><path d="M16 6h2M17 5v2" stroke="white" stroke-width="1.4"/></svg>`;
 
 // ---- Map navigation ----
 const fitAllLayers = () => {

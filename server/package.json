@@ -13,6 +13,7 @@
   "license": "ISC",
   "dependencies": {
     "@turf/turf": "^7.3.3",
+    "compression": "^1.8.1",
     "cors": "^2.8.6",
     "csv-parse": "^6.1.0",
     "epsg-index": "^2.0.0",

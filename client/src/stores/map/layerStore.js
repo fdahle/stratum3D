@@ -42,10 +42,14 @@ export const useLayerStore = defineStore("layers", () => {
     visible,
     geometryType = GEOMETRY_TYPE.UNKNOWN,
     color = DEFAULT_COLOR,
+    strokeColor = null,
+    fillColor = null,
+    renderMode = 'vector',
     url = null,
     searchFields = [],
     metadata = {},
     isUserAdded = false,
+    groupBy = null,
   }) => {
     if (layers.value.some((l) => l._layerId === layerId)) return;
 
@@ -70,6 +74,9 @@ export const useLayerStore = defineStore("layers", () => {
       layerInstance: layerInstance ? markRaw(layerInstance) : null,
       geometryType,
       color,
+      strokeColor,
+      fillColor,
+      renderMode,
       url,
       progress: 0,
       status: initialStatus,
@@ -80,6 +87,14 @@ export const useLayerStore = defineStore("layers", () => {
       // null = not yet checked, true = compatible, false = incompatible with current map CRS
       crsCompatible: null,
       isUserAdded,
+      // sub-category grouping: attribute name to split features by
+      groupBy,
+      // populated after load: { value: { color: '#hex', visible: true } }
+      subCategories: {},
+      // true when groupBy field was not found in any loaded feature
+      groupByMissing: false,
+      // non-fatal warning message shown in the layer panel (e.g. bad group_by field)
+      warning: null,
     };
     layers.value.push(layerObj);
     // Index must point to the reactive proxy that Vue created, not the raw object.
@@ -224,6 +239,31 @@ export const useLayerStore = defineStore("layers", () => {
     layerObj.color = newColor;
   };
 
+  // --- Sub-category actions ---
+
+  /**
+   * Initialise sub-categories from the discovered unique values.
+   * @param {string} layerId
+   * @param {{ [value: string]: { color: string, visible: boolean } }} categories
+   */
+  const initSubCategories = (layerId, categories) => {
+    const layer = layerIndex.get(layerId);
+    if (!layer) return;
+    layer.subCategories = categories;
+  };
+
+  const toggleSubCategory = (layerId, value) => {
+    const layer = layerIndex.get(layerId);
+    if (!layer?.subCategories[value]) return;
+    layer.subCategories[value].visible = !layer.subCategories[value].visible;
+  };
+
+  const updateSubCategoryColor = (layerId, value, color) => {
+    const layer = layerIndex.get(layerId);
+    if (!layer?.subCategories[value]) return;
+    layer.subCategories[value].color = color;
+  };
+
   /**
    * Move a layer up in the stack (increases z-index)
    * @param {string} layerId - Layer ID to move
@@ -355,5 +395,8 @@ export const useLayerStore = defineStore("layers", () => {
     moveLayerDown,
     reorderLayer,
     updateLayerZIndexes,
+    initSubCategories,
+    toggleSubCategory,
+    updateSubCategoryColor,
   };
 });

@@ -141,6 +141,9 @@ export const ICON_WIREFRAME = `<svg viewBox="0 0 24 24" width="20" height="20" f
 /** Bounding box */
 export const ICON_BBOX = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="3 2"><rect x="3" y="3" width="18" height="18" rx="1"/></svg>`;
 
+/** Surface normals (arrows perpendicular to a base line) */
+export const ICON_NORMALS = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 19h18"/><line x1="6" y1="19" x2="6" y2="11"/><line x1="12" y1="19" x2="12" y2="7"/><line x1="18" y1="19" x2="18" y2="11"/><polyline points="4,13 6,11 8,13"/><polyline points="10,9 12,7 14,9"/><polyline points="16,13 18,11 20,13"/></svg>`;
+
 /** Distance measure (ruler) */
 export const ICON_DISTANCE = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20L20 2"/><path d="M7 17l2-2"/><path d="M11 13l2-2"/><path d="M15 9l2-2"/><circle cx="3" cy="21" r="1.5" fill="currentColor"/><circle cx="21" cy="3" r="1.5" fill="currentColor"/></svg>`;
 

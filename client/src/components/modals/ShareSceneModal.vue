@@ -67,12 +67,38 @@
             </div>
 
             <div class="action-row">
-              <button class="btn btn-primary" @click="loadScene" :disabled="!importCode.trim()">
+              <button class="btn btn-primary" @click="loadScene" :disabled="!importCode.trim() || !!currentDisambiguation">
                 Load Scene
               </button>
             </div>
           </div>
         </div>
+
+        <!-- Disambiguation overlay (shown when multiple layers share the same name) -->
+        <Transition name="fade">
+          <div v-if="currentDisambiguation" class="disambig-overlay">
+            <div class="disambig-box">
+              <p class="disambig-title">
+                Multiple layers named <strong>"{{ currentDisambiguation.savedLayer.name }}"</strong> were found.
+                Select the correct one:
+              </p>
+              <ul class="disambig-list">
+                <li
+                  v-for="candidate in currentDisambiguation.candidates"
+                  :key="candidate._layerId"
+                  class="disambig-item"
+                  @click="resolveDisambiguation(candidate)"
+                >
+                  <span class="disambig-type">{{ candidate.type }}</span>
+                  <span class="disambig-url">{{ candidate.url ? shortenUrl(candidate.url) : candidate.geometryType }}</span>
+                </li>
+              </ul>
+              <div class="disambig-actions">
+                <button class="btn btn-secondary" @click="resolveDisambiguation(null)">Skip this layer</button>
+              </div>
+            </div>
+          </div>
+        </Transition>
       </div>
     </div>
   </Transition>
@@ -105,6 +131,12 @@ const importSuccess = ref(false);
 const importError = ref('');
 const exportTextarea = ref(null);
 
+// Disambiguation state
+const currentDisambiguation = ref(null); // { savedLayer, candidates }
+const disambiguationQueue = ref([]);     // remaining conflicts to resolve
+const pendingApplyQueue = ref([]);       // { storeLayer, savedLayer } ready to apply
+const pendingWarnings = ref([]);
+
 // Re-generate export code whenever the modal opens on the export tab
 watch(() => props.isOpen, (open) => {
   if (open) {
@@ -115,6 +147,10 @@ watch(() => props.isOpen, (open) => {
     importError.value = '';
     copyLabel.value = 'Copy to Clipboard';
     exportCode.value = generateSceneCode();
+    currentDisambiguation.value = null;
+    disambiguationQueue.value = [];
+    pendingApplyQueue.value = [];
+    pendingWarnings.value = [];
   }
 });
 
@@ -130,7 +166,6 @@ const generateSceneCode = () => {
   const layers = layerStore.layers
     .filter(l => l.category === 'overlay')
     .map(l => ({
-      id: l._layerId,
       name: l.name,
       active: l.active,
       color: l.color,
@@ -158,6 +193,10 @@ const loadScene = async () => {
   importWarnings.value = [];
   importSuccess.value = false;
   importError.value = '';
+  currentDisambiguation.value = null;
+  disambiguationQueue.value = [];
+  pendingApplyQueue.value = [];
+  pendingWarnings.value = [];
 
   let payload;
   try {
@@ -178,39 +217,72 @@ const loadScene = async () => {
     return;
   }
 
-  // Restore view
+  // Restore view immediately (independent of layer disambiguation)
   const view = map.getView();
   const currentProj = view.getProjection().getCode();
-
   let center = payload.center;
   if (payload.projection && payload.projection !== currentProj) {
     try {
       const { transform } = await import('ol/proj');
       center = transform(payload.center, payload.projection, currentProj);
     } catch {
-      importWarnings.value.push(`Projection mismatch (saved: ${payload.projection}, current: ${currentProj}) – position may be inaccurate.`);
+      pendingWarnings.value.push(`Projection mismatch (saved: ${payload.projection}, current: ${currentProj}) – position may be inaccurate.`);
     }
   }
-
   view.animate({ center, zoom: payload.zoom, duration: 600 });
 
-  // Restore layer states
-  const warnings = [];
+  // Classify each layer: unique match → queue, no match → warn, multiple → disambiguate
+  const toDisambiguate = [];
   for (const savedLayer of (payload.layers ?? [])) {
-    const storeLayer = layerStore.layers.find(l => l._layerId === savedLayer.id);
-    if (!storeLayer) {
-      warnings.push(`"${savedLayer.name || savedLayer.id}" – layer not found in current config.`);
-      continue;
+    const matches = layerStore.layers.filter(l => l.name === savedLayer.name);
+    if (matches.length === 0) {
+      pendingWarnings.value.push(`"${savedLayer.name}" – layer not found in current config.`);
+    } else if (matches.length === 1) {
+      pendingApplyQueue.value.push({ storeLayer: matches[0], savedLayer });
+    } else {
+      toDisambiguate.push({ savedLayer, candidates: matches });
     }
-    // Toggle visibility
-    storeLayer.active = savedLayer.active;
-    storeLayer.layerInstance?.setVisible(savedLayer.active);
-    // Restore color
-    if (savedLayer.color) storeLayer.color = savedLayer.color;
   }
 
-  importWarnings.value = warnings;
+  if (toDisambiguate.length > 0) {
+    disambiguationQueue.value = toDisambiguate.slice(1);
+    currentDisambiguation.value = toDisambiguate[0];
+  } else {
+    applyRestoredLayers();
+  }
+};
+
+const resolveDisambiguation = (chosenLayer) => {
+  if (chosenLayer) {
+    pendingApplyQueue.value.push({ storeLayer: chosenLayer, savedLayer: currentDisambiguation.value.savedLayer });
+  } else {
+    pendingWarnings.value.push(`"${currentDisambiguation.value.savedLayer.name}" – skipped (multiple matches).`);
+  }
+
+  if (disambiguationQueue.value.length > 0) {
+    currentDisambiguation.value = disambiguationQueue.value[0];
+    disambiguationQueue.value = disambiguationQueue.value.slice(1);
+  } else {
+    currentDisambiguation.value = null;
+    applyRestoredLayers();
+  }
+};
+
+const applyRestoredLayers = () => {
+  for (const { storeLayer, savedLayer } of pendingApplyQueue.value) {
+    storeLayer.active = savedLayer.active;
+    storeLayer.layerInstance?.setVisible(savedLayer.active);
+    if (savedLayer.color) storeLayer.color = savedLayer.color;
+  }
+  importWarnings.value = [...pendingWarnings.value];
   importSuccess.value = true;
+  pendingApplyQueue.value = [];
+  pendingWarnings.value = [];
+};
+
+const shortenUrl = (url) => {
+  try { return new URL(url).hostname; }
+  catch { return url.length > 45 ? url.slice(0, 45) + '…' : url; }
 };
 </script>
 
@@ -234,6 +306,8 @@ const loadScene = async () => {
   display: flex;
   flex-direction: column;
   font-family: "Segoe UI", sans-serif;
+  position: relative;
+  overflow: hidden;
 }
 
 .modal-header {
@@ -348,6 +422,74 @@ const loadScene = async () => {
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-primary { background: #3b82f6; color: #fff; }
 .btn-primary:hover:not(:disabled) { background: #2563eb; }
+.btn-secondary { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+.btn-secondary:hover { background: #e5e7eb; }
+
+/* Disambiguation overlay */
+.disambig-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.97);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  padding: 24px;
+  box-sizing: border-box;
+}
+.disambig-box {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.disambig-title {
+  margin: 0;
+  font-size: 13px;
+  color: #1f2937;
+  line-height: 1.5;
+}
+.disambig-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.disambig-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.12s, border-color 0.12s;
+}
+.disambig-item:hover { background: #eff6ff; border-color: #93c5fd; }
+.disambig-type {
+  font-weight: 600;
+  color: #3b82f6;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  background: #eff6ff;
+  border-radius: 4px;
+  padding: 2px 6px;
+  white-space: nowrap;
+}
+.disambig-url {
+  color: #6b7280;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.disambig-actions {
+  display: flex;
+  justify-content: flex-end;
+}
 
 .warnings-box {
   background: #fffbeb;

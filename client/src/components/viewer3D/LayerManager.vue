@@ -5,50 +5,61 @@
     </div>
     
     <div class="layer-list">
-      <div 
-        v-for="layer in layers" 
-        :key="layer.id"
-        class="layer-item"
-        :class="{ selected: selectedLayerId === layer.id }"
-        @click="selectLayer(layer.id)"
-        @contextmenu.prevent="handleRightClick($event, layer)"
-      >
-        <button 
-          class="visibility-btn" 
-          @click.stop="toggleVisibility(layer)"
-          :title="layer.visible ? 'Hide layer' : 'Show layer'"
+      <template v-for="layer in layers" :key="layer.id">
+        <div 
+          class="layer-item"
+          :class="{ selected: selectedLayerId === layer.id }"
+          @click="selectLayer(layer.id)"
+          @contextmenu.prevent="handleRightClick($event, layer)"
         >
-          <span v-html="layer.visible ? ICON_EYE : ICON_EYE_OFF"></span>
-        </button>
-        
-        <span class="layer-icon" v-html="getLayerIcon(layer.type)"></span>
-        <span class="layer-name" :title="layer.name">{{ layer.name }}</span>
-        
-        <button 
-          class="layer-action" 
-          @click.stop="removeLayer(layer.id)"
-          title="Remove layer"
-        >
-          <span v-html="ICON_TRASH"></span>
-        </button>
-      </div>
+          <button 
+            class="visibility-btn" 
+            @click.stop="toggleVisibility(layer)"
+            :title="layer.visible ? 'Hide layer' : 'Show layer'"
+          >
+            <span v-html="layer.visible ? ICON_EYE : ICON_EYE_OFF"></span>
+          </button>
+          
+          <span class="layer-icon" v-html="getLayerIcon(layer.type)"></span>
+          <span class="layer-name" :title="layer.name">{{ layer.name }}</span>
+          
+          <button 
+            class="layer-action" 
+            @click.stop="removeLayer(layer.id)"
+            title="Remove layer"
+          >
+            <span v-html="ICON_TRASH"></span>
+          </button>
+        </div>
+      </template>
       
       <div v-if="layers.length === 0" class="empty-state">
         No layers loaded
       </div>
     </div>
-    
+
     <!-- Context Menu -->
     <ContextMenu3D
       ref="contextMenuRef"
       @action="handleMenuAction"
+      @point-size-change="handlePointSizeChange"
+    />
+
+    <!-- Layer Info Modal -->
+    <LayerInfoModal
+      :is-visible="infoModalVisible"
+      :title="infoModalTitle"
+      :rows="infoModalRows"
+      @close="infoModalVisible = false"
     />
   </div>
 </template>
 
 <script setup>
 import { ref, markRaw } from 'vue';
+import * as THREE from 'three';
 import ContextMenu3D from '../contextMenus/ContextMenu3D.vue';
+import LayerInfoModal from '../modals/LayerInfoModal.vue';
 import {
   ICON_3D_MODEL,
   ICON_POINT_CLOUD,
@@ -65,6 +76,11 @@ const emit = defineEmits(['toggle-layer-visibility', 'remove-layer', 'zoom-to-la
 const layers = ref([]);
 const selectedLayerId = ref(null);
 const contextMenuRef = ref(null);
+
+// Info modal state
+const infoModalVisible = ref(false);
+const infoModalTitle = ref('');
+const infoModalRows = ref([]);
 
 const getLayerIcon = (type) => {
   switch(type) {
@@ -103,16 +119,113 @@ const selectLayer = (layerId) => {
   selectedLayerId.value = layerId;
 };
 
+// --- Point size helpers (only relevant for pointcloud layers) ---
+const getPointSize = (layer) => {
+  if (!layer.object) return 2;
+  let size = 2;
+  layer.object.traverse((child) => {
+    if (child.isPoints && child.material) size = child.material.size;
+  });
+  return size;
+};
+
+const setPointSize = (layer, newSize) => {
+  if (!layer.object) return;
+  layer.object.traverse((child) => {
+    if (child.isPoints && child.material) {
+      child.material.size = newSize;
+      child.material.needsUpdate = true;
+    }
+  });
+};
+
+// --- Layer info computation ---
+const TYPE_LABELS = {
+  model:      '3D Model',
+  pointcloud: 'Point Cloud',
+  camera:     'Camera Poses',
+  markers:    'GCP Markers',
+};
+
+const collectLayerInfo = (layer) => {
+  const rows = [];
+  rows.push({ key: 'Name', value: layer.name });
+  rows.push({ key: 'Type', value: TYPE_LABELS[layer.type] || layer.type });
+
+  if (layer.object) {
+    let totalPoints = 0;
+    let totalVertices = 0;
+    let totalTriangles = 0;
+    let meshCount = 0;
+
+    layer.object.traverse((child) => {
+      if (child.isPoints && child.geometry?.attributes?.position) {
+        totalPoints += child.geometry.attributes.position.count;
+      }
+      if (child.isMesh && child.geometry?.attributes?.position) {
+        meshCount++;
+        totalVertices += child.geometry.attributes.position.count;
+        const idx = child.geometry.index;
+        totalTriangles += idx ? idx.count / 3 : Math.round(child.geometry.attributes.position.count / 3);
+      }
+    });
+
+    if (totalPoints > 0)    rows.push({ key: 'Points',    value: totalPoints.toLocaleString() });
+    if (totalVertices > 0)  rows.push({ key: 'Vertices',  value: totalVertices.toLocaleString() });
+    if (totalTriangles > 0) rows.push({ key: 'Triangles', value: Math.round(totalTriangles).toLocaleString() });
+    if (meshCount > 1)      rows.push({ key: 'Meshes',    value: meshCount.toLocaleString() });
+
+    if (layer.type === 'camera' && layer.object.userData?.cameraCount) {
+      rows.push({ key: 'Cameras', value: layer.object.userData.cameraCount });
+    }
+    if (layer.type === 'markers' && layer.object.userData?.markerCount) {
+      rows.push({ key: 'Markers', value: layer.object.userData.markerCount });
+    }
+
+    // Bounding box — for markers compute from group positions only (not visual geometry)
+    let box;
+    if (layer.type === 'markers') {
+      box = new THREE.Box3();
+      layer.object.children.forEach(child => {
+        if (child.isGroup) box.expandByPoint(child.position);
+      });
+    } else {
+      box = new THREE.Box3().setFromObject(layer.object);
+    }
+
+    if (!box.isEmpty()) {
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      rows.push({ key: 'Size X', value: `${size.x.toFixed(2)} m` });
+      rows.push({ key: 'Size Y', value: `${size.y.toFixed(2)} m` });
+      rows.push({ key: 'Size Z', value: `${size.z.toFixed(2)} m` });
+      rows.push({ key: 'Center X', value: center.x.toFixed(1) });
+      rows.push({ key: 'Center Y', value: center.y.toFixed(1) });
+      rows.push({ key: 'Center Z', value: center.z.toFixed(1) });
+    }
+  }
+
+  return rows;
+};
+
 const handleRightClick = (event, layer) => {
   contextMenuRef.value.open(event, layer);
 };
 
 const handleMenuAction = ({ type, layer }) => {
-  if (type === 'zoom') {
+  if (type === 'info') {
+    infoModalRows.value = collectLayerInfo(layer);
+    infoModalTitle.value = layer.name;
+    infoModalVisible.value = true;
+  } else if (type === 'zoom') {
     emit('zoom-to-layer', layer);
   } else if (type === 'remove') {
     removeLayer(layer.id);
   }
+};
+
+const handlePointSizeChange = ({ size, layer }) => {
+  setPointSize(layer, size);
 };
 
 defineExpose({

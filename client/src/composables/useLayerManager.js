@@ -6,10 +6,9 @@ import { useSettingsStore } from "../stores/settingsStore";
 import { generateUUID } from "../utils/helpers";
 import { logger } from "../utils/logger";
 import {
-  createPinStyle,
-  createVectorStyle,
+  buildLayerSharedStyle,
+  buildGroupByStyleFunction,
   createSelectionStyleFunction,
-  applyFeatureStyle,
 } from "../utils/styleFactory";
 import {
   createTileLayerConfig,
@@ -19,15 +18,16 @@ import {
   createGeoTIFFLayerConfig,
 } from "../utils/layerFactory";
 import {
-  BATCH_SIZE,
   Z_INDEX,
   LAYER_CATEGORY,
   LAYER_STATUS,
   GEOMETRY_TYPE,
+  SUBCATEGORY_COLORS,
 } from "../constants/layerConstants";
 
 // OpenLayers Imports
 import VectorLayer from "ol/layer/Vector";
+import VectorImageLayer from "ol/layer/VectorImage";
 import VectorSource from "ol/source/Vector";
 import GeoJSON from "ol/format/GeoJSON";
 import { Select, DragBox } from "ol/interaction";
@@ -52,11 +52,20 @@ export function useLayerManager(map) {
   // The store calls this function when cancelLayerLoad() is invoked.
   // ---------------------------------------------------------------------------
   layerStore.registerCancelHandler((layerId) => {
+    // 1. Terminate the worker
     const worker = activeWorkers.get(layerId);
     if (worker) {
       worker.terminate();
       activeWorkers.delete(layerId);
     }
+    // 2. Remove any partially-loaded OL layer from the map
+    const storeLayer = layerStore.layers.find((l) => l._layerId === layerId);
+    if (storeLayer?.layerInstance) {
+      map.removeLayer(storeLayer.layerInstance);
+      storeLayer.layerInstance = null;
+    }
+    // 3. Clear any partial search index entries
+    searchIndex.delete(layerId);
   });
 
   // Watcher to trigger downloads - only watch the specific conditions we care about
@@ -253,15 +262,164 @@ export function useLayerManager(map) {
       layerName: layer.name,
     });
 
+    // State shared across all CHUNK messages for this layer.
+    const format = new GeoJSON();
+    const layerSearchIndex = new Map();
+    let source = null;
+    let olLayer = null;
+    let detectedGeomType = GEOMETRY_TYPE.POLYGON;
+    // Collect unique groupBy values while streaming chunks
+    const groupByValues = new Set();
+
     worker.onmessage = (e) => {
-      const { type, progress, data, error } = e.data;
-      if (type === "PROGRESS")
+      const { type, progress, chunkIndex, totalChunks, isFirst, dataProjection, geojsonChunk, metadata, error } = e.data;
+
+      if (type === "PROGRESS") {
         layerStore.setLayerProgress(layer._layerId, progress);
-      if (type === "SUCCESS") {
-        finalizeGeoJsonLayer(data, layer, worker);
       }
+
+      if (type === "CHUNK") {
+        if (isFirst) {
+          layerStore.setLayerStatus(layer._layerId, LAYER_STATUS.PROCESSING);
+          layerStore.setLayerProgress(layer._layerId, 0);
+        }
+
+        // Parse this chunk's features (applies CRS projection — must run on main thread).
+        // dataProjection tells OL what CRS the coordinates are actually in;
+        // featureProjection tells OL what CRS the map view uses.
+        const readOptions = {
+          featureProjection: map.getView().getProjection(),
+        };
+        if (dataProjection) {
+          readOptions.dataProjection = dataProjection;
+        }
+        const features = format.readFeatures(geojsonChunk, readOptions);
+
+        // Assign stable IDs and build the search index.
+        for (const feature of features) {
+          const fid = feature.get("_featureId") || feature.get("id") || generateUUID();
+          feature.setId(fid);
+          feature.set("_layerId", layer._layerId);
+          if (!feature.get("_featureId")) feature.set("_featureId", fid);
+
+          // Track unique values for group_by
+          if (layer.groupBy) {
+            const val = feature.get(layer.groupBy);
+            if (val != null && String(val) !== "") groupByValues.add(String(val));
+          }
+
+          if (layer.searchFields?.length) {
+            const props = feature.getProperties();
+            for (const field of layer.searchFields) {
+              const value = props[field];
+              if (value != null && String(value) !== "") {
+                layerSearchIndex.set(String(value).toLowerCase(), {
+                  feature,
+                  displayValue: String(value),
+                });
+              }
+            }
+          }
+        }
+
+        if (isFirst) {
+          // Detect geometry type from the first loaded feature.
+          if (features.length > 0) {
+            const firstType = features[0].getGeometry().getType();
+            if (firstType === GEOMETRY_TYPE.POINT || firstType === GEOMETRY_TYPE.MULTI_POINT) {
+              detectedGeomType = GEOMETRY_TYPE.POINT;
+            } else if (firstType === GEOMETRY_TYPE.LINE_STRING || firstType === GEOMETRY_TYPE.MULTI_LINE_STRING) {
+              detectedGeomType = GEOMETRY_TYPE.LINE;
+            }
+          }
+
+          const sharedStyle = buildLayerSharedStyle(
+            layer.color,
+            layer.strokeColor ?? null,
+            layer.fillColor ?? null,
+            detectedGeomType,
+          );
+
+          // Create source + layer and add to the map immediately so the first
+          // batch of features is visible while the rest are still streaming in.
+          source = new VectorSource({ features });
+          const LayerClass = layer.renderMode === "image" ? VectorImageLayer : VectorLayer;
+
+          // Use a style function for grouped layers so each group can be
+          // coloured and toggled independently. For plain layers, use the
+          // static shared style (faster — avoids per-feature lookup).
+          const layerStyle = layer.groupBy
+            ? buildGroupByStyleFunction(layer._layerId, layerStore)
+            : sharedStyle;
+
+          olLayer = new LayerClass({
+            source,
+            style: layerStyle,
+            visible: layer.active,
+            zIndex: Z_INDEX.OVERLAY,
+            updateWhileAnimating: false,
+            updateWhileInteracting: false,
+            properties: { id: layer._layerId },
+          });
+
+          const storeLayer = layerStore.layers.find((l) => l._layerId === layer._layerId);
+          if (storeLayer) {
+            storeLayer.layerInstance = markRaw(olLayer);
+            storeLayer.geometryType = detectedGeomType;
+          }
+          map.addLayer(olLayer);
+          layerStore.updateLayerZIndexes();
+        } else {
+          // Append to the existing source — OL re-renders on the next animation frame.
+          source.addFeatures(features);
+        }
+
+        layerStore.setLayerProgress(layer._layerId, Math.round(((chunkIndex + 1) / totalChunks) * 100));
+      }
+
+      if (type === "COMPLETE") {
+        searchIndex.set(layer._layerId, layerSearchIndex);
+
+        // Resolve the store layer first — needed both for groupBy and for
+        // setting status/metadata below. (Must be before the groupBy block
+        // or `storeLayer` would be in the temporal dead zone inside the else.)
+        const storeLayer = layerStore.layers.find((l) => l._layerId === layer._layerId);
+
+        // Build sub-categories from collected unique values.
+        if (layer.groupBy) {
+          if (groupByValues.size > 0) {
+            // All sub-groups start with the same colour as the parent layer so
+            // the main colour still makes sense visually. The user can then
+            // change individual group colours via the right-click context menu.
+            const baseColor = layer.strokeColor || layer.color || DEFAULT_COLOR;
+            const categories = {};
+            for (const val of [...groupByValues].sort()) {
+              categories[val] = { color: baseColor, visible: true };
+            }
+            layerStore.initSubCategories(layer._layerId, categories);
+            if (olLayer) olLayer.changed();
+          } else {
+            // The configured field name was not present in any feature — warn.
+            const msg = `group_by field "${layer.groupBy}" not found in any feature. Check the spelling in config.yaml.`;
+            logger.warn("LayerManager", `Layer "${layer.name}": ${msg}`);
+            if (storeLayer) {
+              storeLayer.groupByMissing = true;
+              storeLayer.warning = msg;
+            }
+          }
+        }
+
+        if (storeLayer) {
+          storeLayer.status = LAYER_STATUS.READY;
+          storeLayer.metadata = metadata ?? {};
+        }
+
+        worker.terminate();
+        activeWorkers.delete(layer._layerId);
+      }
+
       if (type === "ERROR") {
-        logger.error('LayerManager', 'Worker Error:', error);
+        logger.error("LayerManager", "Worker Error:", error);
         layerStore.setLayerError(layer._layerId, error);
         worker.terminate();
         activeWorkers.delete(layer._layerId);
@@ -269,133 +427,46 @@ export function useLayerManager(map) {
     };
   };
 
-  const finalizeGeoJsonLayer = async (geoJsonData, layer, worker) => {
-    // Signal that we're now in the processing (parsing) phase
-    layerStore.setLayerStatus(layer._layerId, LAYER_STATUS.PROCESSING);
-    layerStore.setLayerProgress(layer._layerId, 0);
-
-    // 1. Parse GeoJSON (unavoidable synchronous OL call, but relatively fast)
-    const format = new GeoJSON();
-    const features = format.readFeatures(geoJsonData, {
-      featureProjection: map.getView().getProjection(),
-    });
-
-    // 2. Create cached styles once
-    const baseColor = layer.color;
-    const vectorStyle = createVectorStyle(baseColor);
-    const pinStyle = createPinStyle(baseColor);
-
-    // 3. Process features in chunks, yielding to the browser between each batch
-    const totalFeatures = features.length;
-    const layerSearchIndex = new Map(); // name (lowercase) → feature
-
-    for (let i = 0; i < totalFeatures; i += BATCH_SIZE) {
-      const end = Math.min(i + BATCH_SIZE, totalFeatures);
-
-      for (let j = i; j < end; j++) {
-        const feature = features[j];
-        const fid = feature.get("id") || generateUUID();
-        feature.setId(fid);
-        feature.set("_layerId", layer._layerId);
-        feature.set("_featureId", fid);
-
-        // Apply appropriate style based on geometry type
-        applyFeatureStyle(feature, baseColor);
-
-        // Index this feature by every field declared in search_fields
-        if (layer.searchFields && layer.searchFields.length > 0) {
-          const props = feature.getProperties();
-          for (const field of layer.searchFields) {
-            const value = props[field];
-            if (value != null && String(value) !== "") {
-              layerSearchIndex.set(String(value).toLowerCase(), {
-                feature,
-                displayValue: String(value),
-              });
-            }
-          }
-        }
-      }
-
-      // Update progress and yield to let the browser paint
-      const progress = Math.round((end / totalFeatures) * 100);
-      layerStore.setLayerProgress(layer._layerId, progress);
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-
-    // Store the search index for this layer
-    searchIndex.set(layer._layerId, layerSearchIndex);
-
-    // 4. Create Source and Layer (all features are styled, this is fast)
-    const source = new VectorSource({ features });
-
-    const olLayer = new VectorLayer({
-      source: source,
-      visible: layer.active,
-      zIndex: Z_INDEX.OVERLAY,
-      updateWhileAnimating: true,
-      updateWhileInteracting: true,
-      properties: { id: layer._layerId },
-    });
-
-    // 5. Detect geometry type from loaded features
-    let detectedGeomType = GEOMETRY_TYPE.POLYGON;
-    if (features.length > 0) {
-      const firstType = features[0].getGeometry().getType();
-      if (firstType === GEOMETRY_TYPE.POINT || firstType === GEOMETRY_TYPE.MULTI_POINT) {
-        detectedGeomType = GEOMETRY_TYPE.POINT;
-      } else if (
-        firstType === GEOMETRY_TYPE.LINE_STRING ||
-        firstType === GEOMETRY_TYPE.MULTI_LINE_STRING
-      ) {
-        detectedGeomType = GEOMETRY_TYPE.LINE;
-      }
-    }
-
-    // 6. Update store and add to map
-    const storeLayer = layerStore.layers.find(
-      (l) => l._layerId === layer._layerId,
-    );
-    if (storeLayer) {
-      storeLayer.layerInstance = markRaw(olLayer);
-      storeLayer.geometryType = detectedGeomType;
-      storeLayer.status = LAYER_STATUS.READY;
-      storeLayer.metadata = geoJsonData._metadata || {};
-      map.addLayer(olLayer);
-      // Update z-indexes to respect current layer ordering
-      layerStore.updateLayerZIndexes();
-    }
-
-    worker.terminate();
-    activeWorkers.delete(layer._layerId);
-  };
-
   const applyLayerColor = (layerId) => {
     const layerObj = layerStore.getLayerById(layerId);
     if (!layerObj || !layerObj.layerInstance) return;
 
-    const newColor = layerObj.color;
-    const olLayer = layerObj.layerInstance;
-    const source = olLayer.getSource();
-    if (!source) return;
+    // For grouped layers the style function already reads from the store;
+    // just force OL to re-render the image tile.
+    if (layerObj.groupBy) {
+      layerObj.layerInstance.changed();
+      return;
+    }
 
-    // Get the currently selected features from the select interaction
-    const selectedFeatures = selectInteraction
-      ? selectInteraction.getFeatures().getArray()
-      : [];
-    const selectedIds = new Set(selectedFeatures.map((f) => f.getId()));
+    // Update layer-level style — O(1) regardless of feature count.
+    const newStyle = buildLayerSharedStyle(
+      layerObj.color,
+      layerObj.strokeColor ?? null,
+      layerObj.fillColor ?? null,
+      layerObj.geometryType
+    );
+    layerObj.layerInstance.setStyle(newStyle);
 
-    // Apply style directly to each feature (better performance than a style function)
-    // Skip selected features - they keep their selection style
-    source.getFeatures().forEach((feature) => {
-      // Don't change the style of selected features
-      if (selectedIds.has(feature.getId())) return;
+    // Clear any per-feature style overrides (e.g. from a previous selection)
+    // so the new layer style takes effect on all non-selected features.
+    const source = layerObj.layerInstance.getSource?.();
+    if (source) {
+      const selectedIds = selectInteraction
+        ? new Set(selectInteraction.getFeatures().getArray().map(f => f.getId()))
+        : new Set();
+      source.getFeatures().forEach(f => {
+        if (!selectedIds.has(f.getId())) f.setStyle(null);
+      });
+    }
+  };
 
-      applyFeatureStyle(feature, newColor);
-    });
-
-    // Clear any layer-level style so per-feature styles take effect
-    olLayer.setStyle(null);
+  /**
+   * Force OL to re-render a grouped layer after a sub-category change.
+   * Call this from the UI after toggling visibility or changing a group colour.
+   */
+  const applySubCategories = (layerId) => {
+    const layerObj = layerStore.getLayerById(layerId);
+    if (layerObj?.layerInstance) layerObj.layerInstance.changed();
   };
 
   let dragBoxInteraction = null;
@@ -429,13 +500,10 @@ export function useLayerManager(map) {
     });
 
     selectInteraction.on("select", (e) => {
-      // Restore styles for all deselected features
+      // Clear the per-feature selection style — OL falls back to the
+      // layer-level shared style automatically.
       e.deselected.forEach((deselected) => {
-        const layerId = deselected.get("_layerId");
-        const layerObj = layerStore.getLayerById(layerId);
-        if (layerObj?.color) {
-          applyFeatureStyle(deselected, layerObj.color);
-        }
+        deselected.setStyle(null);
       });
 
       syncSelectionToStore();
@@ -452,7 +520,7 @@ export function useLayerManager(map) {
       const alreadySelected = new Set(selFeatures.getArray().map((f) => f.getId()));
 
       map.getLayers().forEach((layer) => {
-        if (!(layer instanceof VectorLayer)) return;
+        if (!(layer instanceof VectorLayer) && !(layer instanceof VectorImageLayer)) return;
         if (!layer.getVisible()) return; // skip hidden layers
         layer.getSource().forEachFeatureIntersectingExtent(boxExtent, (feature) => {
           if (!alreadySelected.has(feature.getId())) {
@@ -514,5 +582,5 @@ export function useLayerManager(map) {
     }
   };
 
-  return { processLayer, removeLayer, cleanup, applyLayerColor, searchIndex, setupSelection, setSelectionActive };
+  return { processLayer, removeLayer, cleanup, applyLayerColor, applySubCategories, searchIndex, setupSelection, setSelectionActive };
 }

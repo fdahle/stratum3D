@@ -23,7 +23,7 @@ const POINTCLOUDS_INPUT_DIR = path.join(INPUT_DIR, "pointclouds");
 const GEOTIFFS_INPUT_DIR = path.join(INPUT_DIR, "geotiffs");
 
 const OUTPUT_DIR = path.resolve("data");
-const LAYERS_OUTPUT_DIR = path.join(OUTPUT_DIR, "layers");
+const LAYERS_OUTPUT_DIR = path.join(OUTPUT_DIR, "shapes");
 const MODELS_OUTPUT_DIR = path.join(OUTPUT_DIR, "3D");
 const POINTCLOUDS_OUTPUT_DIR = path.join(OUTPUT_DIR, "pointclouds");
 const GEOTIFFS_OUTPUT_DIR = path.join(OUTPUT_DIR, "geotiffs");

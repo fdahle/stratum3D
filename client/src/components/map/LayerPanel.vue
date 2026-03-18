@@ -20,6 +20,8 @@
             'is-idle': layer.status === 'idle',
             'layer-error': layer.status === 'error',
             'dragging': draggedLayerId === layer._layerId,
+            'has-groups': layer.groupBy && layer.status === 'ready' && Object.keys(layer.subCategories).length > 0,
+            'has-warning': !!layer.warning,
           }"
           draggable="true"
           @dragstart="handleDragStart($event, layer)"
@@ -69,12 +71,10 @@
             <span
               class="layer-name-text"
               :style="{ color: layer.status === 'error' ? '#888' : 'inherit' }"
-            >
-              {{ layer.name }}
-              <small v-if="layer.status === 'downloading'" class="loading-text">({{ STRINGS.layer.dl }} {{ layer.progress }}%)</small>
-              <small v-else-if="layer.status === 'processing'" class="loading-text">({{ STRINGS.layer.proc }} {{ layer.progress }}%)</small>
-              <small v-else-if="layer.status === 'loading-details'" class="loading-text">({{ STRINGS.layer.load }} {{ layer.progress }}%)</small>
-            </span>
+            >{{ layer.name }}</span>
+            <small v-if="layer.status === 'downloading'" class="loading-text">({{ STRINGS.layer.dl }} {{ layer.progress }}%)</small>
+            <small v-else-if="layer.status === 'processing'" class="loading-text">({{ STRINGS.layer.proc }} {{ layer.progress }}%)</small>
+            <small v-else-if="layer.status === 'loading-details'" class="loading-text">({{ STRINGS.layer.load }} {{ layer.progress }}%)</small>
 
             <div class="action-buttons">
               <span
@@ -123,9 +123,60 @@
                 v-html="EMOJI_ICONS.TRASH"
               >
               </button>
+
+              <!-- Expand/collapse sub-categories -->
+              <button
+                v-if="layer.groupBy && layer.status === 'ready' && Object.keys(layer.subCategories).length > 0"
+                class="action-btn expand-btn"
+                :title="expandedLayers.has(layer._layerId) ? 'Collapse groups' : 'Expand groups'"
+                @click.stop="toggleExpand(layer._layerId)"
+              >
+                {{ expandedLayers.has(layer._layerId) ? '▾' : '▸' }}
+              </button>
+
+              <!-- group_by field not found in data -->
+              <span
+                v-if="layer.groupBy && layer.status === 'ready' && layer.groupByMissing"
+                class="warning-icon"
+                :title="STRINGS.layer.groupByMissing(layer.groupBy)"
+              >⚠️</span>
             </div>
           </div>
         </label>
+
+        <!-- Inline warning banner for non-fatal issues (e.g. bad group_by field) -->
+        <div v-if="layer.warning" class="layer-warning-banner">
+          ⚠️ {{ layer.warning }}
+        </div>
+
+        <!-- Sub-category rows, shown when the layer is expanded -->
+        <div
+          v-if="layer.groupBy && layer.status === 'ready' && expandedLayers.has(layer._layerId)"
+          class="subcategories-panel"
+        >
+          <div
+            v-for="(cat, value) in layer.subCategories"
+            :key="value"
+            class="subcategory-row"
+            @contextmenu.prevent.stop="handleSubCategoryRightClick($event, layer, value)"
+          >
+            <input
+              type="checkbox"
+              :checked="cat.visible"
+              @change="handleSubCategoryToggle(layer, value)"
+            />
+            <input
+              type="color"
+              :value="cat.color"
+              class="subcategory-color"
+              :title="'Change colour for ' + value"
+              @input="handleSubCategoryColor(layer, value, $event.target.value)"
+            />
+            <span class="subcategory-label" :style="{ color: cat.visible ? 'inherit' : '#aaa' }">
+              {{ value }}
+            </span>
+          </div>
+        </div>
         </div>
       </TransitionGroup>
 
@@ -146,6 +197,14 @@
       @action="handleMenuAction"
       @color-change="handleColorChange"
     />
+
+    <!-- Layer Info Modal -->
+    <LayerInfoModal
+      :is-visible="infoModalVisible"
+      :title="infoModalTitle"
+      :rows="infoModalRows"
+      @close="infoModalVisible = false"
+    />
   </div>
 </template>
 
@@ -156,6 +215,7 @@ import { useLayerStore } from "../../stores/map/layerStore";
 import { useMapStore } from "../../stores/map/mapStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import ContextMenu from "../contextMenus/ContextMenuLayers.vue";
+import LayerInfoModal from "../modals/LayerInfoModal.vue";
 import GeoJSON from "ol/format/GeoJSON"; // Import OL GeoJSON Format
 import { ICON_POINT, ICON_LINE, ICON_POLYGON, ICON_RASTER, EMOJI_ICONS, getGeometryIcon } from "../../constants/icons";
 import { STRINGS } from "../../constants/strings";
@@ -170,6 +230,14 @@ const layerManager = inject("layerManager"); // ref — access via .value
 const { overlayLayers } = storeToRefs(layerStore);
 const contextMenuRef = ref(null);
 
+// Info modal state
+const infoModalVisible = ref(false);
+const infoModalTitle = ref('');
+const infoModalRows = ref([]);
+
+const GEOM_LABELS = { point: 'Point', line: 'Line', polygon: 'Polygon', raster: 'Raster', unknown: 'Unknown' };
+const TYPE_LABELS = { geojson: 'GeoJSON', geotiff: 'GeoTIFF', wms: 'WMS', wmts: 'WMTS', tile: 'Tile' };
+
 // getGeometryIcon now returns SVG markup directly
 const getGeometryIconSVG = (layerType) => getGeometryIcon(layerType);
 
@@ -179,6 +247,47 @@ const handleRightClick = (event, layer) => {
 };
 
 const handleMenuAction = ({ type, layer }) => {
+  // --- INFO ACTION --- (works even without layerInstance for metadata-only layers)
+  if (type === 'info') {
+    const rows = [];
+    rows.push({ key: 'Name', value: layer.name });
+    rows.push({ key: 'Type', value: TYPE_LABELS[layer.type] || layer.type });
+    if (layer.geometryType) rows.push({ key: 'Geometry', value: GEOM_LABELS[layer.geometryType] || layer.geometryType });
+    if (layer.url) rows.push({ key: 'URL', value: layer.url });
+    if (layer.color) rows.push({ key: 'Color', value: layer.color });
+    if (layer.crsCompatible !== null) rows.push({ key: 'CRS match', value: layer.crsCompatible ? 'Yes' : 'No' });
+    if (layer.category) rows.push({ key: 'Category', value: layer.category });
+
+    if (layer.layerInstance) {
+      const source = layer.layerInstance.getSource?.();
+      if (source?.getFeatures) {
+        const count = source.getFeatures().length;
+        rows.push({ key: 'Features', value: count.toLocaleString() });
+      }
+      const map = mapStore.getMap();
+      if (map && source) {
+        try {
+          const extent = source.getExtent?.();
+          if (extent && extent[0] !== Infinity) {
+            rows.push({ key: 'Min X', value: extent[0].toFixed(2) });
+            rows.push({ key: 'Min Y', value: extent[1].toFixed(2) });
+            rows.push({ key: 'Max X', value: extent[2].toFixed(2) });
+            rows.push({ key: 'Max Y', value: extent[3].toFixed(2) });
+          }
+        } catch (_) {}
+        try {
+          const proj = map.getView().getProjection();
+          if (proj) rows.push({ key: 'Map CRS', value: proj.getCode() });
+        } catch (_) {}
+      }
+    }
+
+    infoModalRows.value = rows;
+    infoModalTitle.value = layer.name;
+    infoModalVisible.value = true;
+    return;
+  }
+
   if (!layer.layerInstance) return;
 
   // --- REMOVE ACTION ---
@@ -247,11 +356,16 @@ const handleMenuAction = ({ type, layer }) => {
   }
 };
 
-const handleColorChange = ({ color, layer }) => {
-  // 1. Update the stored color value
-  layerStore.updateLayerColor(layer._layerId, color);
-  // 2. Re-style the OL features to match (composable owns OL logic)
-  if (layerManager.value) layerManager.value.applyLayerColor(layer._layerId);
+const handleColorChange = ({ color, layer, subGroupValue }) => {
+  if (subGroupValue != null) {
+    // Sub-group colour change from right-click on a subcategory row
+    layerStore.updateSubCategoryColor(layer._layerId, subGroupValue, color);
+    if (layerManager.value) layerManager.value.applySubCategories(layer._layerId);
+  } else {
+    // Normal layer colour change
+    layerStore.updateLayerColor(layer._layerId, color);
+    if (layerManager.value) layerManager.value.applyLayerColor(layer._layerId);
+  }
 };
 
 const handleCancel = (layerId) => {
@@ -260,6 +374,30 @@ const handleCancel = (layerId) => {
 
 const handleRemove = (layerId) => {
   if (layerManager.value) layerManager.value.removeLayer(layerId);
+};
+
+// --- Sub-category expand/collapse ---
+const expandedLayers = ref(new Set());
+
+const toggleExpand = (layerId) => {
+  const s = new Set(expandedLayers.value);
+  if (s.has(layerId)) s.delete(layerId);
+  else s.add(layerId);
+  expandedLayers.value = s;
+};
+
+const handleSubCategoryToggle = (layer, value) => {
+  layerStore.toggleSubCategory(layer._layerId, value);
+  if (layerManager.value) layerManager.value.applySubCategories(layer._layerId);
+};
+
+const handleSubCategoryColor = (layer, value, color) => {
+  layerStore.updateSubCategoryColor(layer._layerId, value, color);
+  if (layerManager.value) layerManager.value.applySubCategories(layer._layerId);
+};
+
+const handleSubCategoryRightClick = (event, layer, value) => {
+  contextMenuRef.value.open(event, layer, value);
 };
 
 const moveLayerUp = (layerId) => {
@@ -595,6 +733,8 @@ const handleTouchEnd = (event) => {
   color: #6c757d;
   font-size: 11px;
   margin-left: 5px;
+  flex-shrink: 0;  /* never truncate — this is the part that must stay visible */
+  white-space: nowrap;
 }
 
 label {
@@ -609,7 +749,8 @@ label {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  width: 100%;
+  flex: 1;
+  min-width: 0;  /* lets flex children shrink below their natural size */
   margin-left: 10px;
 }
 
@@ -725,6 +866,110 @@ label {
 
 .remove-btn:hover {
   background-color: #fee2e2;
+}
+
+/* Sub-category expand button */
+.expand-btn {
+  color: #555;
+  font-size: 13px;
+  padding: 2px 5px;
+}
+
+.theme-dark .expand-btn {
+  color: #bbb;
+}
+
+.expand-btn:hover {
+  background-color: #e8e8e8;
+  color: #000;
+}
+
+.theme-dark .expand-btn:hover {
+  background-color: #3a3a3a;
+  color: #fff;
+}
+
+/* Sub-category panel — rendered inside .layer-row (which becomes column) */
+.layer-row.has-groups,
+.layer-row.has-warning {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.layer-warning-banner {
+  font-size: 11px;
+  color: #7a4f00;
+  background: #fff3cd;
+  border-top: 1px solid #ffc107;
+  padding: 3px 8px 4px 8px;
+  line-height: 1.4;
+  word-break: break-word;
+  /* hidden by default — only revealed when the row is hovered */
+  max-height: 0;
+  overflow: hidden;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-top-width: 0;
+  transition: max-height 0.2s ease, padding 0.2s ease, border-top-width 0.2s ease;
+}
+
+.layer-row:hover .layer-warning-banner {
+  max-height: 10em;
+  padding-top: 3px;
+  padding-bottom: 4px;
+  border-top-width: 1px;
+}
+
+.theme-dark .layer-warning-banner {
+  color: #ffd966;
+  background: #3a2e00;
+  border-top-color: #b38600;
+}
+
+.subcategories-panel {
+  padding: 4px 8px 2px 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-top: 1px solid #eee;
+  margin-top: 4px;
+}
+
+.theme-dark .subcategories-panel {
+  border-top-color: #444;
+}
+
+.subcategory-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.subcategory-color {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  cursor: pointer;
+  background: none;
+  flex-shrink: 0;
+}
+
+.subcategory-color::-webkit-color-swatch-wrapper { padding: 0; }
+.subcategory-color::-webkit-color-swatch { border: none; border-radius: 2px; }
+
+.subcategory-label {
+  font-size: 12px;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.theme-dark .subcategory-label {
+  color: #ccc;
 }
 
 .empty-state {

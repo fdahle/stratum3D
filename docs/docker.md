@@ -129,7 +129,7 @@ hist_map/
 │
 ├── server/
 │   ├── data/                # Mounted read-write (persisted)
-│   │   ├── layers/
+│   │   ├── shapes/
 │   │   ├── 3D/
 │   │   ├── pointclouds/
 │   │   └── geotiffs/

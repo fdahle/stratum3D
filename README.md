@@ -94,7 +94,7 @@ base_layers:
 overlay_layers:
   - name: "My Data"
     type: "geojson"
-    url: "http://localhost:3000/data/layers/mydata.geojson"
+    url: "http://localhost:3000/data/shapes/mydata.geojson"
     visible: true
 ```
 

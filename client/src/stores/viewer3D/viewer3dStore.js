@@ -20,6 +20,7 @@ export const useViewer3DStore = defineStore('viewer3d', () => {
   const showBoundingBox = ref(true);
   const showGrid = ref(true);
   const showAxes = ref(true);
+  const showNormals = ref(false);
 
   // Measurement state
   const measurementMode = ref(null); // null, 'distance', 'area'
@@ -109,6 +110,11 @@ export const useViewer3DStore = defineStore('viewer3d', () => {
       const axes = scene.value.getObjectByName('axesHelper');
       if (axes) axes.visible = showAxes.value;
     }
+  };
+
+  const toggleNormals = () => {
+    showNormals.value = !showNormals.value;
+    // Actual helper creation/removal is handled in Canvas.vue via a watcher on showNormals
   };
 
   // Measurement management
@@ -201,10 +207,12 @@ export const useViewer3DStore = defineStore('viewer3d', () => {
     showBoundingBox,
     showGrid,
     showAxes,
+    showNormals,
     toggleWireframe,
     toggleBoundingBox,
     toggleGrid,
     toggleAxes,
+    toggleNormals,
 
     // Measurements
     measurementMode,

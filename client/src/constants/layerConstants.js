@@ -52,3 +52,18 @@ export const DEFAULT_SELECTION_WIDTH = 5;
 export const DEFAULT_TILE_SIZE = 256;
 export const DEFAULT_OPACITY = 0.5; // 50% fill opacity (hex: ~80)
 export const DEFAULT_SELECTION_OPACITY = 0.7; // 70% selection fill opacity (hex: ~B3)
+
+// Colour palette for auto-assigning sub-category group colours.
+// Chosen for good contrast against each other and a white/dark map background.
+export const SUBCATEGORY_COLORS = [
+  '#e74c3c', // red
+  '#3498db', // blue
+  '#2ecc71', // green
+  '#f39c12', // orange
+  '#9b59b6', // purple
+  '#1abc9c', // teal
+  '#e67e22', // dark orange
+  '#34495e', // dark grey
+  '#e91e63', // pink
+  '#00bcd4', // cyan
+];

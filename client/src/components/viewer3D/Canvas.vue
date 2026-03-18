@@ -8,6 +8,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
+import { VertexNormalsHelper } from 'three/examples/jsm/helpers/VertexNormalsHelper.js';
 import { useViewer3DStore } from '@/stores/viewer3D/viewer3dStore';
 import { useSettingsStore } from '@/stores/settingsStore.js';
 import { storeToRefs } from 'pinia';
@@ -48,6 +49,10 @@ const {
   controls,
   measurementMode,
   measurementPoints,
+  showWireframe,
+  showBoundingBox,
+  showNormals,
+  loadedModels,
 } = storeToRefs(viewer3DStore);
 const {
   setScene,
@@ -293,10 +298,20 @@ const loadObjFromText = async (text, modelIndex = 0) => {
 
     scene.value.add(object);
     addModel(object);
+
+    // Apply current display settings to the newly loaded model
+    if (showWireframe.value) {
+      object.traverse((child) => {
+        if (child.isMesh) child.material.wireframe = true;
+      });
+    }
     
-    // Auto-adjust camera for first model
-    if (modelIndex === 0) {
-      adjustCameraToModel(object, size, center);
+    // Update scene helpers and camera to encompass all loaded content
+    adjustCameraToModel();
+
+    // If normals are currently shown, add helpers for the new model's meshes
+    if (showNormals.value) {
+      updateNormalsHelpers(true);
     }
     
     console.log(`OBJ ${modelIndex + 1} loaded successfully`);
@@ -430,57 +445,70 @@ const parseObjWithProgress = async (text, modelIndex) => {
   return group;
 };
 
-const adjustCameraToModel = (object, size, center) => {
+const adjustCameraToModel = () => {
   if (!scene.value || !camera.value || !controls.value) return;
 
-  const modelBox = new THREE.Box3().setFromObject(object);
-  const modelSize = modelBox.getSize(new THREE.Vector3());
-  const modelCenter = modelBox.getCenter(new THREE.Vector3());
+  // Compute scene-wide bounding box, skipping helper objects and measurement markers
+  const exclusionNames = new Set([
+    'gridHelper', 'axesHelper', 'boxHelper',
+    'measurementMarker', 'currentMeasurementMarker', 'savedMeasurementMarker',
+  ]);
+  const modelBBox = new THREE.Box3();
+  scene.value.traverse((child) => {
+    if (!child.isMesh && !child.isPoints) return;
+    if (exclusionNames.has(child.name)) return;
+    if (child.name?.startsWith('normalsHelper_')) return;
+    modelBBox.expandByObject(child);
+  });
+
+  if (modelBBox.isEmpty()) return;
+
+  const modelSize = modelBBox.getSize(new THREE.Vector3());
+  const modelCenter = modelBBox.getCenter(new THREE.Vector3());
   const maxModelDim = Math.max(modelSize.x, modelSize.y, modelSize.z);
-  
-  // Reposition and scale grid - place at bottom of model
+
+  // Reposition and scale grid - place at bottom of scene content
   const grid = scene.value.getObjectByName('gridHelper');
   if (grid) {
     const gridSize = maxModelDim * 2;
     grid.scale.setScalar(gridSize / 200);
-    // Place grid at the bottom Y coordinate of the model
-    grid.position.set(modelCenter.x, modelBox.min.y, modelCenter.z);
-    // Ensure grid is horizontal (XZ plane, Y up) - no rotation needed as GridHelper default is correct
+    grid.position.set(modelCenter.x, modelBBox.min.y, modelCenter.z);
     grid.rotation.set(0, 0, 0);
   }
-  
-  // Reposition and scale axes - place at bottom center of model
+
+  // Reposition and scale axes - place at bottom center of scene content
   const axes = scene.value.getObjectByName('axesHelper');
   if (axes) {
     axes.scale.setScalar(maxModelDim / 50);
-    // Place axes at bottom center (X, minY, Z)
-    axes.position.set(modelCenter.x, modelBox.min.y, modelCenter.z);
+    axes.position.set(modelCenter.x, modelBBox.min.y, modelCenter.z);
   }
-  
-  // Add bounding box helper
+
+  // Replace bounding box helper with one covering the full scene extent
   const existingBox = scene.value.getObjectByName('boxHelper');
   if (existingBox) {
     scene.value.remove(existingBox);
+    if (existingBox.geometry) existingBox.geometry.dispose();
+    if (existingBox.material) existingBox.material.dispose();
   }
-  const boxHelper = new THREE.BoxHelper(object, 0x00ff00);
+  const boxHelper = new THREE.Box3Helper(modelBBox, 0x00ff00);
   boxHelper.name = 'boxHelper';
+  boxHelper.visible = showBoundingBox.value;
   scene.value.add(boxHelper);
-  
-  // Position camera
+
+  // Position camera to see all content
   const distance = maxModelDim * 2;
   camera.value.position.set(
-    modelCenter.x + distance, 
-    modelCenter.y + distance, 
+    modelCenter.x + distance,
+    modelCenter.y + distance,
     modelCenter.z + distance
   );
   camera.value.lookAt(modelCenter);
   controls.value.target.copy(modelCenter);
   controls.value.update();
-  
-  // Store initial camera position
+
   storeInitialCamera();
-  
-  console.log(`Camera adjusted - distance: ${distance.toFixed(2)}`);
+
+  console.log(`Scene helpers updated — extent: ${modelSize.x.toFixed(2)} x ${modelSize.y.toFixed(2)} x ${modelSize.z.toFixed(2)}`);
 };
 
 const loadUserObjFile = async (file) => {
@@ -594,7 +622,7 @@ const loadLASFile = async (file) => {
     // Parse header
     const headerBytes = new Uint8Array(arrayBuffer, 0, Math.min(375, arrayBuffer.byteLength));
     const header = Las.Header.parse(headerBytes);
-    const { pointCount, pointDataRecordLength, pointDataRecordFormat, pointDataOffset, scale, offset } = header;
+    const { pointCount, pointDataRecordLength, pointDataRecordFormat, pointDataOffset } = header;
 
     if (pointCount === 0) {
       emit('loading-error', { url: file.name, error: 'Point cloud is empty' });
@@ -639,9 +667,11 @@ const loadLASFile = async (file) => {
 
     for (let i = 0; i < pointCount; i++) {
       if (i % 100000 === 0 && loadingCancelled.value) return;
-      const x = getX(i) * scale[0] + offset[0];
-      const y = getY(i) * scale[1] + offset[1];
-      const z = getZ(i) * scale[2] + offset[2];
+      // copc's getter already applies scale+offset (Scale.unapply = v*scale+offset),
+      // so getX/Y/Z return absolute world coordinates directly.
+      const x = getX(i);
+      const y = getY(i);
+      const z = getZ(i);
       positions[i * 3]     = x;
       positions[i * 3 + 1] = y;
       positions[i * 3 + 2] = z;
@@ -661,9 +691,9 @@ const loadLASFile = async (file) => {
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
     const material = new THREE.PointsMaterial({
-      size: 0.05,
+      size: 2,
       vertexColors: true,
-      sizeAttenuation: true
+      sizeAttenuation: false
     });
 
     const pointCloud = new THREE.Points(geometry, material);
@@ -672,19 +702,8 @@ const loadLASFile = async (file) => {
 
     scene.value.add(pointCloud);
 
-    // Fit camera
-    const box = new THREE.Box3().setFromObject(pointCloud);
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const distance = maxDim * 2;
-
-    camera.value.position.set(center.x + distance, center.y + distance, center.z + distance);
-    controls.value.target.copy(center);
-    camera.value.lookAt(center);
-
-    const gridHelper = scene.value.getObjectByName('gridHelper');
-    if (gridHelper) gridHelper.position.y = box.min.y;
+    // Fit camera / update helpers for the whole scene
+    adjustCameraToModel();
 
     console.log(`LAS/LAZ point cloud loaded: ${pointCount} points`);
     fileLoadedCount.value++;
@@ -738,11 +757,12 @@ const loadPLYFile = (file) => {
       try {
         const geometry = loader.parse(e.target.result);
       
-      // Create point cloud material
+      // Create point cloud material — sizeAttenuation: false keeps points at a
+      // fixed pixel size at any zoom level, preventing them from disappearing.
       const material = new THREE.PointsMaterial({
-        size: 0.05,
+        size: 2,
         vertexColors: true,
-        sizeAttenuation: true
+        sizeAttenuation: false
       });
       
       // If no colors in PLY, add default color
@@ -766,27 +786,8 @@ const loadPLYFile = (file) => {
       
       scene.value.add(pointCloud);
       
-      // Fit camera to point cloud
-      const box = new THREE.Box3().setFromObject(pointCloud);
-      const center = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3());
-      
-      const maxDim = Math.max(size.x, size.y, size.z);
-      const distance = maxDim * 2;
-      
-      camera.value.position.set(
-        center.x + distance,
-        center.y + distance,
-        center.z + distance
-      );
-      controls.value.target.copy(center);
-      camera.value.lookAt(center);
-      
-      // Update grid position
-      const gridHelper = scene.value.getObjectByName('gridHelper');
-      if (gridHelper) {
-        gridHelper.position.y = box.min.y;
-      }
+      // Fit camera / update helpers for the whole scene
+      adjustCameraToModel();
       
       console.log(`Point cloud loaded: ${geometry.attributes.position.count} points`);
       fileLoadedCount.value++;
@@ -1423,15 +1424,23 @@ const handleMeasurementClick = (event) => {
   // Update raycaster
   raycaster.setFromCamera(mouse, camera.value);
 
-  // Find intersections with scene objects
-  const intersects = raycaster.intersectObjects(scene.value.children, true);
+  // Set a dynamic threshold for Points objects — use 0.5% of camera-to-target
+  // distance so clicks register at any zoom level.
+  const camDist = camera.value.position.distanceTo(controls.value.target);
+  raycaster.params.Points = { threshold: Math.max(0.5, camDist * 0.005) };
+
+  // Find intersections with scene objects (meshes AND point clouds)
+  const intersects = raycaster.intersectObjects(scene.value.children, true)
+    .filter(h => !h.object.name?.startsWith('normalsHelper_') && h.object.name !== 'gridHelper' && h.object.name !== 'axesHelper' && h.object.name !== 'boxHelper');
   
   if (intersects.length > 0) {
     const point = intersects[0].point;
     currentMeasurementPoints.push(point);
 
-    // Add visual marker
-    const markerGeometry = new THREE.SphereGeometry(0.5, 16, 16);
+    // Add visual marker — scale the sphere to ~0.3% of camera distance so it
+    // stays visible at any scene scale.
+    const markerRadius = Math.max(0.3, camDist * 0.003);
+    const markerGeometry = new THREE.SphereGeometry(markerRadius, 16, 16);
     const markerMaterial = new THREE.MeshBasicMaterial({ 
       color: 0xff0000,
       depthTest: false,
@@ -1884,6 +1893,49 @@ watch(measurementMode, (newMode) => {
   if (!newMode) {
     clearCurrentMeasurementMarkers();
   }
+});
+
+// Build/remove VertexNormalsHelpers for all mesh objects in loaded models
+const updateNormalsHelpers = (show) => {
+  if (!scene.value) return;
+
+  // Remove any existing normals helpers first
+  const toRemove = [];
+  scene.value.traverse((child) => {
+    if (child.name?.startsWith('normalsHelper_')) toRemove.push(child);
+  });
+  toRemove.forEach((h) => {
+    scene.value.remove(h);
+    if (h.geometry) h.geometry.dispose();
+    if (h.material) h.material.dispose();
+  });
+
+  if (!show) return;
+
+  // Collect meshes that belong to loaded models (excludes cameras, markers, etc.)
+  const meshes = [];
+  loadedModels.value.forEach((model) => {
+    model.traverse((child) => {
+      if (child.isMesh) meshes.push(child);
+    });
+  });
+
+  meshes.forEach((mesh) => {
+    if (!mesh.geometry?.attributes?.position) return;
+    if (!mesh.geometry.attributes.normal) {
+      mesh.geometry.computeVertexNormals();
+    }
+    if (!mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere();
+    const normalSize = Math.max(mesh.geometry.boundingSphere.radius * 0.05, 0.1);
+    const helper = new VertexNormalsHelper(mesh, normalSize, 0x00aaff);
+    helper.name = `normalsHelper_${mesh.uuid}`;
+    scene.value.add(helper);
+  });
+};
+
+// Sync normals helpers when the store toggle changes
+watch(showNormals, (newVal) => {
+  updateNormalsHelpers(newVal);
 });
 
 // Watch for theme changes and update scene background

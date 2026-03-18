@@ -117,16 +117,27 @@ base_layers:
 # --- 5. Overlay Layers ---
 overlay_layers:
 
+  - name: "Approx Images"
+    type: "geojson"
+    url: "http://localhost:3000/data/shapes/approx_images.geojson"
+    visible: true
+    color: "#ff0000"       # UI badge color
+    stroke_color: "#ff0000"
+    fill_color: "none"     # no fill — outline only
+    render_mode: "image"   # VectorImageLayer: faster for large feature counts
+    search_fields: ["image_id"]
+    group_by: "direction"  # sub-group each unique value separately
+
   - name: "Georef Sat"
     type: "geojson"
-    url: "http://localhost:3000/data/layers/georef_sat.geojson"
+    url: "http://localhost:3000/data/shapes/georef_sat.geojson"
     visible: true
     color: "#ff6600"
     search_fields: ["image_id"]
 
   - name: "Research Stations"
     type: "geojson"
-    url: "http://localhost:3000/data/layers/stations.geojson"
+    url: "http://localhost:3000/data/shapes/stations.geojson"
     visible: true
     color: "#0066ff"
     pointType: "circle"
@@ -134,14 +145,14 @@ overlay_layers:
 
   - name: "Glaciers"
     type: "geojson"
-    url: "http://localhost:3000/data/layers/glaciers.geojson"
+    url: "http://localhost:3000/data/shapes/glaciers.geojson"
     visible: false
     color: "#00ccff"
     search_fields: ["glac_name"]
 
   - name: "TMA Flight Lines"
     type: "geojson"
-    url: "http://localhost:3000/data/layers/tma_lines.geojson"
+    url: "http://localhost:3000/data/shapes/tma_lines.geojson"
     visible: true
     color: "#33cc33"
     search_fields: ["tma_num"]

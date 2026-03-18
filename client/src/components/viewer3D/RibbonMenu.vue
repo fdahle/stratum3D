@@ -57,6 +57,10 @@
               <span class="btn-icon" v-html="ICON_AXES"></span>
               <span class="btn-label">Axes</span>
             </button>
+            <button @click="handleToggleNormals" class="ribbon-btn" :class="{ active: showNormals }">
+              <span class="btn-icon" v-html="ICON_NORMALS"></span>
+              <span class="btn-label">Normals</span>
+            </button>
           </div>
           <span class="group-label">Display</span>
         </div>
@@ -171,6 +175,7 @@ import {
   ICON_FIT,
   ICON_WIREFRAME,
   ICON_BBOX,
+  ICON_NORMALS,
   ICON_DISTANCE,
   ICON_AREA,
   ICON_VIEW_TOP,
@@ -201,6 +206,7 @@ const emit = defineEmits([
   'toggle-bounding-box',
   'toggle-grid',
   'toggle-axes',
+  'toggle-normals',
   'reset-camera',
   'fit-to-scene',
   'view-top',
@@ -213,8 +219,8 @@ const emit = defineEmits([
 ]);
 
 const viewer3DStore = useViewer3DStore();
-const { showGrid, showAxes, showWireframe, showBoundingBox } = storeToRefs(viewer3DStore);
-const { toggleWireframe, toggleBoundingBox, toggleGrid, toggleAxes } = viewer3DStore;
+const { showGrid, showAxes, showWireframe, showBoundingBox, showNormals } = storeToRefs(viewer3DStore);
+const { toggleWireframe, toggleBoundingBox, toggleGrid, toggleAxes, toggleNormals } = viewer3DStore;
 
 const activeTab = ref('insert');
 const modelInput = ref(null);
@@ -255,6 +261,11 @@ const handleToggleGrid = () => {
 const handleToggleAxes = () => {
   toggleAxes();
   emit('toggle-axes', showAxes.value);
+};
+
+const handleToggleNormals = () => {
+  toggleNormals();
+  emit('toggle-normals', showNormals.value);
 };
 
 const SUPPORTED = {

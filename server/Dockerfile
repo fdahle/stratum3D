@@ -30,7 +30,7 @@ RUN npm install
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p data/layers data/3D data/pointclouds data/geotiffs
+RUN mkdir -p data/shapes data/3D data/pointclouds data/geotiffs
 
 # Expose server port
 EXPOSE 3000

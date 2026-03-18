@@ -8,6 +8,27 @@
       @click.stop
     >
       <ul>
+        <!-- Sub-group mode: only show colour picker -->
+        <template v-if="subGroupValue !== null">
+          <li class="color-picker">
+            <span>🎨 {{ subGroupValue }}:</span>
+            <div class="colors">
+              <button @click="emitColor('#e63946')" style="background: #e63946"></button>
+              <button @click="emitColor('#007bff')" style="background: #007bff"></button>
+              <button @click="emitColor('#2a9d8f')" style="background: #2a9d8f"></button>
+              <button @click="emitColor('#e9c46a')" style="background: #e9c46a"></button>
+              <button @click="emitColor('#9b59b6')" style="background: #9b59b6"></button>
+              <button @click="emitColor('#33cc33')" style="background: #33cc33"></button>
+              <label class="custom-color-btn" title="Choose custom color">
+                <input type="color" @change="emitColor($event.target.value)" @click.stop />
+              </label>
+            </div>
+          </li>
+        </template>
+
+        <!-- Normal layer mode -->
+        <template v-else>
+        <li @click="emitAction('info')">ℹ️ Layer Info</li>
         <li @click="emitAction('zoom')">🔍 Zoom to Layer</li>
         <li @click="emitAction('download')">
           💾 {{ payload?.type === 'geotiff' ? 'Download TIF' : 'Download GeoJSON' }}
@@ -49,6 +70,7 @@
           <li class="separator"></li>
           <li class="danger" @click="emitAction('remove')">🗑️ Remove Layer</li>
         </template>
+        </template> <!-- end normal layer mode -->
       </ul>
     </div>
   </div>
@@ -61,16 +83,20 @@ const visible = ref(false);
 const x = ref(0);
 const y = ref(0);
 const payload = ref(null);
+// When non-null, the menu was opened from a sub-group row.
+// Only the colour picker section is shown in that case.
+const subGroupValue = ref(null);
 
 const emit = defineEmits(["action", "color-change"]);
 
-const open = (event, data) => {
+const open = (event, data, subValue = null) => {
   const mouseEvent = event.originalEvent || event;
 
   x.value = mouseEvent.clientX;
   y.value = mouseEvent.clientY;
 
   payload.value = data;
+  subGroupValue.value = subValue;
   visible.value = true;
 };
 
@@ -84,7 +110,7 @@ const emitAction = (type) => {
 };
 
 const emitColor = (color) => {
-  emit("color-change", { color, layer: payload.value });
+  emit("color-change", { color, layer: payload.value, subGroupValue: subGroupValue.value });
   close();
 };
 
