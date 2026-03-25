@@ -564,8 +564,9 @@ const onRibbonLayerInfo = (layer) => {
 
 const onRibbonLayerRemove = (layer) => {
   if (!layer) return;
+  // removeLayerById includes a confirm dialog; on confirm it emits 'remove-layer'
+  // which onRemoveLayer handles (removes from Three.js scene).
   layerManagerRef.value?.removeLayerById(layer.id);
-  if (canvasRef.value?.removeLayer) canvasRef.value.removeLayer(layer.id);
 };
 
 const onRibbonLayerVisibility = ({ layer, visible }) => {

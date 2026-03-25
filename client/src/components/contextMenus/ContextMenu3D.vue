@@ -1,7 +1,5 @@
 <template>
   <div v-if="visible">
-    <div class="overlay" @click="close"></div>
-
     <div
       class="context-menu"
       :style="{ top: `${y}px`, left: `${x}px` }"
@@ -13,14 +11,14 @@
         <li @click="emitAction('fit')"><span class="menu-icon" v-html="ICON_FIT_SM"></span> Fit to View</li>
 
         <li class="separator"></li>
-        <li class="danger" @click="handleRemove()"><span class="menu-icon" v-html="ICON_TRASH_SM"></span> Remove Layer</li>
+        <li class="danger" @click="emitAction('remove')"><span class="menu-icon" v-html="ICON_TRASH_SM"></span> Remove Layer</li>
       </ul>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { ref, onUnmounted } from "vue";
 
 const ICON_INFO_SM   = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><circle cx="12" cy="8" r="0.5" fill="currentColor"/></svg>`;
 const ICON_ZOOM_SM   = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
@@ -42,6 +40,11 @@ const open = (event, data) => {
 
   payload.value = data;
   visible.value = true;
+
+  // Close on any click outside the menu (works even when the ribbon is on top)
+  setTimeout(() => {
+    document.addEventListener('click', close, { once: true });
+  }, 0);
 };
 
 const close = () => {
@@ -53,11 +56,9 @@ const emitAction = (type) => {
   close();
 };
 
-const handleRemove = () => {
-  const name = payload.value?.name || 'this layer';
-  if (!confirm(`Remove "${name}"? This cannot be undone.`)) return;
-  emitAction('remove');
-};
+onUnmounted(() => {
+  document.removeEventListener('click', close);
+});
 
 defineExpose({ open, close });
 </script>

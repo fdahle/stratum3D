@@ -249,7 +249,7 @@ const setPointSizeById = (layerId, size) => {
 defineExpose({
   addLayer,
   openInfoForLayer,
-  removeLayerById: forceRemoveLayer,
+  removeLayerById: removeLayer,   // includes confirmation dialog
   setPointSizeById,
 });
 </script>
