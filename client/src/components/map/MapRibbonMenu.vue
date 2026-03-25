@@ -156,6 +156,7 @@
           <span class="group-label">Layer</span>
         </div>
 
+        <template v-if="isLayerReady">
         <!-- Navigate -->
         <div class="ribbon-group">
           <div class="ribbon-group-buttons">
@@ -222,6 +223,7 @@
           </div>
           <span class="group-label">Layer</span>
         </div>
+        </template>
       </div>
     </div>
 
@@ -250,6 +252,7 @@ import { ref, computed, watch, inject } from 'vue';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useMapStore } from '@/stores/map/mapStore';
 import { useLayerStore } from '@/stores/map/layerStore';
+import { LAYER_STATUS } from '@/constants/layerConstants.js';
 import { ICON_FIT, ICON_DISTANCE, ICON_AREA, ICON_ELEVATION, ICON_3D, ICON_SHARE, ICON_INFO, ICON_CLOSE } from '@/constants/icons.js';
 import LayerInfoModal from '../modals/LayerInfoModal.vue';
 import GeoJSON from 'ol/format/GeoJSON';
@@ -281,6 +284,13 @@ const selectedLayer = computed(() => {
   if (!layerStore.selectedLayerId) return null;
   return layerStore.layers.find(l => l._layerId === layerStore.selectedLayerId) ?? null;
 });
+
+// Layer is considered valid/loaded when fully ready and CRS-compatible
+const isLayerReady = computed(() =>
+  !!selectedLayer.value &&
+  selectedLayer.value.status === LAYER_STATUS.READY &&
+  selectedLayer.value.crsCompatible !== false
+);
 
 // Auto-switch to layer tab on selection; return to layers tab on deselect
 watch(() => layerStore.selectedLayerId, (newId) => {
@@ -512,6 +522,7 @@ const removeSelected = () => {
   background: #f8f9fa;
   display: flex;
   align-items: stretch;
+  position: relative;
 }
 
 .theme-dark .ribbon-content {
@@ -647,6 +658,8 @@ const removeSelected = () => {
   gap: 5px;
   color: #f59e0b !important;
   border-bottom-color: transparent;
+  position: relative;
+  z-index: 1;
 }
 
 .tab-btn--context:hover {
@@ -689,8 +702,16 @@ const removeSelected = () => {
 }
 
 /* Contextual ribbon content accent */
-.ribbon-content.ctx-active {
-  box-shadow: inset 0 3px 0 #f59e0b;
+.ribbon-content.ctx-active::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: #f59e0b;
+  z-index: 1;
+  pointer-events: none;
 }
 
 /* Color picker row in ribbon */

@@ -160,6 +160,8 @@ const raycaster = new THREE.Raycaster();
 const loadingCancelled = ref(false);
 const activeReaders = new Set();
 let activeStreamReader = null;
+const activeWorker = ref(null);        // current point-cloud Web Worker
+const activeWorkerCancel = ref(null);  // resolves the race-promise to unblock loadLASFile
 
 const cancelLoading = () => {
   loadingCancelled.value = true;
@@ -171,6 +173,14 @@ const cancelLoading = () => {
     try { activeStreamReader.cancel(); } catch (_) {}
     activeStreamReader = null;
   }
+  // Terminate the off-thread worker immediately — instant response regardless
+  // of how deep into WASM decompression it is.
+  if (activeWorker.value) {
+    activeWorker.value.terminate();
+    activeWorker.value = null;
+  }
+  activeWorkerCancel.value?.();
+  activeWorkerCancel.value = null;
 };
 const mouse = new THREE.Vector2();
 const measurementMarkers = [];
@@ -557,13 +567,18 @@ const reloadWithMaterials = async (mtlFile, imageFiles) => {
   if (!pendingObjData.value) return;
   const { text, file, modelIndex, objectId } = pendingObjData.value;
   pendingObjData.value = null;
-  // Remove the unshaded object from the scene (disposes geometry/materials)
+  // Remove the unshaded/previous object from the scene
   removeLayer(objectId);
   // Re-load with materials
   const object = await loadObjWithMaterials(text, mtlFile, imageFiles, modelIndex);
   if (object && !loadingCancelled.value) {
     object.name = file.name.replace(/\.[^.]+$/, '');
     object.userData.type = 'model';
+    // MTL loaded but no textures — keep pending so the user can add images in a second pass
+    if (imageFiles.length === 0) {
+      pendingObjData.value = { text, file, modelIndex, objectId: object.uuid };
+      emit('suggest-materials', { stem: object.name, objectId: object.uuid });
+    }
     emit('model-loaded', { url: file.name, index: modelIndex, object });
   }
 };
@@ -848,7 +863,8 @@ const loadLASFile = async (file) => {
     loaded: 0, total: fileSize, progress: 0, status: 'reading'
   });
 
-  // Use FileReader so we get granular read-progress events and can abort
+  // Read the file on the main thread — FileReader is IO-bound so it doesn't
+  // block, and gives per-byte progress for the progress bar.
   let arrayBuffer;
   try {
     arrayBuffer = await new Promise((resolve, reject) => {
@@ -878,125 +894,92 @@ const loadLASFile = async (file) => {
 
   if (loadingCancelled.value) return;
 
-  // Transition to parsing phase — reset progress to 0
   emit('loading-progress', {
     url: file.name, index: currentIndex,
-    loaded: 0, total: fileSize, progress: 0, status: 'parsing'
+    loaded: 0, total: fileSize, progress: 0, status: 'decompressing'
   });
 
-  try {
-    const [{ Las }, { createLazPerf }] = await Promise.all([
-      import('copc'),
-      import('laz-perf'),
-    ]);
+  // Offload the CPU-heavy WASM decompression + point extraction to a worker
+  // so the main thread is always free to respond to Stop button clicks.
+  const worker = new Worker(
+    new URL('../../workers/pointcloudWorker.js', import.meta.url),
+    { type: 'module' }
+  );
+  activeWorker.value = worker;
 
-    // Initialize laz-perf with the WASM file served from /public/wasm/
-    const lazPerf = await createLazPerf({
-      locateFile: (file) => `/wasm/${file}`,
-    });
+  // cancelLoading() will terminate() the worker AND resolve this promise so
+  // the async function can exit cleanly even though onmessage never fires.
+  let cancelResolve;
+  const cancelPromise = new Promise((r) => { cancelResolve = r; });
+  activeWorkerCancel.value = cancelResolve;
 
-    // Parse header
-    const headerBytes = new Uint8Array(arrayBuffer, 0, Math.min(375, arrayBuffer.byteLength));
-    const header = Las.Header.parse(headerBytes);
-    const { pointCount, pointDataRecordLength, pointDataRecordFormat, pointDataOffset } = header;
+  // Transfer the ArrayBuffer to the worker (zero-copy move, no serialisation)
+  worker.postMessage(
+    { arrayBuffer, fileName: file.name, maxPoints: 5_000_000 },
+    [arrayBuffer]
+  );
 
-    if (pointCount === 0) {
-      emit('loading-error', { url: file.name, error: 'Point cloud is empty' });
-      return;
-    }
+  await Promise.race([
+    new Promise((resolve) => {
+      worker.onmessage = ({ data }) => {
+        if (data.type === 'progress') {
+          emit('loading-progress', {
+            url: file.name, index: currentIndex,
+            loaded: data.loaded ?? 0,
+            total:  data.total  ?? fileSize,
+            progress: data.progress ?? 0,
+            status: data.status,
+          });
+        } else if (data.type === 'result') {
+          if (!loadingCancelled.value) {
+            const positions = new Float32Array(data.posBuffer);
+            const colors    = new Float32Array(data.colBuffer);
+            const geometry  = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color',    new THREE.BufferAttribute(colors,    3));
 
-    // Decompress LAZ or slice raw LAS point data
-    let pointBytes;
-    const isLaz = file.name.toLowerCase().endsWith('.laz');
-    if (isLaz) {
-      // Pass our lazPerf instance so copc uses the correctly located WASM
-      pointBytes = await Las.PointData.decompressFile(new Uint8Array(arrayBuffer), lazPerf);
-    } else {
-      pointBytes = new Uint8Array(arrayBuffer, pointDataOffset, pointCount * pointDataRecordLength);
-    }
+            const material = new THREE.PointsMaterial({
+              size: 2, vertexColors: true, sizeAttenuation: false,
+            });
+            const pointCloud = new THREE.Points(geometry, material);
+            pointCloud.rotation.x = -Math.PI / 2;
+            pointCloud.userData.type          = 'pointcloud';
+            pointCloud.userData.totalPoints   = data.totalPoints;
+            pointCloud.userData.sampledPoints = data.sampledPoints;
 
-    // Create a view to read X/Y/Z (and RGB if available)
-    const view = Las.View.create(pointBytes, header);
+            scene.value.add(pointCloud);
+            adjustCameraToModel();
 
-    const getX = view.getter('X');
-    const getY = view.getter('Y');
-    const getZ = view.getter('Z');
-
-    // Formats 2, 3, 5, 7, 8, 10 have RGB
-    const formatsWithColor = new Set([2, 3, 5, 7, 8, 10]);
-    const hasColor = formatsWithColor.has(pointDataRecordFormat);
-    let getR, getG, getB;
-    if (hasColor) {
-      getR = view.getter('Red');
-      getG = view.getter('Green');
-      getB = view.getter('Blue');
-    }
-
-    if (loadingCancelled.value) return;
-
-    const positions = new Float32Array(pointCount * 3);
-    const colors = new Float32Array(pointCount * 3);
-
-    // Process in async chunks: allows UI progress updates and Stop button to work
-    const CHUNK = 200_000;
-    for (let start = 0; start < pointCount; start += CHUNK) {
-      if (loadingCancelled.value) return;
-      const end = Math.min(start + CHUNK, pointCount);
-      for (let i = start; i < end; i++) {
-        // copc's getter already applies scale+offset
-        positions[i * 3]     = getX(i);
-        positions[i * 3 + 1] = getY(i);
-        positions[i * 3 + 2] = getZ(i);
-        if (hasColor) {
-          // LAS stores colors as 16-bit; normalize to [0,1]
-          colors[i * 3]     = getR(i) / 65535;
-          colors[i * 3 + 1] = getG(i) / 65535;
-          colors[i * 3 + 2] = getB(i) / 65535;
-        } else {
-          colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = 0.7;
+            if (data.step > 1) {
+              console.warn(`LAS/LAZ: ${data.totalPoints.toLocaleString()} pts → sampled to ${data.sampledPoints.toLocaleString()} (1 in ${data.step})`);
+            } else {
+              console.log(`LAS/LAZ point cloud loaded: ${data.totalPoints.toLocaleString()} points`);
+            }
+            fileLoadedCount.value++;
+            emit('model-loaded', { url: file.name, index: currentIndex, object: pointCloud });
+          }
+          resolve();
+        } else if (data.type === 'error') {
+          if (!loadingCancelled.value) {
+            console.error('LAS/LAZ loading error:', data.message);
+            emit('loading-error', { url: file.name, error: data.message });
+          }
+          resolve();
         }
-      }
-      // Emit progress and yield to browser so the UI can repaint and events fire
-      emit('loading-progress', {
-        url: file.name, index: currentIndex,
-        loaded: end, total: pointCount,
-        progress: Math.round((end / pointCount) * 100),
-        status: 'parsing'
-      });
-      await new Promise(resolve => setTimeout(resolve, 0));
-    }
-    if (loadingCancelled.value) return;
+      };
+      worker.onerror = (e) => {
+        if (!loadingCancelled.value) {
+          emit('loading-error', { url: file.name, error: e.message });
+        }
+        resolve();
+      };
+    }),
+    cancelPromise,
+  ]);
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-    const material = new THREE.PointsMaterial({
-      size: 2,
-      vertexColors: true,
-      sizeAttenuation: false
-    });
-
-    const pointCloud = new THREE.Points(geometry, material);
-    pointCloud.rotation.x = -Math.PI / 2;
-    pointCloud.userData.type = 'pointcloud';
-
-    if (loadingCancelled.value) return;
-    scene.value.add(pointCloud);
-
-    // Fit camera / update helpers for the whole scene
-    adjustCameraToModel();
-
-    console.log(`LAS/LAZ point cloud loaded: ${pointCount} points`);
-    fileLoadedCount.value++;
-    emit('model-loaded', { url: file.name, index: currentIndex, object: pointCloud });
-
-  } catch (error) {
-    if (error.message !== 'cancelled') {
-      console.error('LAS/LAZ loading error:', error);
-      emit('loading-error', { url: file.name, error: error.message });
-    }
-  }
+  worker.terminate();
+  if (activeWorker.value === worker)       activeWorker.value       = null;
+  if (activeWorkerCancel.value === cancelResolve) activeWorkerCancel.value = null;
 };
 
 // ---------------------------------------------------------------------------
@@ -1123,6 +1106,12 @@ const loadDEMFile = async (file) => {
     mesh.userData.type = 'dem';
     mesh.userData.minElev = minElev;
     mesh.userData.maxElev = maxElev;
+    mesh.userData.nodata = nodata;        // null if not present
+    mesh.userData.verticalExaggeration = 1;
+    // Store raw elevations so vertical exaggeration can be applied without reloading
+    mesh.userData.rawElevations = elevations;
+    mesh.userData.gridW = gridW;
+    mesh.userData.gridH = gridH;
 
     if (loadingCancelled.value) return;
 
@@ -1166,6 +1155,55 @@ const demElevationColor = (t) => {
   };
 };
 
+// Apply vertical exaggeration to a single DEM mesh identified by its Three.js uuid (= layer id).
+// Uses raw elevations + stored nodata to avoid drift on repeated calls.
+const applyVerticalExaggeration = (layerId, factor) => {
+  if (!scene.value) return;
+  let mesh = null;
+  scene.value.traverse((obj) => {
+    if (obj.isMesh && obj.userData.type === 'dem' && obj.uuid === layerId) mesh = obj;
+  });
+  if (!mesh) return;
+
+  const { rawElevations, gridW, gridH, minElev, maxElev, nodata } = mesh.userData;
+  if (!rawElevations) return;
+
+  mesh.userData.verticalExaggeration = factor;
+
+  const isNodata = (nodata !== null && nodata !== undefined)
+    ? (v) => Math.abs(v - nodata) <= Math.max(0.5, Math.abs(nodata) * 1e-6)
+    : () => false;
+
+  const positions = mesh.geometry.attributes.position;
+  const elevRange = maxElev - minElev || 1;
+
+  for (let row = 0; row < gridH; row++) {
+    for (let col = 0; col < gridW; col++) {
+      const vIdx = row * gridW + col;
+      const raw = rawElevations[vIdx];
+      const elev = (isFinite(raw) && !isNodata(raw)) ? raw : minElev;
+      positions.setZ(vIdx, minElev + (elev - minElev) * factor);
+    }
+  }
+  positions.needsUpdate = true;
+
+  // Recompute hypsometric colors based on original (un-exaggerated) elevation
+  const colorsArr = mesh.geometry.attributes.color?.array;
+  if (colorsArr) {
+    for (let i = 0; i < positions.count; i++) {
+      const raw = rawElevations[i];
+      const elev = (isFinite(raw) && !isNodata(raw)) ? raw : minElev;
+      const t = Math.max(0, Math.min(1, (elev - minElev) / elevRange));
+      const { r, g, b } = demElevationColor(t);
+      colorsArr[i * 3]     = r;
+      colorsArr[i * 3 + 1] = g;
+      colorsArr[i * 3 + 2] = b;
+    }
+    mesh.geometry.attributes.color.needsUpdate = true;
+  }
+  mesh.geometry.computeVertexNormals();
+};
+
 const loadPLYFile = (file) => {
   const reader = new FileReader();
   activeReaders.add(reader);
@@ -1202,12 +1240,45 @@ const loadPLYFile = (file) => {
     });
     
     // Use setTimeout to allow UI to update before synchronous parsing
-    setTimeout(() => {
+    setTimeout(async () => {
       if (loadingCancelled.value) return;
       const loader = new PLYLoader();
       try {
-        const geometry = loader.parse(e.target.result);
-      
+        const rawGeometry = loader.parse(e.target.result);
+        const totalCount = rawGeometry.attributes.position.count;
+
+        // Subsample large clouds so rendering stays smooth
+        const MAX_DISPLAY_POINTS = 5_000_000;
+        let geometry = rawGeometry;
+        let sampledCount = totalCount;
+        if (totalCount > MAX_DISPLAY_POINTS) {
+          const step = Math.ceil(totalCount / MAX_DISPLAY_POINTS);
+          sampledCount = Math.ceil(totalCount / step);
+          const srcPos = rawGeometry.attributes.position.array;
+          const srcCol = rawGeometry.attributes.color?.array ?? null;
+          const dstPos = new Float32Array(sampledCount * 3);
+          const dstCol = new Float32Array(sampledCount * 3);
+          let j = 0;
+          for (let i = 0; i < totalCount; i++) {
+            if (i % step !== 0) continue;
+            dstPos[j * 3]     = srcPos[i * 3];
+            dstPos[j * 3 + 1] = srcPos[i * 3 + 1];
+            dstPos[j * 3 + 2] = srcPos[i * 3 + 2];
+            if (srcCol) {
+              dstCol[j * 3]     = srcCol[i * 3];
+              dstCol[j * 3 + 1] = srcCol[i * 3 + 1];
+              dstCol[j * 3 + 2] = srcCol[i * 3 + 2];
+            } else {
+              dstCol[j * 3] = dstCol[j * 3 + 1] = dstCol[j * 3 + 2] = 0.7;
+            }
+            j++;
+          }
+          geometry = new THREE.BufferGeometry();
+          geometry.setAttribute('position', new THREE.BufferAttribute(dstPos, 3));
+          geometry.setAttribute('color',    new THREE.BufferAttribute(dstCol, 3));
+          console.warn(`PLY: ${totalCount.toLocaleString()} pts → sampled to ${j.toLocaleString()} (1 in ${step})`);
+        }
+
       // Create point cloud material — sizeAttenuation: false keeps points at a
       // fixed pixel size at any zoom level, preventing them from disappearing.
       const material = new THREE.PointsMaterial({
@@ -1215,33 +1286,35 @@ const loadPLYFile = (file) => {
         vertexColors: true,
         sizeAttenuation: false
       });
-      
+
       // If no colors in PLY, add default color
       if (!geometry.attributes.color) {
-        const colors = new Float32Array(geometry.attributes.position.count * 3);
-        for (let i = 0; i < colors.length; i += 3) {
-          colors[i] = 0.7;     // R
-          colors[i + 1] = 0.7; // G
-          colors[i + 2] = 0.7; // B
-        }
+        const colors = new Float32Array(geometry.attributes.position.count * 3).fill(0.7);
         geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
       }
-      
+
       const pointCloud = new THREE.Points(geometry, material);
-      
+
       // Apply Z-up to Y-up rotation
       pointCloud.rotation.x = -Math.PI / 2;
-      
-      // Set type metadata
-      pointCloud.userData.type = 'pointcloud';
 
+      // Set type metadata
+      pointCloud.userData.type          = 'pointcloud';
+      pointCloud.userData.totalPoints   = totalCount;
+      pointCloud.userData.sampledPoints = sampledCount;
+
+      // Yield to the event loop so any queued Stop-button clicks can fire
+      // before we commit the point cloud to the scene. Without this yield,
+      // the synchronous loader.parse() blocks the thread, the click is
+      // enqueued, and the cancel check passes (false) before the click fires.
+      await new Promise(resolve => setTimeout(resolve, 0));
       if (loadingCancelled.value) return;
       scene.value.add(pointCloud);
-      
+
       // Fit camera / update helpers for the whole scene
       adjustCameraToModel();
-      
-      console.log(`Point cloud loaded: ${geometry.attributes.position.count} points`);
+
+      console.log(`Point cloud loaded: ${sampledCount.toLocaleString()} points`);
       fileLoadedCount.value++;
       emit('model-loaded', { url: file.name, index: currentIndex, object: pointCloud });
     } catch (error) {
@@ -2336,6 +2409,13 @@ onUnmounted(() => {
   if (animationFrameId) {
     cancelAnimationFrame(animationFrameId);
   }
+  // Stop any in-flight point cloud worker
+  if (activeWorker.value) {
+    activeWorker.value.terminate();
+    activeWorker.value = null;
+  }
+  activeWorkerCancel.value?.();
+  activeWorkerCancel.value = null;
   clearAllMeasurements();
   cleanup();
 });
@@ -2419,7 +2499,8 @@ defineExpose({
   removeSavedMeasurement,
   setCameraPreset,
   resetToInitialCamera,
-  zoomToLayer
+  zoomToLayer,
+  applyVerticalExaggeration,
 });
 </script>
 

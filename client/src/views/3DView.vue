@@ -5,6 +5,7 @@
       :is-measuring-distance="isMeasurementModalVisible && activeMeasurementType === 'distance'"
       :is-measuring-area="isMeasurementModalVisible && activeMeasurementType === 'area'"
       :selected-layer="selectedLayer3D"
+      :has-pending-mtl="pendingMtlTarget !== null && pendingMtlTarget?.id === selectedLayer3D?.id"
       @load-model="handleLoadModel"
       @load-pointcloud="handleLoadPointCloud"
       @load-cameras="handleLoadCameras"
@@ -25,6 +26,8 @@
       @ribbon-layer-remove="onRibbonLayerRemove"
       @ribbon-layer-visibility="onRibbonLayerVisibility"
       @ribbon-layer-pointsize="onRibbonLayerPointSize"
+      @vertical-exaggeration="onVerticalExaggeration"
+      @pick-materials="triggerMtlFilePicker"
     />
 
     <!-- Body: Layer panel + Canvas -->
@@ -70,7 +73,11 @@
               ></div>
             </div>
             <p class="loading-status">{{ loadingStatus }}</p>
-            <button class="stop-btn" @click="handleStopLoading">&#9632; Stop</button>
+            <button class="stop-btn" :class="{ stopping: isStopping }" @click="handleStopLoading" :disabled="isStopping">
+              <span v-if="isStopping" class="stop-spinner"></span>
+              <span v-else>&#9632;</span>
+              {{ isStopping ? 'Stopping…' : 'Stop' }}
+            </button>
           </div>
         </div>
 
@@ -123,6 +130,7 @@ const canvasRef = ref(null);
 const layerManagerRef = ref(null);
 const selectedLayer3D = ref(null);
 const isLoading = ref(false);
+const isStopping = ref(false);
 const loadingProgress = ref(0);
 const loadingStatus = ref('');
 const loadingTitle = ref('Loading...');
@@ -191,6 +199,10 @@ const onLoadingProgress = ({ url, index, loaded, total, progress, status }) => {
   } else if (status === 'reading') {
     const fileName = url.split('/').pop();
     loadingStatus.value = `Reading ${fileName}: ${loadedMB}MB / ${totalMB}MB (${progress}%)`;
+  } else if (status === 'decompressing') {
+    const fileName = url.split('/').pop();
+    loadingStatus.value = `Decompressing ${fileName}…`;
+    loadingProgress.value = 0;
   } else if (status === 'parsing') {
     const fileName = url.split('/').pop();
     loadingStatus.value = progress > 0 && progress < 100
@@ -567,6 +579,11 @@ const onRibbonLayerPointSize = ({ layer, size }) => {
   layerManagerRef.value?.setPointSizeById(layer.id, size);
 };
 
+const onVerticalExaggeration = ({ layer, factor }) => {
+  if (!layer) return;
+  canvasRef.value?.applyVerticalExaggeration(layer.id, factor);
+};
+
 const showError = (msg) => {
   errorMessage.value = msg;
   setTimeout(() => { errorMessage.value = null; }, 3000);
@@ -590,6 +607,11 @@ const onMaterialFilePicked = (event) => {
   const mtlFile = files.find(f => lower(f).endsWith('.mtl')) ?? null;
   const imageFiles = files.filter(f => /\.(jpg|jpeg|png|bmp|gif|webp)$/.test(lower(f)));
 
+  if (!mtlFile) {
+    showError('No .mtl file found in selection — please include the .mtl file.');
+    return; // keep pendingMtlTarget and pendingObjData intact
+  }
+
   // Remove old layer entry (the unshaded one)
   layerManagerRef.value?.removeLayerById(pendingMtlTarget.value.id);
 
@@ -600,13 +622,20 @@ const onMaterialFilePicked = (event) => {
 };
 
 const handleStopLoading = () => {
+  if (isStopping.value) return;
+  isStopping.value = true;
   if (canvasRef.value?.cancelLoading) {
     canvasRef.value.cancelLoading();
   }
-  isLoading.value = false;
-  loadingProgress.value = 0;
-  loadingStatus.value = '';
-  loadingTitle.value = 'Loading...';
+  // Give the canvas one event-loop tick to process the cancellation,
+  // then hide the overlay. isStopping resets when isLoading drops.
+  setTimeout(() => {
+    isLoading.value = false;
+    isStopping.value = false;
+    loadingProgress.value = 0;
+    loadingStatus.value = '';
+    loadingTitle.value = 'Loading...';
+  }, 300);
 };
 </script>
 
@@ -748,16 +777,41 @@ const handleStopLoading = () => {
   font-size: 13px;
   font-family: "Segoe UI", sans-serif;
   cursor: pointer;
-  transition: background 0.2s, transform 0.1s;
+  transition: background 0.2s, transform 0.1s, opacity 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 90px;
+  justify-content: center;
 }
 
-.stop-btn:hover {
+.stop-btn:hover:not(:disabled) {
   background: #dc3545;
   transform: scale(1.03);
 }
 
-.stop-btn:active {
+.stop-btn:active:not(:disabled) {
   transform: scale(0.97);
+}
+
+.stop-btn.stopping,
+.stop-btn:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.stop-spinner {
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(255,255,255,0.35);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: stop-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes stop-spin {
+  to { transform: rotate(360deg); }
 }
 
 .theme-light .stop-btn {

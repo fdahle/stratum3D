@@ -180,6 +180,20 @@
           </div>
           <span class="group-label">Display</span>
         </div>
+        <!-- Materials – model layers awaiting MTL/textures -->
+        <div v-if="selectedLayer.type === 'model' && hasPendingMtl" class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <button
+              class="ribbon-btn"
+              @click="emit('pick-materials', selectedLayer)"
+              title="Pick MTL and texture files for this model"
+            >
+              <span class="btn-icon" v-html="ICON_MTL"></span>
+              <span class="btn-label">Materials</span>
+            </button>
+          </div>
+          <span class="group-label">Appearance</span>
+        </div>
         <!-- Point Size – pointcloud layers only -->
         <div v-if="selectedLayer.type === 'pointcloud'" class="ribbon-group">
           <div class="ribbon-group-buttons">
@@ -201,6 +215,28 @@
             </div>
           </div>
           <span class="group-label">Point Size</span>
+        </div>
+        <!-- Vertical Exaggeration – DEM layers only -->
+        <div v-if="selectedLayer.type === 'dem'" class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <div class="ctx-point-size">
+              <div class="ctx-range-row">
+                <input
+                  type="range"
+                  min="0.1"
+                  max="10"
+                  step="0.1"
+                  :value="localVertExag"
+                  @input="onVerticalExaggerationInput"
+                  class="ctx-range"
+                  :style="{ background: vertExagTrackStyle }"
+                  title="Vertical exaggeration"
+                />
+                <span class="ctx-range-value">{{ localVertExag }}×</span>
+              </div>
+            </div>
+          </div>
+          <span class="group-label">Vert. Exag.</span>
         </div>
         <!-- Remove -->
         <div class="ribbon-group">
@@ -295,6 +331,10 @@ const props = defineProps({
   selectedLayer: {
     type: Object,
     default: null
+  },
+  hasPendingMtl: {
+    type: Boolean,
+    default: false
   }
 });
 
@@ -323,7 +363,9 @@ const emit = defineEmits([
   'ribbon-layer-info',
   'ribbon-layer-remove',
   'ribbon-layer-visibility',
-  'ribbon-layer-pointsize'
+  'ribbon-layer-pointsize',
+  'vertical-exaggeration',
+  'pick-materials',
 ]);
 
 const viewer3DStore = useViewer3DStore();
@@ -376,6 +418,26 @@ const sliderTrackStyle = computed(() => {
   return `linear-gradient(to right, #f59e0b ${pct}%, #d1d5db ${pct}%)`;
 });
 
+// Track vertical exaggeration for DEM layers
+const localVertExag = ref(1);
+watch(() => props.selectedLayer, (layer) => {
+  if (layer?.type === 'dem') {
+    localVertExag.value = layer.object?.userData?.verticalExaggeration ?? 1;
+  }
+}, { immediate: true });
+
+const onVerticalExaggerationInput = (e) => {
+  const factor = parseFloat(parseFloat(e.target.value).toFixed(1));
+  localVertExag.value = factor;
+  emit('vertical-exaggeration', { layer: props.selectedLayer, factor });
+};
+
+const vertExagTrackStyle = computed(() => {
+  const min = 0.1, max = 10;
+  const pct = ((localVertExag.value - min) / (max - min)) * 100;
+  return `linear-gradient(to right, #3b82f6 ${pct}%, #d1d5db ${pct}%)`;
+});
+
 const toggleSelectedVisibility = () => {
   if (!props.selectedLayer) return;
   const visible = !props.selectedLayer.visible;
@@ -384,6 +446,7 @@ const toggleSelectedVisibility = () => {
 
 // Contextual icons
 const ICON_TRASH_CTX = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>`;
+const ICON_MTL = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`;
 
 const openFileDialog = (type) => {
   switch(type) {

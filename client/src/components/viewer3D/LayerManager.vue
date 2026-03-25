@@ -158,6 +158,7 @@ const collectLayerInfo = (layer) => {
 
   if (layer.object) {
     let totalPoints = 0;
+    let rawTotalPoints = 0;
     let totalVertices = 0;
     let totalTriangles = 0;
     let meshCount = 0;
@@ -165,6 +166,7 @@ const collectLayerInfo = (layer) => {
     layer.object.traverse((child) => {
       if (child.isPoints && child.geometry?.attributes?.position) {
         totalPoints += child.geometry.attributes.position.count;
+        if (child.userData.totalPoints) rawTotalPoints += child.userData.totalPoints;
       }
       if (child.isMesh && child.geometry?.attributes?.position) {
         meshCount++;
@@ -174,7 +176,12 @@ const collectLayerInfo = (layer) => {
       }
     });
 
-    if (totalPoints > 0)    rows.push({ key: 'Points',    value: totalPoints.toLocaleString() });
+    if (totalPoints > 0) {
+      const pointsValue = rawTotalPoints > totalPoints
+        ? `${totalPoints.toLocaleString()} (sampled from ${rawTotalPoints.toLocaleString()})`
+        : totalPoints.toLocaleString();
+      rows.push({ key: 'Points', value: pointsValue });
+    }
     if (totalVertices > 0)  rows.push({ key: 'Vertices',  value: totalVertices.toLocaleString() });
     if (totalTriangles > 0) rows.push({ key: 'Triangles', value: Math.round(totalTriangles).toLocaleString() });
     if (meshCount > 1)      rows.push({ key: 'Meshes',    value: meshCount.toLocaleString() });
