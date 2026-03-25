@@ -48,6 +48,16 @@
         </div>
 
         <div :class="['layer-label', { 'disabled-label': layer.status === 'error' }]">
+          <!-- Expand/collapse triangle – left side -->
+          <button
+            v-if="layer.groupBy && layer.status === 'ready' && Object.keys(layer.subCategories).length > 0"
+            class="action-btn expand-btn expand-btn--left"
+            :title="expandedLayers.has(layer._layerId) ? 'Collapse groups' : 'Expand groups'"
+            @click.stop="toggleExpand(layer._layerId)"
+            v-html="expandedLayers.has(layer._layerId) ? ICON_CHEVRON_DOWN : ICON_CHEVRON_RIGHT"
+          ></button>
+          <span v-else class="expand-spacer"></span>
+
           <span class="icon-container">
             <div
               v-if="['downloading', 'processing', 'loading-details'].includes(layer.status)"
@@ -57,11 +67,8 @@
             <span
               v-else
               class="geom-icon"
-              :class="{ 'geom-icon--activatable': !layer.active && !['downloading', 'processing', 'error', 'loading-details'].includes(layer.status) }"
-              :title="!layer.active && !['downloading', 'processing', 'error', 'loading-details'].includes(layer.status) ? 'Click to show layer' : undefined"
               :style="{ color: layer.status === 'error' ? '#ccc' : layer.color || '#666' }"
               v-html="getGeometryIconSVG(layer.geometryType)"
-              @click="handleGeomIconClick(layer)"
             >
             </span>
           </span>
@@ -113,26 +120,6 @@
                 </button>
               </div>
 
-              <!-- Remove button (only for runtime-added layers) -->
-              <button
-                v-if="layer.isUserAdded && layer.status === 'ready'"
-                class="action-btn remove-btn"
-                title="Remove layer"
-                @click.stop="handleRemove(layer._layerId)"
-                v-html="EMOJI_ICONS.TRASH"
-              >
-              </button>
-
-              <!-- Expand/collapse sub-categories -->
-              <button
-                v-if="layer.groupBy && layer.status === 'ready' && Object.keys(layer.subCategories).length > 0"
-                class="action-btn expand-btn"
-                :title="expandedLayers.has(layer._layerId) ? 'Collapse groups' : 'Expand groups'"
-                @click.stop="toggleExpand(layer._layerId)"
-              >
-                {{ expandedLayers.has(layer._layerId) ? '▾' : '▸' }}
-              </button>
-
               <!-- group_by field not found in data -->
               <span
                 v-if="layer.groupBy && layer.status === 'ready' && layer.groupByMissing"
@@ -145,7 +132,7 @@
                 v-if="!['downloading', 'processing', 'loading-details'].includes(layer.status) && layer.status !== 'error'"
                 class="action-btn eye-btn"
                 :class="{ 'eye-off': !layer.active }"
-                :title="layer.active ? 'Hide layer' : 'Show layer'"
+                :title="layer.status === 'idle' ? 'Click to load and show this layer' : (layer.active ? 'Hide layer' : 'Show layer')"
                 @click.stop="layerStore.toggleLayer(layer._layerId)"
                 v-html="layer.active ? ICON_EYE : ICON_EYE_OFF"
               ></button>
@@ -174,13 +161,12 @@
               :checked="cat.visible"
               @change="handleSubCategoryToggle(layer, value)"
             />
-            <input
-              type="color"
-              :value="cat.color"
-              class="subcategory-color"
+            <div
+              class="subcategory-color-swatch"
+              :style="{ background: cat.color }"
               :title="'Change colour for ' + value"
-              @input="handleSubCategoryColor(layer, value, $event.target.value)"
-            />
+              @click.stop="openSubCatColorPicker(layer._layerId, value, $event)"
+            ></div>
             <span class="subcategory-label" :style="{ color: cat.visible ? 'inherit' : '#aaa' }">
               {{ value }}
             </span>
@@ -207,6 +193,33 @@
       @color-change="handleColorChange"
     />
 
+    <!-- Inline sub-category color picker popup (teleported to avoid overflow clipping) -->
+    <Teleport to="body">
+      <div
+        v-if="colorPickerOpen"
+        class="subcategory-color-popup"
+        :style="{ left: colorPickerPos.x + 'px', top: colorPickerPos.y + 'px' }"
+        @click.stop
+      >
+        <div class="scp-presets">
+          <button
+            v-for="c in COLOR_PRESETS"
+            :key="c"
+            class="scp-dot"
+            :style="{ background: c }"
+            @click="applySubCatColor(c)"
+          ></button>
+          <label class="scp-custom" title="Custom colour">
+            <input
+              type="color"
+              @change.stop="applySubCatColor($event.target.value)"
+              @click.stop
+            />
+          </label>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- Layer Info Modal -->
     <LayerInfoModal
       :is-visible="infoModalVisible"
@@ -218,7 +231,7 @@
 </template>
 
 <script setup>
-import { ref, inject, computed } from "vue";
+import { ref, inject, computed, onMounted, onUnmounted } from "vue";
 import { storeToRefs } from "pinia";
 import { useLayerStore } from "../../stores/map/layerStore";
 import { useMapStore } from "../../stores/map/mapStore";
@@ -226,7 +239,7 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import ContextMenu from "../contextMenus/ContextMenuLayers.vue";
 import LayerInfoModal from "../modals/LayerInfoModal.vue";
 import GeoJSON from "ol/format/GeoJSON"; // Import OL GeoJSON Format
-import { ICON_POINT, ICON_LINE, ICON_POLYGON, ICON_RASTER, EMOJI_ICONS, getGeometryIcon, ICON_EYE, ICON_EYE_OFF } from "../../constants/icons";
+import { ICON_POINT, ICON_LINE, ICON_POLYGON, ICON_RASTER, EMOJI_ICONS, getGeometryIcon, ICON_EYE, ICON_EYE_OFF, ICON_CHEVRON_DOWN, ICON_CHEVRON_RIGHT } from "../../constants/icons";
 import { STRINGS } from "../../constants/strings";
 
 defineEmits(['open-settings']);
@@ -261,11 +274,48 @@ const handleLayerSelect = (layerId) => {
   }
 };
 
-const handleGeomIconClick = (layer) => {
-  if (!layer.active && !['downloading', 'processing', 'error', 'loading-details'].includes(layer.status)) {
-    layerStore.toggleLayer(layer._layerId);
+// Sub-category inline color picker state
+const colorPickerOpen = ref(false);
+const colorPickerLayerId = ref(null);
+const colorPickerValue = ref(null);
+const colorPickerPos = ref({ x: 0, y: 0 });
+const COLOR_PRESETS = ['#e63946', '#007bff', '#2a9d8f', '#e9c46a', '#9b59b6', '#33cc33'];
+
+const openSubCatColorPicker = (layerId, value, event) => {
+  if (colorPickerLayerId.value === layerId && colorPickerValue.value === value) {
+    colorPickerOpen.value = false;
+    colorPickerLayerId.value = null;
+    colorPickerValue.value = null;
+    return;
   }
+  const rect = event.currentTarget.getBoundingClientRect();
+  colorPickerPos.value = { x: rect.left, y: rect.bottom + 4 };
+  colorPickerLayerId.value = layerId;
+  colorPickerValue.value = value;
+  colorPickerOpen.value = true;
+  event.stopPropagation();
 };
+
+const applySubCatColor = (color) => {
+  if (!colorPickerLayerId.value || colorPickerValue.value === null) return;
+  handleSubCategoryColor(
+    { _layerId: colorPickerLayerId.value },
+    colorPickerValue.value,
+    color
+  );
+  colorPickerOpen.value = false;
+  colorPickerLayerId.value = null;
+  colorPickerValue.value = null;
+};
+
+const closeColorPickerOnOutside = () => {
+  colorPickerOpen.value = false;
+  colorPickerLayerId.value = null;
+  colorPickerValue.value = null;
+};
+
+onMounted(() => document.addEventListener('click', closeColorPickerOnOutside));
+onUnmounted(() => document.removeEventListener('click', closeColorPickerOnOutside));
 
 const handleMenuAction = ({ type, layer }) => {
   // --- INFO ACTION --- (works even without layerInstance for metadata-only layers)
@@ -394,6 +444,9 @@ const handleCancel = (layerId) => {
 };
 
 const handleRemove = (layerId) => {
+  const layer = layerStore.getLayerById(layerId);
+  const name = layer?.name || 'this layer';
+  if (!confirm(`Remove "${name}"? This cannot be undone.`)) return;
   if (layerManager.value) layerManager.value.removeLayer(layerId);
 };
 
@@ -736,6 +789,9 @@ const handleTouchEnd = (event) => {
   background: rgba(59, 130, 246, 0.07);
 }
 
+.layer-row.is-idle {
+  opacity: 0.6;
+}
 .layer-row.is-idle .layer-name-text {
   color: #777;
 }
@@ -909,7 +965,7 @@ const handleTouchEnd = (event) => {
 /* Eye visibility toggle button */
 .eye-btn {
   color: #666;
-  opacity: 0;
+  opacity: 0.55;
   transition: opacity 0.15s ease, color 0.15s;
   padding: 2px 4px;
   display: flex;
@@ -933,16 +989,39 @@ const handleTouchEnd = (event) => {
   color: #666;
 }
 
-/* Geometry icon – activatable state for hidden layers */
+/* Geometry icon – no longer activatable (click to show removed) */
 .geom-icon--activatable {
-  cursor: pointer;
-  transition: transform 0.12s, opacity 0.12s;
-  opacity: 0.45;
+  cursor: default;
 }
 
-.geom-icon--activatable:hover {
-  transform: scale(1.25);
-  opacity: 1;
+/* Sub-category expand button – left side */
+.expand-btn--left {
+  color: #555;
+  font-size: 11px;
+  padding: 2px 3px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-right: 2px;
+  margin-left: 2px;
+}
+
+.theme-dark .expand-btn--left {
+  color: #bbb;
+}
+
+.expand-btn--left :deep(svg) {
+  width: 12px;
+  height: 12px;
+}
+
+/* Spacer when no expand button (preserves icon alignment) */
+.expand-spacer {
+  width: 22px;
+  flex-shrink: 0;
 }
 
 /* Sub-category expand button */
@@ -1023,19 +1102,80 @@ const handleTouchEnd = (event) => {
   padding: 2px 0;
 }
 
-.subcategory-color {
+/* Sub-category color swatch (replaces native color input) */
+.subcategory-color-swatch {
   width: 20px;
   height: 20px;
-  padding: 0;
   border: 1px solid #ccc;
   border-radius: 3px;
   cursor: pointer;
-  background: none;
+  flex-shrink: 0;
+  transition: border-color 0.15s, transform 0.12s;
+}
+
+.subcategory-color-swatch:hover {
+  border-color: #888;
+  transform: scale(1.1);
+}
+
+/* Global styles for teleported popup (outside scoped component) */
+:global(.subcategory-color-popup) {
+  position: fixed;
+  z-index: 10000;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+:global(.scp-presets) {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  flex-wrap: wrap;
+  max-width: 160px;
+}
+
+:global(.scp-dot) {
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgba(0,0,0,0.15);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.12s;
+  padding: 0;
+}
+
+:global(.scp-dot:hover) {
+  transform: scale(1.25);
+  border-color: #555;
+}
+
+:global(.scp-custom) {
+  width: 20px;
+  height: 20px;
+  border: 1px solid #ddd;
+  border-radius: 50%;
+  cursor: pointer;
+  position: relative;
+  display: inline-block;
+  background: conic-gradient(red, orange, yellow, green, blue, indigo, violet, red);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
   flex-shrink: 0;
 }
 
-.subcategory-color::-webkit-color-swatch-wrapper { padding: 0; }
-.subcategory-color::-webkit-color-swatch { border: none; border-radius: 2px; }
+:global(.scp-custom input) {
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  padding: 0; margin: 0;
+}
 
 .subcategory-label {
   font-size: 12px;

@@ -51,6 +51,7 @@ export const useLayerStore = defineStore("layers", () => {
     metadata = {},
     isUserAdded = false,
     groupBy = null,
+    attribution = null,
   }) => {
     if (layers.value.some((l) => l._layerId === layerId)) return;
 
@@ -96,6 +97,8 @@ export const useLayerStore = defineStore("layers", () => {
       groupByMissing: false,
       // non-fatal warning message shown in the layer panel (e.g. bad group_by field)
       warning: null,
+      // attribution text for base tile/WMS/WMTS layers (HTML allowed)
+      attribution,
     };
     layers.value.push(layerObj);
     // Index must point to the reactive proxy that Vue created, not the raw object.

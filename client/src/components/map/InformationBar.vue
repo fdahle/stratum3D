@@ -1,17 +1,32 @@
 <template>
   <div class="info-bar">
-    <div class="info-group projected" v-if="projectedCoords">
+    <!-- Projected coords (left) -->
+    <div class="info-group" v-if="projectedCoords">
       <span class="label">X:</span> {{ Math.round(projectedCoords.x) }}
       <span class="label">Y:</span> {{ Math.round(projectedCoords.y) }}
     </div>
-    <div class="info-group status">
+
+    <!-- Zoom level -->
+    <div class="info-group">
       <span class="label">ZOOM:</span> {{ zoom }}
-      <span class="divider">|</span>
-      <span class="label">CRS:</span> {{ crsName }}
     </div>
 
-    <div class="info-group stats">
-      <span class="label">LAYERS:</span> {{ activeOverlayCount }}
+    <!-- Scale (approximate) -->
+    <div class="info-group" v-if="scaleText">
+      <span class="label">SCALE:</span> {{ scaleText }}
+    </div>
+
+    <!-- Selected features -->
+    <div class="info-group" v-if="selectedCount > 0">
+      <span class="label">SEL:</span> {{ selectedCount }} feature{{ selectedCount !== 1 ? 's' : '' }}
+    </div>
+
+    <!-- Spacer pushes CRS to the right -->
+    <div class="spacer"></div>
+
+    <!-- CRS (right) -->
+    <div class="info-group crs-group">
+      <span class="label">CRS:</span> {{ crsName }}
     </div>
   </div>
 </template>
@@ -21,14 +36,29 @@ import { computed } from "vue";
 import { storeToRefs } from "pinia";
 import { useMapStore } from "../../stores/map/mapStore";
 import { useLayerStore } from "../../stores/map/layerStore";
+import { useSelectionStore } from "../../stores/map/selectionStore";
 
 const mapStore = useMapStore();
 const layerStore = useLayerStore();
-const { zoom, mouseCoords, projectedCoords, crsName } = storeToRefs(mapStore);
+const selectionStore = useSelectionStore();
+const { zoom, projectedCoords, crsName } = storeToRefs(mapStore);
 
-const activeOverlayCount = computed(
-  () => layerStore.overlayLayers.filter((l) => l.active).length
-);
+const selectedCount = computed(() => selectionStore.selectedFeatures.length);
+
+// Approximate map scale based on zoom (1 tile pixel ~ 256px at 96dpi)
+const scaleText = computed(() => {
+  const z = zoom.value;
+  if (!z) return null;
+  // Ground resolution at equator for Web Mercator: 156543m/pixel at zoom 0
+  const metersPerPixel = 156543.03392 / Math.pow(2, z);
+  const screenDpi = 96;
+  const inchesPerMeter = 39.3701;
+  const scale = Math.round(metersPerPixel * screenDpi * inchesPerMeter);
+  if (!isFinite(scale) || scale <= 0) return null;
+  if (scale >= 1000000) return `1:${(scale / 1000000).toFixed(1)}M`;
+  if (scale >= 1000) return `1:${(scale / 1000).toFixed(0)}k`;
+  return `1:${scale}`;
+});
 </script>
 
 <style scoped>
@@ -47,8 +77,9 @@ const activeOverlayCount = computed(
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   font-size: 11px;
   color: #444;
-  gap: 20px;
+  gap: 16px;
   backdrop-filter: blur(2px);
+  box-sizing: border-box;
 }
 
 .theme-dark .info-bar {
@@ -60,7 +91,23 @@ const activeOverlayCount = computed(
 .info-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.crs-group {
+  color: #555;
+  font-family: monospace;
+  font-size: 10.5px;
+}
+
+.theme-dark .crs-group {
+  color: #aaa;
 }
 
 .label {
@@ -68,12 +115,7 @@ const activeOverlayCount = computed(
   color: #888;
 }
 
-.divider {
-  color: #ddd;
-}
-
-.coords {
-  min-width: 180px;
-  font-family: monospace; /* Keep coords steady */
+.theme-dark .label {
+  color: #666;
 }
 </style>

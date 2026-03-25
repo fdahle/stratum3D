@@ -332,10 +332,28 @@ const loadModelFromUrl = async (url, modelIndex = 0) => {
     
     if (loadingCancelled.value) return;
 
-    // Parse the loaded text (now async with progress)
-    const object = await loadObjFromText(text, modelIndex);
-    
-    if (!loadingCancelled.value) {
+    // Try to fetch a co-located MTL file (same URL with .obj → .mtl)
+    let mtlText = null;
+    if (/\.obj$/i.test(url)) {
+      const mtlUrl = url.replace(/\.obj$/i, '.mtl');
+      const fullMtlUrl = mtlUrl.startsWith('http') ? mtlUrl : `http://localhost:3000/${mtlUrl}`;
+      try {
+        const mtlRes = await fetch(fullMtlUrl);
+        if (mtlRes.ok) mtlText = await mtlRes.text();
+      } catch (_) { /* MTL not available */ }
+    }
+
+    // Parse OBJ, with materials if a co-located MTL was found
+    let object;
+    if (mtlText) {
+      const fullObjUrl = url.startsWith('http') ? url : `http://localhost:3000/${url}`;
+      const baseUrl = fullObjUrl.substring(0, fullObjUrl.lastIndexOf('/') + 1);
+      object = await loadObjWithMaterialsFromUrl(text, mtlText, baseUrl, modelIndex);
+    } else {
+      object = await loadObjFromText(text, modelIndex);
+    }
+
+    if (!loadingCancelled.value && object) {
       emit('model-loaded', { url, index: modelIndex, object });
     }
   } catch (error) {
@@ -393,6 +411,62 @@ const loadObjFromText = async (text, modelIndex = 0) => {
   } catch (error) {
     console.error('Error parsing OBJ:', error);
     emit('loading-error', { error: error.message });
+  }
+};
+
+// Loads an OBJ (as text) with materials sourced from a server-hosted MTL file.
+// Textures are resolved as basUrl + basename so they load directly from the server.
+const loadObjWithMaterialsFromUrl = async (objText, mtlText, baseUrl, modelIndex = 0) => {
+  if (!scene.value || !camera.value || !controls.value) return null;
+  try {
+    const manager = new THREE.LoadingManager();
+    manager.setURLModifier((url) => {
+      if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:') || url.startsWith('data:')) return url;
+      const basename = url.split(/[\/\\]/).pop();
+      return baseUrl + basename;
+    });
+
+    const mtlLoader = new MTLLoader(manager);
+    const materials = mtlLoader.parse(mtlText, baseUrl);
+    materials.preload();
+
+    const objLoader = new OBJLoader(manager);
+    objLoader.setMaterials(materials);
+    const object = objLoader.parse(objText);
+
+    object.rotation.x = -Math.PI / 2;
+    object.userData.type = 'model';
+
+    object.traverse((child) => {
+      if (child.isMesh) {
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        mats.forEach(m => { m.side = THREE.DoubleSide; });
+      }
+    });
+
+    scene.value.add(object);
+    addModel(object);
+
+    if (showWireframe.value) {
+      object.traverse((child) => {
+        if (child.isMesh) {
+          const mats = Array.isArray(child.material) ? child.material : [child.material];
+          mats.forEach(m => { m.wireframe = true; });
+        }
+      });
+    }
+
+    adjustCameraToModel();
+
+    if (showNormals.value) {
+      updateNormalsHelpers(true);
+    }
+
+    console.log(`OBJ ${modelIndex + 1} loaded with server materials`);
+    return object;
+  } catch (error) {
+    console.error('Error loading OBJ with materials from URL, falling back to plain load:', error);
+    return loadObjFromText(objText, modelIndex);
   }
 };
 

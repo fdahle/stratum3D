@@ -11,7 +11,7 @@
         <!-- Sub-group mode: only show colour picker -->
         <template v-if="subGroupValue !== null">
           <li class="color-picker">
-            <span>🎨 {{ subGroupValue }}:</span>
+            <span class="menu-icon" v-html="ICON_PALETTE"></span><span>{{ subGroupValue }}:</span>
             <div class="colors">
               <button @click="emitColor('#e63946')" style="background: #e63946"></button>
               <button @click="emitColor('#007bff')" style="background: #007bff"></button>
@@ -28,16 +28,14 @@
 
         <!-- Normal layer mode -->
         <template v-else>
-        <li @click="emitAction('info')">ℹ️ Layer Info</li>
-        <li @click="emitAction('zoom')">🔍 Zoom to Layer</li>
+        <li @click="emitAction('info')"><span class="menu-icon" v-html="ICON_INFO_SM"></span> Layer Info</li>
+        <li @click="emitAction('zoom')"><span class="menu-icon" v-html="ICON_ZOOM"></span> Zoom to Layer</li>
         <li @click="emitAction('download')">
-          💾 {{ payload?.type === 'geotiff' ? 'Download TIF' : 'Download GeoJSON' }}
+          <span class="menu-icon" v-html="ICON_DOWNLOAD"></span> {{ payload?.type === 'geotiff' ? 'Download TIF' : 'Download GeoJSON' }}
         </li>
         <template v-if="payload?.type !== 'geotiff'">
-          <li class="separator"></li>
           <li class="color-picker">
-
-            <span>🎨 Color:</span>
+            <span class="menu-icon" v-html="ICON_PALETTE"></span><span>Color:</span>
             <div class="colors">
               <button
                 @click="emitColor('#e63946')"
@@ -68,7 +66,7 @@
         </template>
         <template v-if="payload?.isUserAdded">
           <li class="separator"></li>
-          <li class="danger" @click="emitAction('remove')">🗑️ Remove Layer</li>
+          <li class="danger" @click="handleRemove()"><span class="menu-icon" v-html="ICON_TRASH_SM"></span> Remove Layer</li>
         </template>
         </template> <!-- end normal layer mode -->
       </ul>
@@ -78,6 +76,14 @@
 
 <script setup>
 import { ref } from "vue";
+import { ICON_INFO, EMOJI_ICONS } from "@/constants/icons.js";
+
+// Ribbon-matching icons (defined locally, matching MapRibbonMenu style)
+const ICON_ZOOM = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
+const ICON_DOWNLOAD = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+const ICON_PALETTE = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="8" cy="10" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="10" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="14" r="1.2" fill="currentColor" stroke="none"/><circle cx="8" cy="14" r="1.2" fill="currentColor" stroke="none"/></svg>`;
+const ICON_TRASH_SM = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>`;
+const ICON_INFO_SM = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><circle cx="12" cy="8" r="0.5" fill="currentColor"/></svg>`;
 
 const visible = ref(false);
 const x = ref(0);
@@ -112,6 +118,12 @@ const emitAction = (type) => {
 const emitColor = (color) => {
   emit("color-change", { color, layer: payload.value, subGroupValue: subGroupValue.value });
   close();
+};
+
+const handleRemove = () => {
+  const name = payload.value?.name || 'this layer';
+  if (!confirm(`Remove "${name}"? This cannot be undone.`)) return;
+  emitAction('remove');
 };
 
 defineExpose({ open, close });
@@ -159,6 +171,20 @@ li {
   padding: 8px 12px;
   cursor: pointer;
   border-bottom: 1px solid #f5f5f5;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.menu-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: #555;
+}
+
+.theme-dark .menu-icon {
+  color: #aaa;
 }
 
 .theme-dark li {
@@ -178,6 +204,11 @@ li:hover {
   background: #eee;
   padding: 0;
   margin: 2px 0;
+  border-bottom: none;
+}
+
+li:has(+ .separator) {
+  border-bottom: none;
 }
 
 .theme-dark .separator {

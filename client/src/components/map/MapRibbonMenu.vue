@@ -445,6 +445,7 @@ const changeLayerColor = (color) => {
 const removeSelected = () => {
   const layer = selectedLayer.value;
   if (!layer) return;
+  if (!confirm(`Remove "${layer.name}"? This cannot be undone.`)) return;
   layerManager?.value?.removeLayer(layer._layerId);
   layerStore.deselectLayer();
 };

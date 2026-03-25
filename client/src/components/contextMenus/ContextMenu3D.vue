@@ -8,29 +8,12 @@
       @click.stop
     >
       <ul>
-        <li @click="emitAction('info')">ℹ️ Layer Info</li>
-        <li @click="emitAction('zoom')">🔍 Zoom to Layer</li>
-        <li @click="emitAction('fit')">📐 Fit to View</li>
-
-        <!-- Inline point size slider — only for point cloud layers -->
-        <template v-if="payload?.type === 'pointcloud'">
-          <li class="separator"></li>
-          <li class="point-size-item" @click.stop>
-            <span class="ps-label">⬤ Point size</span>
-            <div class="ps-control">
-              <input
-                type="range" min="1" max="10" step="0.5"
-                :value="currentPointSize"
-                @input="handlePointSizeInput(+$event.target.value)"
-                @click.stop
-              />
-              <span class="ps-value">{{ currentPointSize }}px</span>
-            </div>
-          </li>
-        </template>
+        <li @click="emitAction('info')"><span class="menu-icon" v-html="ICON_INFO_SM"></span> Layer Info</li>
+        <li @click="emitAction('zoom')"><span class="menu-icon" v-html="ICON_ZOOM_SM"></span> Zoom to Layer</li>
+        <li @click="emitAction('fit')"><span class="menu-icon" v-html="ICON_FIT_SM"></span> Fit to View</li>
 
         <li class="separator"></li>
-        <li @click="emitAction('remove')">🗑️ Remove Layer</li>
+        <li class="danger" @click="handleRemove()"><span class="menu-icon" v-html="ICON_TRASH_SM"></span> Remove Layer</li>
       </ul>
     </div>
   </div>
@@ -39,13 +22,17 @@
 <script setup>
 import { ref } from "vue";
 
+const ICON_INFO_SM   = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><circle cx="12" cy="8" r="0.5" fill="currentColor"/></svg>`;
+const ICON_ZOOM_SM   = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
+const ICON_FIT_SM    = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>`;
+const ICON_TRASH_SM  = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>`;
+
 const visible = ref(false);
 const x = ref(0);
 const y = ref(0);
 const payload = ref(null);
-const currentPointSize = ref(2);
 
-const emit = defineEmits(["action", "point-size-change"]);
+const emit = defineEmits(["action"]);
 
 const open = (event, data) => {
   const mouseEvent = event.originalEvent || event;
@@ -54,16 +41,6 @@ const open = (event, data) => {
   y.value = mouseEvent.clientY;
 
   payload.value = data;
-
-  // Initialise slider from current material
-  if (data?.type === 'pointcloud' && data.object) {
-    let size = 2;
-    data.object.traverse((child) => {
-      if (child.isPoints && child.material) size = child.material.size;
-    });
-    currentPointSize.value = size;
-  }
-
   visible.value = true;
 };
 
@@ -76,9 +53,10 @@ const emitAction = (type) => {
   close();
 };
 
-const handlePointSizeInput = (size) => {
-  currentPointSize.value = size;
-  emit("point-size-change", { size, layer: payload.value });
+const handleRemove = () => {
+  const name = payload.value?.name || 'this layer';
+  if (!confirm(`Remove "${name}"? This cannot be undone.`)) return;
+  emitAction('remove');
 };
 
 defineExpose({ open, close });
@@ -155,48 +133,6 @@ li:hover {
   background: #444;
 }
 
-/* --- Point size inline control --- */
-.point-size-item {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  cursor: default;
-  padding: 8px 12px;
-}
-
-.point-size-item:hover {
-  background: transparent;
-}
-
-.ps-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: #555;
-}
-
-.theme-dark .ps-label {
-  color: #bbb;
-}
-
-.ps-control {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.ps-control input[type=range] {
-  flex: 1;
-  accent-color: #007bff;
-  cursor: pointer;
-}
-
-.ps-value {
-  font-size: 11px;
-  color: #007bff;
-  min-width: 30px;
-  text-align: right;
-  font-family: 'Courier New', monospace;
-}
 </style>
 
 <style scoped>
@@ -240,6 +176,36 @@ li {
   padding: 8px 12px;
   cursor: pointer;
   border-bottom: 1px solid #f5f5f5;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.menu-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: #555;
+}
+
+.theme-dark .menu-icon {
+  color: #aaa;
+}
+
+li.danger {
+  color: #dc2626;
+}
+
+.theme-dark li.danger {
+  color: #f87171;
+}
+
+li.danger:hover {
+  background: #fee2e2;
+}
+
+.theme-dark li.danger:hover {
+  background: #3a1a1a;
 }
 
 .theme-dark li {
@@ -247,6 +213,10 @@ li {
 }
 
 li:last-child {
+  border-bottom: none;
+}
+
+li:has(+ .separator) {
   border-bottom: none;
 }
 
@@ -264,6 +234,7 @@ li:hover {
   padding: 0;
   margin: 2px 0;
   cursor: default;
+  border-bottom: none;
 }
 
 .theme-dark .separator {

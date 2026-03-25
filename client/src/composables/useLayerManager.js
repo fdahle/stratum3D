@@ -229,7 +229,12 @@ export function useLayerManager(map) {
     }
 
     // Add layer to store with category
-    layerStore.addLayer({ ...layerConfig, category, isUserAdded: layerConf.isUserAdded ?? false });
+    layerStore.addLayer({
+      ...layerConfig,
+      category,
+      isUserAdded: layerConf.isUserAdded ?? false,
+      attribution: layerConf.attribution ?? null,
+    });
 
     // For raster layers (tile, wms, wmts), add to map immediately
     if (layerConfig.layerInstance) {
@@ -458,6 +463,8 @@ export function useLayerManager(map) {
         if (!selectedIds.has(f.getId())) f.setStyle(null);
       });
     }
+    // Force a full re-render (required for VectorImageLayer and large feature sets)
+    layerObj.layerInstance.changed();
   };
 
   /**

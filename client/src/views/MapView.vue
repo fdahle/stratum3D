@@ -50,6 +50,7 @@
       >
         <BaseMapSwitcher />
       </div>
+      <AttributionOverlay />
       <InformationBar v-if="settingsStore.showInfoBar" />
       <AttributePanel />
 
@@ -107,6 +108,7 @@
       :profile-data="elevationProfile"
       @close="closeElevationModal"
       @toggle-draw="onToggleElevationDraw"
+      @finish-draw="onFinishElevationDraw"
     />
 
     <CsvColumnPickerModal
@@ -137,6 +139,7 @@ import { useLayerStore } from "../stores/map/layerStore";
 import AttributePanel from "../components/map/AttributePanel.vue";
 import BaseMapSwitcher from "../components/map/BaseMapSwitcher.vue";
 import InformationBar from "../components/map/InformationBar.vue";
+import AttributionOverlay from "../components/map/AttributionOverlay.vue";
 import MapWidget from "../components/map/MapWidget.vue";
 import SearchBar from "../components/map/SearchBar.vue";
 import LayerPanel from "../components/map/LayerPanel.vue";
@@ -611,6 +614,12 @@ const onToggleElevationDraw = (layerId, noDataOverride) => {
 
   elevationDrawInteraction = draw;
   map.addInteraction(draw);
+};
+
+const onFinishElevationDraw = () => {
+  if (elevationDrawInteraction) {
+    elevationDrawInteraction.finishDrawing();
+  }
 };
 
 const _sampleLinePoints = (coords, numSamples) => {

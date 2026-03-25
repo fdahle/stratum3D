@@ -12,23 +12,15 @@
           @click="selectLayer(layer.id)"
           @contextmenu.prevent="handleRightClick($event, layer)"
         >
+          <span class="layer-icon" v-html="getLayerIcon(layer.type)"></span>
+          <span class="layer-name" :title="layer.name">{{ layer.name }}</span>
+          
           <button 
             class="visibility-btn" 
             @click.stop="toggleVisibility(layer)"
             :title="layer.visible ? 'Hide layer' : 'Show layer'"
           >
             <span v-html="layer.visible ? ICON_EYE : ICON_EYE_OFF"></span>
-          </button>
-          
-          <span class="layer-icon" v-html="getLayerIcon(layer.type)"></span>
-          <span class="layer-name" :title="layer.name">{{ layer.name }}</span>
-          
-          <button 
-            class="layer-action" 
-            @click.stop="removeLayer(layer.id)"
-            title="Remove layer"
-          >
-            <span v-html="ICON_TRASH"></span>
           </button>
         </div>
       </template>
@@ -42,7 +34,7 @@
     <ContextMenu3D
       ref="contextMenuRef"
       @action="handleMenuAction"
-      @point-size-change="handlePointSizeChange"
+
     />
 
     <!-- Layer Info Modal -->
@@ -106,6 +98,13 @@ const toggleVisibility = (layer) => {
 };
 
 const removeLayer = (layerId) => {
+  const layer = layers.value.find(l => l.id === layerId);
+  const name = layer?.name || 'this layer';
+  if (!confirm(`Remove "${name}"? This cannot be undone.`)) return;
+  forceRemoveLayer(layerId);
+};
+
+const forceRemoveLayer = (layerId) => {
   const index = layers.value.findIndex(l => l.id === layerId);
   if (index !== -1) {
     layers.value.splice(index, 1);
@@ -229,10 +228,6 @@ const handleMenuAction = ({ type, layer }) => {
   }
 };
 
-const handlePointSizeChange = ({ size, layer }) => {
-  setPointSize(layer, size);
-};
-
 const openInfoForLayer = (layer) => {
   infoModalRows.value = collectLayerInfo(layer);
   infoModalTitle.value = layer.name;
@@ -247,7 +242,7 @@ const setPointSizeById = (layerId, size) => {
 defineExpose({
   addLayer,
   openInfoForLayer,
-  removeLayerById: removeLayer,
+  removeLayerById: forceRemoveLayer,
   setPointSizeById,
 });
 </script>
@@ -324,14 +319,14 @@ defineExpose({
 }
 
 .layer-item.selected {
-  background: #fff;
-  border-left: 4px solid #007bff;
-  padding-left: 5px;
+  background: rgba(59, 130, 246, 0.08);
+  outline: 1px solid rgba(59, 130, 246, 0.35);
+  outline-offset: -1px;
 }
 
 .theme-dark .layer-item.selected {
-  background: #3a3a3a;
-  border-left: 4px solid #4a9eff;
+  background: rgba(74, 158, 255, 0.1);
+  outline: 1px solid rgba(74, 158, 255, 0.3);
 }
 
 .visibility-btn {

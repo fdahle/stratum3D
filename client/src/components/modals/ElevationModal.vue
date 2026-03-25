@@ -72,17 +72,28 @@
         <div class="settings-hint">Pixels equal to this value will be treated as missing data and excluded from the profile.</div>
       </div>
 
-      <!-- Draw / cancel button -->
-      <button
-        class="draw-btn"
-        :class="{ active: isDrawing, 'btn-disabled': !internalLayerId || isLoading }"
-        :disabled="!internalLayerId || isLoading"
-        @click="$emit('toggle-draw', internalLayerId, noDataOverride)"
-        title="Click then draw a line on the map"
-      >
-        <span class="btn-icon" v-html="isDrawing ? ICON_CLOSE : ICON_DRAW"></span>
-        {{ isDrawing ? 'Cancel drawing' : 'Draw profile line' }}
-      </button>
+      <!-- Draw / cancel / finish buttons -->
+      <div class="draw-row">
+        <button
+          class="draw-btn"
+          :class="{ active: isDrawing, 'btn-disabled': !internalLayerId || isLoading }"
+          :disabled="!internalLayerId || isLoading"
+          @click="$emit('toggle-draw', internalLayerId, noDataOverride)"
+          title="Click then draw a line on the map"
+        >
+          <span class="btn-icon" v-html="isDrawing ? ICON_CLOSE : ICON_DRAW"></span>
+          {{ isDrawing ? 'Cancel drawing' : 'Draw profile line' }}
+        </button>
+        <button
+          v-if="isDrawing"
+          class="finish-btn"
+          @click="$emit('finish-draw')"
+          title="Finish drawing the current line"
+        >
+          <span class="btn-icon" v-html="ICON_CHECK"></span>
+          Finish
+        </button>
+      </div>
 
       <!-- Loading -->
       <div v-if="isLoading" class="loading-row">
@@ -174,7 +185,7 @@ import { ICON_CLOSE } from '@/constants/icons';
 
 const ICON_ELEVATION = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 7 10 11 14 15 7 21 17"/><line x1="3" y1="20" x2="21" y2="20"/></svg>`;
 const ICON_DRAW = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17L9 11L13 15L20 7"/><circle cx="3" cy="17" r="1.5" fill="currentColor"/><circle cx="20" cy="7" r="1.5" fill="currentColor"/></svg>`;
-const ICON_SETTINGS = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
+const ICON_CHECK = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;const ICON_SETTINGS = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
 
 const props = defineProps({
   isVisible:   { type: Boolean, default: false },
@@ -182,7 +193,7 @@ const props = defineProps({
   isLoading:   { type: Boolean, default: false },
   profileData: { type: Object,  default: null  },
 });
-defineEmits(['close', 'toggle-draw']);
+defineEmits(['close', 'toggle-draw', 'finish-draw']);
 
 const layerStore = useLayerStore();
 const { layers } = storeToRefs(layerStore);
@@ -558,7 +569,13 @@ onUnmounted(() => {
 }
 .theme-light .settings-hint { color: #999; }
 
-/* ── Draw button ── */
+/* ── Draw row + buttons ── */
+.draw-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
 .draw-btn {
   display: flex;
   align-items: center;
@@ -572,7 +589,7 @@ onUnmounted(() => {
   font-size: 12px;
   font-weight: 500;
   transition: all 0.15s;
-  width: 100%;
+  flex: 1;
   justify-content: center;
 }
 .draw-btn:hover:not(:disabled) {
@@ -600,6 +617,37 @@ onUnmounted(() => {
   background: rgba(37, 99, 235, 0.15);
   border-color: #2563eb;
 }
+
+.finish-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  background: rgba(34, 197, 94, 0.15);
+  border: 1px solid rgba(34, 197, 94, 0.45);
+  color: #22c55e;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.finish-btn:hover {
+  background: rgba(34, 197, 94, 0.25);
+  border-color: #22c55e;
+}
+.theme-light .finish-btn {
+  background: rgba(21, 128, 61, 0.08);
+  border-color: rgba(21, 128, 61, 0.4);
+  color: #15803d;
+}
+.theme-light .finish-btn:hover {
+  background: rgba(21, 128, 61, 0.16);
+  border-color: #15803d;
+}
+
 .btn-icon { display: flex; align-items: center; }
 .btn-icon :deep(svg) { width: 14px; height: 14px; }
 
