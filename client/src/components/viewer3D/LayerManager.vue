@@ -71,7 +71,7 @@ import {
   ICON_TRASH
 } from '@/constants/icons.js';
 
-const emit = defineEmits(['toggle-layer-visibility', 'remove-layer', 'zoom-to-layer']);
+const emit = defineEmits(['toggle-layer-visibility', 'remove-layer', 'zoom-to-layer', 'select-layer']);
 
 const layers = ref([]);
 const selectedLayerId = ref(null);
@@ -96,6 +96,7 @@ const addLayer = (layer) => {
   layers.value.push({ ...layer, object: layer.object ? markRaw(layer.object) : null });
   if (layers.value.length === 1) {
     selectedLayerId.value = layer.id;
+    emit('select-layer', layers.value[0]);
   }
 };
 
@@ -110,13 +111,17 @@ const removeLayer = (layerId) => {
     layers.value.splice(index, 1);
     emit('remove-layer', layerId);
     if (selectedLayerId.value === layerId) {
-      selectedLayerId.value = layers.value.length > 0 ? layers.value[0].id : null;
+      const next = layers.value.length > 0 ? layers.value[0] : null;
+      selectedLayerId.value = next ? next.id : null;
+      emit('select-layer', next);
     }
   }
 };
 
 const selectLayer = (layerId) => {
   selectedLayerId.value = layerId;
+  const layer = layers.value.find(l => l.id === layerId) ?? null;
+  emit('select-layer', layer);
 };
 
 // --- Point size helpers (only relevant for pointcloud layers) ---
@@ -228,8 +233,22 @@ const handlePointSizeChange = ({ size, layer }) => {
   setPointSize(layer, size);
 };
 
+const openInfoForLayer = (layer) => {
+  infoModalRows.value = collectLayerInfo(layer);
+  infoModalTitle.value = layer.name;
+  infoModalVisible.value = true;
+};
+
+const setPointSizeById = (layerId, size) => {
+  const layer = layers.value.find(l => l.id === layerId);
+  if (layer) setPointSize(layer, size);
+};
+
 defineExpose({
-  addLayer
+  addLayer,
+  openInfoForLayer,
+  removeLayerById: removeLayer,
+  setPointSizeById,
 });
 </script>
 

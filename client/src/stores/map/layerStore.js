@@ -13,6 +13,7 @@ import { debounce } from "../../utils/helpers";
 
 export const useLayerStore = defineStore("layers", () => {
   const layers = ref([]);
+  const selectedLayerId = ref(null);
   
   // Index for O(1) layer lookups by ID
   const layerIndex = new Map();
@@ -103,6 +104,7 @@ export const useLayerStore = defineStore("layers", () => {
   };
 
   const removeLayer = (layerId) => {
+    if (selectedLayerId.value === layerId) selectedLayerId.value = null;
     const idx = layers.value.findIndex((l) => l._layerId === layerId);
     if (idx === -1) return;
     layers.value.splice(idx, 1);
@@ -112,7 +114,11 @@ export const useLayerStore = defineStore("layers", () => {
   const reset = () => {
     layers.value = [];
     layerIndex.clear();
+    selectedLayerId.value = null;
   };
+
+  const selectLayer  = (layerId) => { selectedLayerId.value = layerId; };
+  const deselectLayer = () => { selectedLayerId.value = null; };
 
   // O(1) lookup helper
   const getLayerById = (layerId) => layerIndex.get(layerId);
@@ -376,6 +382,9 @@ export const useLayerStore = defineStore("layers", () => {
 
   return {
     layers,
+    selectedLayerId,
+    selectLayer,
+    deselectLayer,
     baseLayers,
     overlayLayers,
     addLayer,

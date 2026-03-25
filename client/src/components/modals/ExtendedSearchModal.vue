@@ -69,6 +69,7 @@
               <table v-if="displayResults.length" class="results-table">
                 <thead>
                   <tr>
+                    <th class="th th-action"></th>
                     <th
                       v-for="col in columns"
                       :key="col"
@@ -79,7 +80,6 @@
                       {{ col }}
                       <span v-if="sortCol === col" class="sort-indicator">{{ sortAsc ? '▲' : '▼' }}</span>
                     </th>
-                    <th class="th th-action"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -87,8 +87,12 @@
                     v-for="(row, i) in displayResults"
                     :key="i"
                     class="result-row"
-                    @click="zoomToFeature(row.feature)"
                   >
+                    <td class="td td-action">
+                      <button class="zoom-btn" @click="zoomToFeature(row.feature)" title="Zoom to feature">
+                        <span v-html="ICON_ZOOM"></span>
+                      </button>
+                    </td>
                     <td
                       v-for="col in columns"
                       :key="col"
@@ -96,11 +100,6 @@
                       :title="String(row.props[col] ?? '')"
                     >
                       <span v-html="highlight(String(row.props[col] ?? ''))"></span>
-                    </td>
-                    <td class="td td-action">
-                      <button class="zoom-btn" @click.stop="zoomToFeature(row.feature)" title="Zoom to feature">
-                        <span v-html="ICON_ZOOM"></span>
-                      </button>
                     </td>
                   </tr>
                 </tbody>
@@ -131,7 +130,7 @@ import { ICON_CLOSE } from '@/constants/icons.js';
 
 const ICON_SEARCH    = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
 const ICON_SEARCH_SM = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
-const ICON_ZOOM      = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>`;
+const ICON_ZOOM      = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>`;
 
 const PAGE_SIZE = 50;
 
@@ -468,12 +467,11 @@ const zoomToFeature = (feature) => {
 .sort-indicator { margin-left: 4px; font-size: 10px; color: #3b82f6; }
 
 .result-row {
-  cursor: pointer;
   transition: background 0.1s;
 }
-.result-row:hover { background: #eff6ff; }
+.result-row:hover { background: #f9fafb; }
 .result-row:nth-child(even) { background: #f9fafb; }
-.result-row:nth-child(even):hover { background: #eff6ff; }
+.result-row:nth-child(even):hover { background: #f3f4f6; }
 
 .td {
   padding: 5px 10px;

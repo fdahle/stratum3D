@@ -108,6 +108,17 @@
       @close="closeElevationModal"
       @toggle-draw="onToggleElevationDraw"
     />
+
+    <CsvColumnPickerModal
+      :is-open="csvModalOpen"
+      :file-name="csvModalFileName"
+      :columns="csvModalColumns"
+      :sample-rows="csvModalSampleRows"
+      :preselected-x="csvModalPreX"
+      :preselected-y="csvModalPreY"
+      @confirm="handleCsvConfirm"
+      @cancel="handleCsvCancel"
+    />
   </div>
 </template>
 
@@ -135,6 +146,7 @@ import ElevationModal from "../components/modals/ElevationModal.vue";
 import ShareSceneModal from "../components/modals/ShareSceneModal.vue";
 import ExtendedSearchModal from "../components/modals/ExtendedSearchModal.vue";
 import Settings from "../components/modals/Settings.vue";
+import CsvColumnPickerModal from "../components/modals/CsvColumnPickerModal.vue";
 import { useSettingsStore } from "../stores/settingsStore";
 // Re-setup the local state
 const settingsStore = useSettingsStore();
@@ -182,6 +194,119 @@ let notificationTimer = null;
 // Large-file thresholds (MiB)
 const LARGE_FILE_THRESHOLD_MB = 50;
 const MAX_FILE_SIZE_MB = 500;
+
+// ─── CSV Column Picker modal state ───────────────────────────────────────────
+const csvModalOpen = ref(false);
+const csvModalFileName = ref('');
+const csvModalColumns = ref([]);
+const csvModalSampleRows = ref([]);
+const csvModalPreX = ref('');
+const csvModalPreY = ref('');
+let _csvModalResolve = null;
+
+const _openCsvModal = (fileName, columns, sampleRows, preX, preY) =>
+  new Promise((resolve) => {
+    _csvModalResolve = resolve;
+    csvModalFileName.value = fileName;
+    csvModalColumns.value = columns;
+    csvModalSampleRows.value = sampleRows;
+    csvModalPreX.value = preX || '';
+    csvModalPreY.value = preY || '';
+    csvModalOpen.value = true;
+  });
+
+const handleCsvConfirm = (result) => {
+  csvModalOpen.value = false;
+  if (_csvModalResolve) { _csvModalResolve(result); _csvModalResolve = null; }
+};
+
+const handleCsvCancel = () => {
+  csvModalOpen.value = false;
+  if (_csvModalResolve) { _csvModalResolve(null); _csvModalResolve = null; }
+};
+
+// ─── CSV parsing helpers ──────────────────────────────────────────────────────
+const _csvDetectDelimiter = (firstLine) => {
+  const candidates = [',', ';', '\t', '|'];
+  let best = ',', bestCount = 0;
+  for (const d of candidates) {
+    let count = 0, inQ = false;
+    for (const c of firstLine) {
+      if (c === '"') inQ = !inQ;
+      else if (!inQ && c === d) count++;
+    }
+    if (count > bestCount) { bestCount = count; best = d; }
+  }
+  return best;
+};
+
+const _parseCsvRow = (line, delimiter) => {
+  const cols = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') {
+      if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+      else inQ = !inQ;
+    } else if (c === delimiter && !inQ) {
+      cols.push(cur); cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  cols.push(cur);
+  return cols;
+};
+
+const _parseCsv = (text) => {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return { headers: [], rows: [] };
+  const delimiter = _csvDetectDelimiter(lines[0]);
+  const headers = _parseCsvRow(lines[0], delimiter).map((h) => h.trim());
+  const rows = lines.slice(1).map((line) => {
+    const vals = _parseCsvRow(line, delimiter);
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = vals[i]?.trim() ?? ''; });
+    return obj;
+  });
+  return { headers, rows };
+};
+
+// Column name patterns tried in order (longest/most-specific first so
+// 'longitude' beats a bare 'x' when both are present).
+const _X_PATTERNS = ['longitude', 'long', 'lon', 'lng', 'easting', 'east', 'x'];
+const _Y_PATTERNS = ['latitude', 'lat', 'northing', 'north', 'y'];
+
+const _detectGeomColumns = (headers) => {
+  const lower = headers.map((h) => h.toLowerCase().trim());
+  const xIdx = _X_PATTERNS.reduce((found, p) => found >= 0 ? found : lower.indexOf(p), -1);
+  const yIdx = _Y_PATTERNS.reduce((found, p) => found >= 0 ? found : lower.indexOf(p), -1);
+  return {
+    xCol: xIdx >= 0 ? headers[xIdx] : null,
+    yCol: yIdx >= 0 ? headers[yIdx] : null,
+    confident: xIdx >= 0 && yIdx >= 0,
+  };
+};
+
+const _csvToGeoJson = (rows, xCol, yCol, crs) => {
+  const features = [];
+  for (const row of rows) {
+    const x = parseFloat(row[xCol]);
+    const y = parseFloat(row[yCol]);
+    if (!isFinite(x) || !isFinite(y)) continue;
+    features.push({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [x, y] },
+      properties: { ...row },
+    });
+  }
+  const geojson = { type: 'FeatureCollection', features };
+  // Embed non-default CRS so the layer worker can reproject correctly.
+  if (crs && crs !== 'EPSG:4326') {
+    geojson.crs = { type: 'name', properties: { name: crs } };
+  }
+  return geojson;
+};
 
 const showNotification = (message, type = "info") => {
   clearTimeout(notificationTimer);
@@ -760,6 +885,72 @@ const processDroppedFile = async (file) => {
       showNotification(`Added layer: ${layerName}`, "success");
     } catch (e) {
       showNotification(`Failed to load ${layerName}: ${e.message}`, "error");
+    }
+  } else if (nameLower.endsWith('.csv')) {
+    if (!layerManagerRef?.value) {
+      showNotification('Map is not yet initialized. Try again in a moment.', 'error');
+      return;
+    }
+    const layerName = file.name.replace(/\.[^.]+$/, '');
+    try {
+      const text = await file.text();
+      const { headers, rows } = _parseCsv(text);
+      if (headers.length === 0) {
+        showNotification(`${layerName}: could not parse CSV — no headers found.`, 'error');
+        return;
+      }
+
+      const detected = _detectGeomColumns(headers);
+      const sampleRows = rows.slice(0, 5);
+      let xCol, yCol, crs;
+
+      if (detected.confident) {
+        // Clear match — load immediately, no modal needed.
+        xCol = detected.xCol;
+        yCol = detected.yCol;
+        crs = 'EPSG:4326';
+        showNotification(`${layerName}: auto-detected X="${xCol}", Y="${yCol}"`, 'info');
+        await new Promise((r) => requestAnimationFrame(r));
+      } else {
+        // Ambiguous — ask the user which columns to use.
+        const result = await _openCsvModal(
+          file.name, headers, sampleRows, detected.xCol, detected.yCol,
+        );
+        if (!result) return; // user cancelled
+        xCol = result.xCol;
+        yCol = result.yCol;
+        crs = result.crs;
+      }
+
+      const geojson = _csvToGeoJson(rows, xCol, yCol, crs);
+      const skipped = rows.length - geojson.features.length;
+
+      if (geojson.features.length === 0) {
+        showNotification(
+          `${layerName}: no valid coordinates found in columns "${xCol}" / "${yCol}".`,
+          'error',
+        );
+        return;
+      }
+
+      showNotification(`Loading ${layerName}…`, 'info');
+      await new Promise((r) => requestAnimationFrame(r));
+
+      const blob = new Blob([JSON.stringify(geojson)], { type: 'application/json' });
+      const blobUrl = URL.createObjectURL(blob);
+      await layerManagerRef.value.processLayer(
+        { type: 'geojson', url: blobUrl, name: layerName, visible: true, isUserAdded: true },
+        'overlay',
+      );
+
+      showNotification(
+        skipped > 0
+          ? `Added layer: ${layerName} (${skipped} row${skipped !== 1 ? 's' : ''} skipped — invalid coords)`
+          : `Added layer: ${layerName}`,
+        skipped > 0 ? 'warning' : 'success',
+      );
+    } catch (e) {
+      showNotification(`Failed to load ${layerName}: ${e.message}`, 'error');
     }
   } else {
     const ext = file.name.includes(".")

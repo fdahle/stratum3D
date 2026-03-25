@@ -4,10 +4,12 @@
     <RibbonMenu 
       :is-measuring-distance="isMeasurementModalVisible && activeMeasurementType === 'distance'"
       :is-measuring-area="isMeasurementModalVisible && activeMeasurementType === 'area'"
+      :selected-layer="selectedLayer3D"
       @load-model="handleLoadModel"
       @load-pointcloud="handleLoadPointCloud"
       @load-cameras="handleLoadCameras"
       @load-markers="handleLoadMarkers"
+      @load-dem="handleLoadDEM"
       @unsupported-file="({ ext, expected }) => showError(`Unsupported file format: .${ext} — expected ${expected}`)"
       @reset-camera="onResetCamera"
       @fit-to-scene="onFitToScene"
@@ -18,6 +20,11 @@
       @view-left="onViewLeft"
       @measure-distance="onMeasureDistance"
       @measure-area="onMeasureArea"
+      @ribbon-layer-zoom="onRibbonLayerZoom"
+      @ribbon-layer-info="onRibbonLayerInfo"
+      @ribbon-layer-remove="onRibbonLayerRemove"
+      @ribbon-layer-visibility="onRibbonLayerVisibility"
+      @ribbon-layer-pointsize="onRibbonLayerPointSize"
     />
 
     <!-- Body: Layer panel + Canvas -->
@@ -28,6 +35,7 @@
         @toggle-layer-visibility="onToggleLayerVisibility"
         @remove-layer="onRemoveLayer"
         @zoom-to-layer="onZoomToLayer"
+        @select-layer="onSelect3DLayer"
       />
 
       <!-- Main 3D canvas -->
@@ -45,6 +53,8 @@
           @parsing-started="onParsingStarted"
           @parsing-progress="onParsingProgress"
           @building-geometry="onBuildingGeometry"
+          @unsupported-file="({ ext }) => showError(`Unsupported file format: .${ext}`)"
+          @suggest-materials="onSuggestMaterials"
         />
 
         <!-- Loading indicator -->
@@ -69,6 +79,14 @@
           <span>{{ errorMessage }}</span>
           <button @click="errorMessage = null">&#10005;</button>
         </div>
+
+        <!-- MTL hint -->
+        <div v-if="mtlHintMessage" class="hint-toast">
+          <span>{{ mtlHintMessage }}</span>
+          <button class="hint-action-btn" @click="triggerMtlFilePicker">Pick MTL &amp; textures…</button>
+          <button @click="mtlHintMessage = null">&#10005;</button>
+        </div>
+        <input ref="mtlFileInputRef" type="file" multiple accept=".mtl,.jpg,.jpeg,.png,.bmp,.gif,.webp" style="display:none" @change="onMaterialFilePicked" />
       </div>
     </div>
 
@@ -103,12 +121,16 @@ import MeasurementModal from '@/components/modals/MeasurementModal.vue';
 const route = useRoute();
 const canvasRef = ref(null);
 const layerManagerRef = ref(null);
+const selectedLayer3D = ref(null);
 const isLoading = ref(false);
 const loadingProgress = ref(0);
 const loadingStatus = ref('');
 const loadingTitle = ref('Loading...');
 const isParsing = computed(() => loadingStatus.value.includes('Parsing'));
 const errorMessage = ref(null);
+const mtlHintMessage = ref(null);
+const pendingMtlTarget = ref(null);
+const mtlFileInputRef = ref(null);
 
 const viewer3DStore = useViewer3DStore();
 const { cleanup, startMeasurement } = viewer3DStore;
@@ -150,6 +172,14 @@ const onSceneReady = () => {
 };
 
 const onLoadingProgress = ({ url, index, loaded, total, progress, status }) => {
+  if (!isLoading.value) {
+    isLoading.value = true;
+    const lower = url.toLowerCase();
+    if (lower.endsWith('.obj')) loadingTitle.value = 'Loading 3D Model...';
+    else if (lower.endsWith('.ply') || lower.endsWith('.las') || lower.endsWith('.laz')) loadingTitle.value = 'Loading Point Cloud...';
+    else if (lower.endsWith('.txt') || lower.endsWith('.csv')) loadingTitle.value = 'Loading Cameras...';
+    else loadingTitle.value = 'Loading...';
+  }
   loadingProgress.value = progress;
   const loadedMB = (loaded / (1024 * 1024)).toFixed(1);
   const totalMB = (total / (1024 * 1024)).toFixed(1);
@@ -163,11 +193,17 @@ const onLoadingProgress = ({ url, index, loaded, total, progress, status }) => {
     loadingStatus.value = `Reading ${fileName}: ${loadedMB}MB / ${totalMB}MB (${progress}%)`;
   } else if (status === 'parsing') {
     const fileName = url.split('/').pop();
-    loadingStatus.value = `Parsing ${fileName}...`;
+    loadingStatus.value = progress > 0 && progress < 100
+      ? `Processing ${fileName}: ${progress}%`
+      : `Parsing ${fileName}...`;
   }
 };
 
 const onParsingStarted = ({ index, size }) => {
+  if (!isLoading.value) {
+    isLoading.value = true;
+    loadingTitle.value = 'Loading...';
+  }
   const sizeMB = (size / (1024 * 1024)).toFixed(1);
   if (modelUrls.value.length > 0) {
     loadingStatus.value = `Parsing model ${index + 1}/${modelUrls.value.length} (${sizeMB}MB)...`;
@@ -181,7 +217,11 @@ const onParsingProgress = ({ index, progress, processed, total }) => {
   loadingProgress.value = progress;
   const processedK = (processed / 1000).toFixed(0);
   const totalK = (total / 1000).toFixed(0);
-  loadingStatus.value = `Parsing model ${index + 1}/${modelUrls.value.length}: ${processedK}k / ${totalK}k lines (${progress}%)`;
+  if (modelUrls.value.length > 0) {
+    loadingStatus.value = `Parsing model ${index + 1}/${modelUrls.value.length}: ${processedK}k / ${totalK}k lines (${progress}%)`;
+  } else {
+    loadingStatus.value = `Parsing: ${processedK}k / ${totalK}k lines (${progress}%)`;
+  }
 };
 
 const onBuildingGeometry = ({ index, stage, vertices, faces, triangles }) => {
@@ -235,19 +275,29 @@ const onModelLoaded = ({ url, index, object }) => {
     loadingStatus.value = '';
     loadingTitle.value = 'Loading...';
   } else if (modelUrls.value.length === 0) {
-    // For file-based loading, hide loading indicator after a short delay
+    // For file-based loading, hide loading indicator after a brief pause
     setTimeout(() => {
       isLoading.value = false;
       loadingProgress.value = 0;
       loadingStatus.value = '';
       loadingTitle.value = 'Loading...';
-    }, 500);
+    }, 100);
   }
 };
 
 const handleLoadMarkers = (file) => {
   if (canvasRef.value?.loadMarkersFile) {
     canvasRef.value.loadMarkersFile(file);
+  }
+};
+
+const handleLoadDEM = (file) => {
+  if (canvasRef.value?.loadDEMFile) {
+    isLoading.value = true;
+    loadingTitle.value = 'Loading DEM...';
+    loadingStatus.value = `Loading DEM: ${file.name}...`;
+    loadingProgress.value = 0;
+    canvasRef.value.loadDEMFile(file);
   }
 };
 
@@ -488,9 +538,65 @@ const onZoomToLayer = (layer) => {
   }
 };
 
+const onSelect3DLayer = (layer) => {
+  selectedLayer3D.value = layer ?? null;
+};
+
+const onRibbonLayerZoom = (layer) => {
+  if (canvasRef.value?.zoomToLayer && layer) canvasRef.value.zoomToLayer(layer.id);
+};
+
+const onRibbonLayerInfo = (layer) => {
+  layerManagerRef.value?.openInfoForLayer(layer);
+};
+
+const onRibbonLayerRemove = (layer) => {
+  if (!layer) return;
+  layerManagerRef.value?.removeLayerById(layer.id);
+  if (canvasRef.value?.removeLayer) canvasRef.value.removeLayer(layer.id);
+};
+
+const onRibbonLayerVisibility = ({ layer, visible }) => {
+  if (!layer) return;
+  layer.visible = visible;
+  if (canvasRef.value?.toggleLayerVisibility) canvasRef.value.toggleLayerVisibility(layer.id, visible);
+};
+
+const onRibbonLayerPointSize = ({ layer, size }) => {
+  if (!layer) return;
+  layerManagerRef.value?.setPointSizeById(layer.id, size);
+};
+
 const showError = (msg) => {
   errorMessage.value = msg;
   setTimeout(() => { errorMessage.value = null; }, 3000);
+};
+
+const onSuggestMaterials = ({ stem, objectId }) => {
+  pendingMtlTarget.value = { id: objectId };
+  mtlHintMessage.value = `"${stem}" loaded without textures.`;
+};
+
+const triggerMtlFilePicker = () => {
+  mtlFileInputRef.value?.click();
+};
+
+const onMaterialFilePicked = (event) => {
+  const files = Array.from(event.target.files ?? []);
+  event.target.value = '';
+  if (!files.length || !pendingMtlTarget.value) return;
+
+  const lower = f => f.name.toLowerCase();
+  const mtlFile = files.find(f => lower(f).endsWith('.mtl')) ?? null;
+  const imageFiles = files.filter(f => /\.(jpg|jpeg|png|bmp|gif|webp)$/.test(lower(f)));
+
+  // Remove old layer entry (the unshaded one)
+  layerManagerRef.value?.removeLayerById(pendingMtlTarget.value.id);
+
+  pendingMtlTarget.value = null;
+  mtlHintMessage.value = null;
+
+  canvasRef.value?.reloadWithMaterials(mtlFile, imageFiles);
 };
 
 const handleStopLoading = () => {
@@ -658,12 +764,12 @@ const handleStopLoading = () => {
   background: rgba(220, 53, 69, 0.9);
 }
 
-.error-toast {
+.error-toast,
+.hint-toast {
   position: absolute;
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  background: #dc3545;
   color: white;
   padding: 10px 16px;
   border-radius: 6px;
@@ -675,6 +781,16 @@ const handleStopLoading = () => {
   font-size: 13px;
   font-family: "Segoe UI", sans-serif;
   animation: slideUp 0.3s ease;
+  white-space: nowrap;
+}
+
+.error-toast {
+  background: #dc3545;
+}
+
+.hint-toast {
+  background: #0d6efd;
+  bottom: 60px;
 }
 
 @keyframes slideUp {
@@ -688,7 +804,8 @@ const handleStopLoading = () => {
   }
 }
 
-.error-toast button {
+.error-toast button,
+.hint-toast button {
   background: none;
   border: none;
   color: white;
@@ -704,7 +821,16 @@ const handleStopLoading = () => {
   transition: opacity 0.2s;
 }
 
-.error-toast button:hover {
+.error-toast button:hover,
+.hint-toast button:hover {
   opacity: 1;
+}
+
+.hint-action-btn {
+  width: auto !important;
+  padding: 2px 8px !important;
+  border: 1px solid rgba(255,255,255,0.6) !important;
+  border-radius: 4px;
+  font-size: 12px !important;
 }
 </style>

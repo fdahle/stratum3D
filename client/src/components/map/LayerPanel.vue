@@ -9,6 +9,7 @@
       :class="{ 'is-dragging': isDragging }"
       @dragover.prevent="handleListDragOver"
       @drop.prevent="executeDrop"
+      @click.self="layerStore.deselectLayer()"
     >
       <TransitionGroup name="layers">
         <div
@@ -20,10 +21,12 @@
             'is-idle': layer.status === 'idle',
             'layer-error': layer.status === 'error',
             'dragging': draggedLayerId === layer._layerId,
+            'selected': layer._layerId === selectedLayerId,
             'has-groups': layer.groupBy && layer.status === 'ready' && Object.keys(layer.subCategories).length > 0,
             'has-warning': !!layer.warning,
           }"
           draggable="true"
+          @click="handleLayerSelect(layer._layerId)"
           @dragstart="handleDragStart($event, layer)"
           @dragend="handleDragEnd"
           @dragover.prevent.stop="handleDragOver($event, layer)"
@@ -44,14 +47,7 @@
           ></div>
         </div>
 
-        <label :class="{ 'disabled-label': layer.status === 'error' }">
-          <input
-            type="checkbox"
-            :checked="layer.active"
-            :disabled="['downloading', 'processing', 'error', 'loading-details'].includes(layer.status)"
-            @change="layerStore.toggleLayer(layer._layerId)"
-          />
-
+        <div :class="['layer-label', { 'disabled-label': layer.status === 'error' }]">
           <span class="icon-container">
             <div
               v-if="['downloading', 'processing', 'loading-details'].includes(layer.status)"
@@ -61,8 +57,11 @@
             <span
               v-else
               class="geom-icon"
+              :class="{ 'geom-icon--activatable': !layer.active && !['downloading', 'processing', 'error', 'loading-details'].includes(layer.status) }"
+              :title="!layer.active && !['downloading', 'processing', 'error', 'loading-details'].includes(layer.status) ? 'Click to show layer' : undefined"
               :style="{ color: layer.status === 'error' ? '#ccc' : layer.color || '#666' }"
               v-html="getGeometryIconSVG(layer.geometryType)"
+              @click="handleGeomIconClick(layer)"
             >
             </span>
           </span>
@@ -140,9 +139,19 @@
                 class="warning-icon"
                 :title="STRINGS.layer.groupByMissing(layer.groupBy)"
               >⚠️</span>
+
+              <!-- Eye toggle for visibility -->
+              <button
+                v-if="!['downloading', 'processing', 'loading-details'].includes(layer.status) && layer.status !== 'error'"
+                class="action-btn eye-btn"
+                :class="{ 'eye-off': !layer.active }"
+                :title="layer.active ? 'Hide layer' : 'Show layer'"
+                @click.stop="layerStore.toggleLayer(layer._layerId)"
+                v-html="layer.active ? ICON_EYE : ICON_EYE_OFF"
+              ></button>
             </div>
           </div>
-        </label>
+        </div>
 
         <!-- Inline warning banner for non-fatal issues (e.g. bad group_by field) -->
         <div v-if="layer.warning" class="layer-warning-banner">
@@ -217,7 +226,7 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import ContextMenu from "../contextMenus/ContextMenuLayers.vue";
 import LayerInfoModal from "../modals/LayerInfoModal.vue";
 import GeoJSON from "ol/format/GeoJSON"; // Import OL GeoJSON Format
-import { ICON_POINT, ICON_LINE, ICON_POLYGON, ICON_RASTER, EMOJI_ICONS, getGeometryIcon } from "../../constants/icons";
+import { ICON_POINT, ICON_LINE, ICON_POLYGON, ICON_RASTER, EMOJI_ICONS, getGeometryIcon, ICON_EYE, ICON_EYE_OFF } from "../../constants/icons";
 import { STRINGS } from "../../constants/strings";
 
 defineEmits(['open-settings']);
@@ -227,7 +236,7 @@ const mapStore = useMapStore();
 const settingsStore = useSettingsStore();
 const layerManager = inject("layerManager"); // ref — access via .value
 
-const { overlayLayers } = storeToRefs(layerStore);
+const { overlayLayers, selectedLayerId } = storeToRefs(layerStore);
 const contextMenuRef = ref(null);
 
 // Info modal state
@@ -244,6 +253,18 @@ const getGeometryIconSVG = (layerType) => getGeometryIcon(layerType);
 const handleRightClick = (event, layer) => {
   if (layer.status !== "ready") return;
   contextMenuRef.value.open(event, layer);
+};
+
+const handleLayerSelect = (layerId) => {
+  if (layerStore.selectedLayerId !== layerId) {
+    layerStore.selectLayer(layerId);
+  }
+};
+
+const handleGeomIconClick = (layer) => {
+  if (!layer.active && !['downloading', 'processing', 'error', 'loading-details'].includes(layer.status)) {
+    layerStore.toggleLayer(layer._layerId);
+  }
 };
 
 const handleMenuAction = ({ type, layer }) => {
@@ -698,6 +719,23 @@ const handleTouchEnd = (event) => {
   border-left: 4px solid #007bff;
 }
 
+.layer-row.selected {
+  background: rgba(59, 130, 246, 0.07);
+  outline: 1px solid rgba(59, 130, 246, 0.35);
+  outline-offset: -1px;
+}
+
+.theme-dark .layer-row.selected {
+  background: rgba(74, 158, 255, 0.09);
+  outline: 1px solid rgba(74, 158, 255, 0.3);
+}
+
+/* selected+active: keep the blue border AND add the highlight */
+.layer-row.selected.active {
+  border-left: 4px solid #3b82f6;
+  background: rgba(59, 130, 246, 0.07);
+}
+
 .layer-row.is-idle .layer-name-text {
   color: #777;
 }
@@ -737,11 +775,11 @@ const handleTouchEnd = (event) => {
   white-space: nowrap;
 }
 
-label {
+.layer-label {
   display: flex;
   align-items: center;
   width: 100%;
-  cursor: pointer;
+  cursor: default;
   z-index: 1;
 }
 
@@ -866,6 +904,45 @@ label {
 
 .remove-btn:hover {
   background-color: #fee2e2;
+}
+
+/* Eye visibility toggle button */
+.eye-btn {
+  color: #666;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s;
+  padding: 2px 4px;
+  display: flex;
+  align-items: center;
+}
+
+.eye-btn.eye-off {
+  color: #aaa;
+  opacity: 1;
+}
+
+.layer-row:hover .eye-btn {
+  opacity: 1;
+}
+
+.theme-dark .eye-btn {
+  color: #999;
+}
+
+.theme-dark .eye-btn.eye-off {
+  color: #666;
+}
+
+/* Geometry icon – activatable state for hidden layers */
+.geom-icon--activatable {
+  cursor: pointer;
+  transition: transform 0.12s, opacity 0.12s;
+  opacity: 0.45;
+}
+
+.geom-icon--activatable:hover {
+  transform: scale(1.25);
+  opacity: 1;
 }
 
 /* Sub-category expand button */

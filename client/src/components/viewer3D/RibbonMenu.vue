@@ -9,9 +9,21 @@
       >
         {{ tab.label }}
       </button>
+
+      <!-- Contextual layer tab – visible only when a layer is selected -->
+      <template v-if="selectedLayer">
+        <div class="ctx-tab-divider"></div>
+        <button
+          :class="['tab-btn', 'tab-btn--context', { active: activeTab === 'layer' }]"
+          @click="activeTab = 'layer'"
+          :title="'Layer: ' + selectedLayer.name"
+        >
+          <span class="ctx-tab-name">{{ selectedLayer.name }}</span>
+        </button>
+      </template>
     </div>
 
-    <div class="ribbon-content">
+    <div class="ribbon-content" :class="{ 'ctx-active': activeTab === 'layer' && selectedLayer }">
       <!-- Insert Tab -->
       <div v-if="activeTab === 'insert'" class="ribbon-panel">
         <div class="ribbon-group">
@@ -31,6 +43,10 @@
             <button @click="openFileDialog('markers')" class="ribbon-btn">
               <span class="btn-icon" v-html="ICON_MARKER_FLAG"></span>
               <span class="btn-label">Markers</span>
+            </button>
+            <button @click="openFileDialog('dem')" class="ribbon-btn">
+              <span class="btn-icon" v-html="ICON_DEM"></span>
+              <span class="btn-label">DEM</span>
             </button>
           </div>
           <span class="group-label">Data</span>
@@ -126,6 +142,77 @@
           <span class="group-label">Measure</span>
         </div>
       </div>
+
+      <!-- Contextual Layer Tab -->
+      <div v-if="activeTab === 'layer' && selectedLayer" class="ribbon-panel">
+        <!-- Info (leftmost, own group) -->
+        <div class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <button class="ribbon-btn" @click="emit('ribbon-layer-info', selectedLayer)" title="View layer info">
+              <span class="btn-icon" v-html="ICON_INFO"></span>
+              <span class="btn-label">Info</span>
+            </button>
+          </div>
+          <span class="group-label">Layer</span>
+        </div>
+        <!-- Navigate -->
+        <div class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <button class="ribbon-btn" @click="emit('ribbon-layer-zoom', selectedLayer)" title="Zoom to selected layer">
+              <span class="btn-icon" v-html="ICON_FIT"></span>
+              <span class="btn-label">Zoom To</span>
+            </button>
+          </div>
+          <span class="group-label">Navigate</span>
+        </div>
+        <!-- Display -->
+        <div class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <button
+              class="ribbon-btn"
+              :class="{ active: selectedLayer.visible }"
+              @click="toggleSelectedVisibility"
+              :title="selectedLayer.visible ? 'Hide layer' : 'Show layer'"
+            >
+              <span class="btn-icon" v-html="selectedLayer.visible ? ICON_EYE : ICON_EYE_OFF"></span>
+              <span class="btn-label">{{ selectedLayer.visible ? 'Visible' : 'Hidden' }}</span>
+            </button>
+          </div>
+          <span class="group-label">Display</span>
+        </div>
+        <!-- Point Size – pointcloud layers only -->
+        <div v-if="selectedLayer.type === 'pointcloud'" class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <div class="ctx-point-size">
+              <div class="ctx-range-row">
+                <input
+                  type="range"
+                  min="0.5"
+                  max="10"
+                  step="0.5"
+                  :value="localPointSize"
+                  @input="onPointSizeInput"
+                  class="ctx-range"
+                  :style="{ background: sliderTrackStyle }"
+                  title="Adjust point size"
+                />
+                <span class="ctx-range-value">{{ localPointSize }}</span>
+              </div>
+            </div>
+          </div>
+          <span class="group-label">Point Size</span>
+        </div>
+        <!-- Remove -->
+        <div class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <button class="ribbon-btn ribbon-btn--danger" @click="emit('ribbon-layer-remove', selectedLayer)" title="Remove this layer">
+              <span class="btn-icon" v-html="ICON_TRASH_CTX"></span>
+              <span class="btn-label">Remove</span>
+            </button>
+          </div>
+          <span class="group-label">Layer</span>
+        </div>
+      </div>
     </div>
 
     <!-- Hidden file inputs -->
@@ -157,11 +244,18 @@
       @change="handleMarkersFile"
       style="display: none"
     />
+    <input
+      ref="demInput"
+      type="file"
+      accept=".tif,.tiff"
+      @change="handleDEMFile"
+      style="display: none"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, watch, computed } from 'vue';
 import { useViewer3DStore } from '@/stores/viewer3D/viewer3dStore';
 import { storeToRefs } from 'pinia';
 import {
@@ -169,6 +263,7 @@ import {
   ICON_POINT_CLOUD,
   ICON_CAMERA,
   ICON_MARKER_FLAG,
+  ICON_DEM,
   ICON_GRID,
   ICON_AXES,
   ICON_RESET,
@@ -182,7 +277,10 @@ import {
   ICON_VIEW_FRONT,
   ICON_VIEW_BACK,
   ICON_VIEW_RIGHT,
-  ICON_VIEW_LEFT
+  ICON_VIEW_LEFT,
+  ICON_EYE,
+  ICON_EYE_OFF,
+  ICON_INFO
 } from '@/constants/icons.js';
 
 const props = defineProps({
@@ -193,6 +291,10 @@ const props = defineProps({
   isMeasuringArea: {
     type: Boolean,
     default: false
+  },
+  selectedLayer: {
+    type: Object,
+    default: null
   }
 });
 
@@ -201,6 +303,7 @@ const emit = defineEmits([
   'load-pointcloud',
   'load-cameras',
   'load-markers',
+  'load-dem',
   'unsupported-file',
   'toggle-wireframe',
   'toggle-bounding-box',
@@ -215,7 +318,12 @@ const emit = defineEmits([
   'view-right',
   'view-left',
   'measure-distance',
-  'measure-area'
+  'measure-area',
+  'ribbon-layer-zoom',
+  'ribbon-layer-info',
+  'ribbon-layer-remove',
+  'ribbon-layer-visibility',
+  'ribbon-layer-pointsize'
 ]);
 
 const viewer3DStore = useViewer3DStore();
@@ -227,6 +335,7 @@ const modelInput = ref(null);
 const pointcloudInput = ref(null);
 const camerasInput = ref(null);
 const markersInput = ref(null);
+const demInput = ref(null);
 
 const tabs = [
   { id: 'insert', label: 'Insert' },
@@ -234,12 +343,55 @@ const tabs = [
   { id: 'tools', label: 'Tools' }
 ];
 
+// Auto-switch to layer tab when a layer is selected
+watch(() => props.selectedLayer, (newLayer) => {
+  if (newLayer) {
+    activeTab.value = 'layer';
+  } else if (activeTab.value === 'layer') {
+    activeTab.value = 'insert';
+  }
+});
+
+// Track point size for pointcloud layers
+const localPointSize = ref(2);
+watch(() => props.selectedLayer, (layer) => {
+  if (layer?.type === 'pointcloud' && layer.object) {
+    let size = 2;
+    layer.object.traverse?.((child) => {
+      if (child.isPoints && child.material) size = child.material.size ?? 2;
+    });
+    localPointSize.value = parseFloat(size.toFixed(1));
+  }
+}, { immediate: true });
+
+const onPointSizeInput = (e) => {
+  const size = parseFloat(e.target.value);
+  localPointSize.value = size;
+  emit('ribbon-layer-pointsize', { layer: props.selectedLayer, size });
+};
+
+const sliderTrackStyle = computed(() => {
+  const min = 0.5, max = 10;
+  const pct = ((localPointSize.value - min) / (max - min)) * 100;
+  return `linear-gradient(to right, #f59e0b ${pct}%, #d1d5db ${pct}%)`;
+});
+
+const toggleSelectedVisibility = () => {
+  if (!props.selectedLayer) return;
+  const visible = !props.selectedLayer.visible;
+  emit('ribbon-layer-visibility', { layer: props.selectedLayer, visible });
+};
+
+// Contextual icons
+const ICON_TRASH_CTX = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>`;
+
 const openFileDialog = (type) => {
   switch(type) {
     case 'model':       modelInput.value?.click();    break;
     case 'pointcloud':  pointcloudInput.value?.click(); break;
     case 'cameras':     camerasInput.value?.click();  break;
     case 'markers':     markersInput.value?.click();  break;
+    case 'dem':         demInput.value?.click();       break;
   }
 };
 
@@ -273,6 +425,7 @@ const SUPPORTED = {
   pointcloud: ['.copc.laz', '.laz', '.las', '.ply'],
   cameras:    ['.txt'],
   markers:    ['.xml'],
+  dem:        ['.tif', '.tiff'],
 };
 
 const checkExtension = (file, type) => {
@@ -308,6 +461,11 @@ const handleCamerasFile = (event) => {
 const handleMarkersFile = (event) => {
   const file = event.target.files[0];
   if (file) emitOrReject(file, 'markers', 'load-markers', event);
+};
+
+const handleDEMFile = (event) => {
+  const file = event.target.files[0];
+  if (file) emitOrReject(file, 'dem', 'load-dem', event);
 };
 </script>
 
@@ -533,5 +691,141 @@ const handleMarkersFile = (event) => {
 .ribbon-btn-sm .btn-label {
   font-size: 9px;
   margin-left: 3px;
+}
+
+/* ---- Contextual tab ---- */
+.ctx-tab-divider {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.18);
+  margin: 4px 6px;
+  flex-shrink: 0;
+}
+
+.tab-btn--context {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #f59e0b !important;
+  border-bottom-color: transparent;
+}
+
+.tab-btn--context:hover {
+  background: rgba(245, 158, 11, 0.15) !important;
+}
+
+.tab-btn--context.active {
+  background: #f8f9fa !important;
+  color: #b45309 !important;
+  border-bottom-color: #f59e0b !important;
+}
+
+.theme-dark .tab-btn--context.active {
+  background: #2a2a2a !important;
+  color: #f59e0b !important;
+}
+
+.ctx-tab-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Contextual ribbon content accent */
+.ribbon-content.ctx-active {
+  box-shadow: inset 0 3px 0 #f59e0b;
+}
+
+/* Danger button */
+.ribbon-btn--danger {
+  color: #dc2626 !important;
+}
+
+.ribbon-btn--danger:hover {
+  background: #fee2e2 !important;
+  border-color: #fca5a5 !important;
+}
+
+.theme-dark .ribbon-btn--danger {
+  color: #f87171 !important;
+}
+
+.theme-dark .ribbon-btn--danger:hover {
+  background: rgba(220, 38, 38, 0.15) !important;
+  border-color: rgba(248, 113, 113, 0.3) !important;
+}
+
+/* Point size control in contextual ribbon */
+.ctx-point-size {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  height: 100%;
+}
+
+.ctx-range-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ctx-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 90px;
+  height: 4px;
+  border-radius: 2px;
+  cursor: pointer;
+  outline: none;
+  border: none;
+  transition: background 0.1s;
+}
+
+.ctx-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #f59e0b;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+
+.ctx-range::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.2);
+}
+
+.ctx-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #f59e0b;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+
+.ctx-range-value {
+  min-width: 28px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #444;
+  font-family: "Segoe UI", monospace;
+  text-align: center;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 4px;
+  padding: 2px 4px;
+  line-height: 1.4;
+}
+
+.theme-dark .ctx-range-value {
+  color: #eee;
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.4);
 }
 </style>

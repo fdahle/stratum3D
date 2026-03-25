@@ -167,6 +167,7 @@ export const ICON_VIEW_LEFT = `<svg viewBox="0 0 24 24" width="20" height="20" f
 
 /** GCP / survey flag marker */
 export const ICON_MARKER_FLAG = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><line x1="7" y1="3" x2="7" y2="21"/><path d="M7 3 L19 8 L7 13" fill="currentColor" stroke="none" opacity="0.9"/><path d="M7 3 L19 8 L7 13"/></svg>`;
+export const ICON_DEM = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="2 18 7 8 11 14 15 6 22 18"/><line x1="2" y1="18" x2="22" y2="18"/></svg>`;
 
 /** Eye (visibility on) */
 export const ICON_EYE = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>`;

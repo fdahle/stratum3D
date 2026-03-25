@@ -1,5 +1,27 @@
 <template>
-  <div ref="viewerRef" class="viewer-canvas"></div>
+  <div
+    ref="viewerRef"
+    class="viewer-canvas"
+    @dragenter.prevent="onDragEnter"
+    @dragover.prevent="onDragOver"
+    @dragleave="onDragLeave"
+    @drop.prevent="onDrop"
+  >
+    <Transition name="drag-fade">
+      <div v-if="isDragOver" class="drop-overlay">
+        <div class="drop-overlay-content">
+          <div class="drop-icon">
+            <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>
+              <path d="M12 8v8M8 12l4-4 4 4" stroke-width="1.3"/>
+            </svg>
+          </div>
+          <div class="drop-text">Drop files to load</div>
+        </div>
+      </div>
+    </Transition>
+  </div>
 </template>
 
 <script setup>
@@ -7,6 +29,7 @@ import { ref, onMounted, onUnmounted, watch } from 'vue';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import { MTLLoader } from 'three/examples/jsm/loaders/MTLLoader.js';
 import { PLYLoader } from 'three/examples/jsm/loaders/PLYLoader.js';
 import { VertexNormalsHelper } from 'three/examples/jsm/helpers/VertexNormalsHelper.js';
 import { useViewer3DStore } from '@/stores/viewer3D/viewer3dStore';
@@ -33,10 +56,74 @@ const props = defineProps({
   }
 });
 
-const emit = defineEmits(['scene-ready', 'model-loaded', 'loading-error', 'loading-progress', 'parsing-started', 'parsing-progress', 'building-geometry']);
+const emit = defineEmits(['scene-ready', 'model-loaded', 'loading-error', 'loading-progress', 'parsing-started', 'parsing-progress', 'building-geometry', 'unsupported-file', 'suggest-materials']);
 
 const viewerRef = ref(null);
 const fileLoadedCount = ref(0); // Track number of models loaded from files
+const isDragOver = ref(false);
+const pendingObjData = ref(null); // Stores last OBJ-only load so materials can be applied later
+let dragCounter = 0;
+
+const onDragEnter = (event) => {
+  dragCounter++;
+  if (event.dataTransfer?.types?.includes('Files')) {
+    isDragOver.value = true;
+  }
+};
+
+const onDragOver = (event) => {
+  if (event.dataTransfer?.types?.includes('Files')) {
+    event.dataTransfer.dropEffect = 'copy';
+  }
+};
+
+const onDragLeave = () => {
+  dragCounter--;
+  if (dragCounter <= 0) {
+    dragCounter = 0;
+    isDragOver.value = false;
+  }
+};
+
+const onDrop = (event) => {
+  dragCounter = 0;
+  isDragOver.value = false;
+
+  const files = Array.from(event.dataTransfer?.files ?? []);
+  if (files.length === 0) return;
+
+  const objFiles = [];
+  const mtlFiles = [];
+  const imageFiles = [];
+
+  for (const file of files) {
+    const lower = file.name.toLowerCase();
+    if (lower.endsWith('.obj')) {
+      objFiles.push(file);
+    } else if (lower.endsWith('.mtl')) {
+      mtlFiles.push(file);
+    } else if (/\.(jpg|jpeg|png|bmp|gif|webp)$/.test(lower)) {
+      imageFiles.push(file);
+    } else if (lower.endsWith('.ply') || lower.endsWith('.las') || lower.endsWith('.laz')) {
+      loadPointCloudFile(file);
+    } else if (lower.endsWith('.txt') || lower.endsWith('.csv')) {
+      loadCamerasFile(file);
+    } else if (lower.endsWith('.xml')) {
+      loadMarkersFile(file);
+    } else if (lower.endsWith('.tif') || lower.endsWith('.tiff')) {
+      loadDEMFile(file);
+    } else {
+      emit('unsupported-file', { ext: lower.split('.').pop() });
+    }
+  }
+
+  for (const file of objFiles) {
+    // Match MTL by stem name, fall back to first available
+    const stem = file.name.replace(/\.obj$/i, '').toLowerCase();
+    const matchedMtl = mtlFiles.find(m => m.name.replace(/\.mtl$/i, '').toLowerCase() === stem) ?? mtlFiles[0] ?? null;
+    loadUserObjFile(file, matchedMtl, imageFiles);
+  }
+};
 
 const settingsStore = useSettingsStore();
 const { theme } = storeToRefs(settingsStore);
@@ -273,19 +360,6 @@ const loadObjFromText = async (text, modelIndex = 0) => {
     console.log(`Original model size: ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}`);
     console.log(`Original center: ${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)}`);
 
-    // Center the model at its local origin
-    object.position.set(-center.x, -center.y, -center.z);
-    
-    // Position at real-world coordinates
-    if (modelIndex === 0) {
-      object.position.x += props.coordinates.x;
-      object.position.y += props.coordinates.y;
-    } else {
-      // Offset additional models side by side
-      object.position.x += props.coordinates.x + (modelIndex * (size.x + 1000));
-      object.position.y += props.coordinates.y;
-    }
-
     // Add materials
     object.traverse((child) => {
       if (child.isMesh) {
@@ -319,6 +393,104 @@ const loadObjFromText = async (text, modelIndex = 0) => {
   } catch (error) {
     console.error('Error parsing OBJ:', error);
     emit('loading-error', { error: error.message });
+  }
+};
+
+const loadObjWithMaterials = async (objText, mtlFile, imageFiles, modelIndex = 0) => {
+  if (!scene.value || !camera.value || !controls.value) return null;
+
+  try {
+    // Create blob URLs for texture images, keyed by lowercase filename
+    const textureUrls = {};
+    for (const imgFile of imageFiles) {
+      textureUrls[imgFile.name.toLowerCase()] = URL.createObjectURL(imgFile);
+    }
+
+    // LoadingManager that resolves texture filenames to blob URLs
+    const manager = new THREE.LoadingManager();
+    manager.setURLModifier((url) => {
+      const basename = url.split(/[\/\\]/).pop().toLowerCase();
+      return textureUrls[basename] ?? url;
+    });
+
+    // Read and parse the MTL file
+    const mtlText = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = (e) => resolve(e.target.result);
+      r.onerror = () => reject(new Error('Failed to read MTL file'));
+      r.readAsText(mtlFile);
+    });
+    const mtlLoader = new MTLLoader(manager);
+    const materials = mtlLoader.parse(mtlText, '');
+    materials.preload();
+
+    // Parse OBJ with the loaded materials
+    const objLoader = new OBJLoader(manager);
+    objLoader.setMaterials(materials);
+    const object = objLoader.parse(objText);
+
+    // Apply Z-up to Y-up rotation
+    object.rotation.x = -Math.PI / 2;
+
+    // Ensure double-sided rendering for all materials
+    object.traverse((child) => {
+      if (child.isMesh) {
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        mats.forEach(m => { m.side = THREE.DoubleSide; });
+      }
+    });
+
+    const box = new THREE.Box3().setFromObject(object);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    console.log(`Original model size: ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}`);
+    console.log(`Original center: ${center.x.toFixed(2)}, ${center.y.toFixed(2)}, ${center.z.toFixed(2)}`);
+
+    scene.value.add(object);
+    addModel(object);
+
+    if (showWireframe.value) {
+      object.traverse((child) => {
+        if (child.isMesh) {
+          const mats = Array.isArray(child.material) ? child.material : [child.material];
+          mats.forEach(m => { m.wireframe = true; });
+        }
+      });
+    }
+
+    adjustCameraToModel();
+
+    if (showNormals.value) {
+      updateNormalsHelpers(true);
+    }
+
+    console.log(`OBJ ${modelIndex + 1} loaded with materials successfully`);
+
+    // Free blob URLs
+    for (const url of Object.values(textureUrls)) {
+      URL.revokeObjectURL(url);
+    }
+
+    return object;
+  } catch (error) {
+    console.error('Error loading OBJ with materials:', error);
+    emit('loading-error', { error: error.message });
+    return null;
+  }
+};
+
+const reloadWithMaterials = async (mtlFile, imageFiles) => {
+  if (!pendingObjData.value) return;
+  const { text, file, modelIndex, objectId } = pendingObjData.value;
+  pendingObjData.value = null;
+  // Remove the unshaded object from the scene (disposes geometry/materials)
+  removeLayer(objectId);
+  // Re-load with materials
+  const object = await loadObjWithMaterials(text, mtlFile, imageFiles, modelIndex);
+  if (object && !loadingCancelled.value) {
+    object.name = file.name.replace(/\.[^.]+$/, '');
+    object.userData.type = 'model';
+    emit('model-loaded', { url: file.name, index: modelIndex, object });
   }
 };
 
@@ -511,7 +683,7 @@ const adjustCameraToModel = () => {
   console.log(`Scene helpers updated — extent: ${modelSize.x.toFixed(2)} x ${modelSize.y.toFixed(2)} x ${modelSize.z.toFixed(2)}`);
 };
 
-const loadUserObjFile = async (file) => {
+const loadUserObjFile = async (file, mtlFile = null, imageFiles = []) => {
   loadingCancelled.value = false;
   const reader = new FileReader();
   activeReaders.add(reader);
@@ -540,10 +712,19 @@ const loadUserObjFile = async (file) => {
     if (loadingCancelled.value) return;
     emit('parsing-started', { url: file.name, index: currentIndex, size: fileSize });
     
-    const object = await loadObjFromText(e.target.result, currentIndex);
+    const object = mtlFile
+      ? await loadObjWithMaterials(e.target.result, mtlFile, imageFiles, currentIndex)
+      : await loadObjFromText(e.target.result, currentIndex);
     
     if (object && !loadingCancelled.value) {
+      object.name = file.name.replace(/\.[^.]+$/, '');
       object.userData.type = 'model';
+      if (!mtlFile) {
+        pendingObjData.value = { text: e.target.result, file, modelIndex: currentIndex, objectId: object.uuid };
+        emit('suggest-materials', { stem: object.name, objectId: object.uuid });
+      } else {
+        pendingObjData.value = null;
+      }
       fileLoadedCount.value++;
       emit('model-loaded', { url: file.name, index: currentIndex, object });
     }
@@ -593,19 +774,40 @@ const loadLASFile = async (file) => {
     loaded: 0, total: fileSize, progress: 0, status: 'reading'
   });
 
+  // Use FileReader so we get granular read-progress events and can abort
   let arrayBuffer;
   try {
-    arrayBuffer = await file.arrayBuffer();
+    arrayBuffer = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      activeReaders.add(reader);
+      reader.onprogress = (e) => {
+        if (e.lengthComputable) {
+          emit('loading-progress', {
+            url: file.name, index: currentIndex,
+            loaded: e.loaded, total: e.total,
+            progress: Math.round((e.loaded / e.total) * 100),
+            status: 'reading'
+          });
+        }
+      };
+      reader.onload  = (e) => { activeReaders.delete(reader); resolve(e.target.result); };
+      reader.onabort = ()  => { activeReaders.delete(reader); reject(new Error('cancelled')); };
+      reader.onerror = ()  => { activeReaders.delete(reader); reject(new Error('Failed to read file')); };
+      reader.readAsArrayBuffer(file);
+    });
   } catch (e) {
-    emit('loading-error', { url: file.name, error: 'Failed to read file' });
+    if (e.message !== 'cancelled') {
+      emit('loading-error', { url: file.name, error: e.message || 'Failed to read file' });
+    }
     return;
   }
 
   if (loadingCancelled.value) return;
 
+  // Transition to parsing phase — reset progress to 0
   emit('loading-progress', {
     url: file.name, index: currentIndex,
-    loaded: fileSize, total: fileSize, progress: 100, status: 'parsing'
+    loaded: 0, total: fileSize, progress: 0, status: 'parsing'
   });
 
   try {
@@ -633,10 +835,6 @@ const loadLASFile = async (file) => {
     let pointBytes;
     const isLaz = file.name.toLowerCase().endsWith('.laz');
     if (isLaz) {
-      emit('loading-progress', {
-        url: file.name, index: currentIndex,
-        loaded: fileSize, total: fileSize, progress: 0, status: 'parsing'
-      });
       // Pass our lazPerf instance so copc uses the correctly located WASM
       pointBytes = await Las.PointData.decompressFile(new Uint8Array(arrayBuffer), lazPerf);
     } else {
@@ -665,26 +863,35 @@ const loadLASFile = async (file) => {
     const positions = new Float32Array(pointCount * 3);
     const colors = new Float32Array(pointCount * 3);
 
-    for (let i = 0; i < pointCount; i++) {
-      if (i % 100000 === 0 && loadingCancelled.value) return;
-      // copc's getter already applies scale+offset (Scale.unapply = v*scale+offset),
-      // so getX/Y/Z return absolute world coordinates directly.
-      const x = getX(i);
-      const y = getY(i);
-      const z = getZ(i);
-      positions[i * 3]     = x;
-      positions[i * 3 + 1] = y;
-      positions[i * 3 + 2] = z;
-
-      if (hasColor) {
-        // LAS stores colors as 16-bit; normalize to [0,1]
-        colors[i * 3]     = getR(i) / 65535;
-        colors[i * 3 + 1] = getG(i) / 65535;
-        colors[i * 3 + 2] = getB(i) / 65535;
-      } else {
-        colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = 0.7;
+    // Process in async chunks: allows UI progress updates and Stop button to work
+    const CHUNK = 200_000;
+    for (let start = 0; start < pointCount; start += CHUNK) {
+      if (loadingCancelled.value) return;
+      const end = Math.min(start + CHUNK, pointCount);
+      for (let i = start; i < end; i++) {
+        // copc's getter already applies scale+offset
+        positions[i * 3]     = getX(i);
+        positions[i * 3 + 1] = getY(i);
+        positions[i * 3 + 2] = getZ(i);
+        if (hasColor) {
+          // LAS stores colors as 16-bit; normalize to [0,1]
+          colors[i * 3]     = getR(i) / 65535;
+          colors[i * 3 + 1] = getG(i) / 65535;
+          colors[i * 3 + 2] = getB(i) / 65535;
+        } else {
+          colors[i * 3] = colors[i * 3 + 1] = colors[i * 3 + 2] = 0.7;
+        }
       }
+      // Emit progress and yield to browser so the UI can repaint and events fire
+      emit('loading-progress', {
+        url: file.name, index: currentIndex,
+        loaded: end, total: pointCount,
+        progress: Math.round((end / pointCount) * 100),
+        status: 'parsing'
+      });
+      await new Promise(resolve => setTimeout(resolve, 0));
     }
+    if (loadingCancelled.value) return;
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -700,6 +907,7 @@ const loadLASFile = async (file) => {
     pointCloud.rotation.x = -Math.PI / 2;
     pointCloud.userData.type = 'pointcloud';
 
+    if (loadingCancelled.value) return;
     scene.value.add(pointCloud);
 
     // Fit camera / update helpers for the whole scene
@@ -710,9 +918,178 @@ const loadLASFile = async (file) => {
     emit('model-loaded', { url: file.name, index: currentIndex, object: pointCloud });
 
   } catch (error) {
-    console.error('LAS/LAZ loading error:', error);
-    emit('loading-error', { url: file.name, error: error.message });
+    if (error.message !== 'cancelled') {
+      console.error('LAS/LAZ loading error:', error);
+      emit('loading-error', { url: file.name, error: error.message });
+    }
   }
+};
+
+// ---------------------------------------------------------------------------
+// DEM (single-band GeoTIFF) → 2.5D terrain mesh
+// ---------------------------------------------------------------------------
+
+const loadDEMFile = async (file) => {
+  loadingCancelled.value = false;
+  const currentIndex = fileLoadedCount.value;
+  const fileSize = file.size;
+
+  emit('loading-progress', {
+    url: file.name, index: currentIndex,
+    loaded: 0, total: fileSize, progress: 0, status: 'reading',
+  });
+
+  try {
+    const { fromBlob } = await import('geotiff');
+    const tiff = await fromBlob(file);
+    const image = await tiff.getImage();
+
+    const width = image.getWidth();
+    const height = image.getHeight();
+    const samplesPerPixel = image.getSamplesPerPixel();
+
+    if (samplesPerPixel !== 1) {
+      emit('loading-error', {
+        url: file.name,
+        error: `Expected a single-band DEM — this file has ${samplesPerPixel} bands.`,
+      });
+      return;
+    }
+
+    if (loadingCancelled.value) return;
+
+    emit('loading-progress', {
+      url: file.name, index: currentIndex,
+      loaded: fileSize, total: fileSize, progress: 40, status: 'parsing',
+    });
+
+    // Cap grid to 512×512 for real-time performance
+    const MAX_GRID = 512;
+    const scaleFactor = Math.min(1, MAX_GRID / Math.max(width, height));
+    const gridW = Math.max(2, Math.round(width * scaleFactor));
+    const gridH = Math.max(2, Math.round(height * scaleFactor));
+
+    // Read (and optionally downsample) the single elevation band
+    const [elevations] = await image.readRasters({
+      width: gridW,
+      height: gridH,
+      resampleMethod: 'nearest',
+    });
+
+    if (loadingCancelled.value) return;
+
+    emit('loading-progress', {
+      url: file.name, index: currentIndex,
+      loaded: fileSize, total: fileSize, progress: 70, status: 'parsing',
+    });
+
+    // Nodata handling
+    const nodataRaw = image.getGDALNoData();
+    const nodata = nodataRaw !== null && nodataRaw !== undefined ? parseFloat(nodataRaw) : null;
+    const isNodata = (v) =>
+      nodata !== null && Math.abs(v - nodata) <= Math.max(0.5, Math.abs(nodata) * 1e-6);
+
+    // Find elevation range (skip nodata / non-finite values)
+    let minElev = Infinity, maxElev = -Infinity;
+    for (let i = 0; i < elevations.length; i++) {
+      const v = elevations[i];
+      if (!isFinite(v) || isNodata(v)) continue;
+      if (v < minElev) minElev = v;
+      if (v > maxElev) maxElev = v;
+    }
+
+    if (!isFinite(minElev)) {
+      emit('loading-error', { url: file.name, error: 'DEM contains no valid elevation values.' });
+      return;
+    }
+
+    emit('loading-progress', {
+      url: file.name, index: currentIndex,
+      loaded: fileSize, total: fileSize, progress: 85, status: 'building',
+    });
+
+    const elevRange = maxElev - minElev || 1;
+
+    // Build a PlaneGeometry in the XY plane and displace vertices along Z by elevation.
+    // After mesh.rotation.x = -Math.PI/2 (Z-up → Y-up), Y becomes the elevation axis.
+    // PlaneGeometry vertex layout: row-major, row 0 = top (+H/2 in Y), col 0 = left (-W/2 in X).
+    const geometry = new THREE.PlaneGeometry(gridW, gridH, gridW - 1, gridH - 1);
+    const positions = geometry.attributes.position;
+
+    for (let row = 0; row < gridH; row++) {
+      for (let col = 0; col < gridW; col++) {
+        const vIdx = row * gridW + col;
+        const elev = elevations[vIdx];
+        positions.setZ(vIdx, isFinite(elev) && !isNodata(elev) ? elev : minElev);
+      }
+    }
+    positions.needsUpdate = true;
+
+    // Hypsometric vertex colors (green → yellow → brown → gray → white)
+    const colorsArr = new Float32Array(positions.count * 3);
+    for (let i = 0; i < positions.count; i++) {
+      const t = Math.max(0, Math.min(1, (positions.getZ(i) - minElev) / elevRange));
+      const { r, g, b } = demElevationColor(t);
+      colorsArr[i * 3]     = r;
+      colorsArr[i * 3 + 1] = g;
+      colorsArr[i * 3 + 2] = b;
+    }
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colorsArr, 3));
+    geometry.computeVertexNormals();
+
+    const material = new THREE.MeshPhongMaterial({
+      vertexColors: true,
+      side: THREE.DoubleSide,
+      shininess: 20,
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.rotation.x = -Math.PI / 2; // Z-up (GIS) → Y-up (Three.js)
+    mesh.name = file.name.replace(/\.[^.]+$/, '');
+    mesh.userData.type = 'dem';
+    mesh.userData.minElev = minElev;
+    mesh.userData.maxElev = maxElev;
+
+    if (loadingCancelled.value) return;
+
+    scene.value.add(mesh);
+    addModel(mesh);
+    adjustCameraToModel();
+    fileLoadedCount.value++;
+    emit('model-loaded', { url: file.name, index: currentIndex, object: mesh });
+
+    console.log(
+      `DEM loaded: ${gridW}×${gridH} grid (source ${width}×${height}), ` +
+      `elevation ${minElev.toFixed(1)}–${maxElev.toFixed(1)} m`
+    );
+  } catch (error) {
+    if (error.message !== 'cancelled') {
+      console.error('DEM loading error:', error);
+      emit('loading-error', { url: file.name, error: error.message });
+    }
+  }
+};
+
+// Hypsometric tint: elevation fraction t ∈ [0,1] → {r,g,b} ∈ [0,1]
+const demElevationColor = (t) => {
+  const stops = [
+    { t: 0.00, r: 0.13, g: 0.55, b: 0.13 }, // forest green
+    { t: 0.30, r: 0.56, g: 0.73, b: 0.25 }, // yellow-green
+    { t: 0.55, r: 0.80, g: 0.70, b: 0.20 }, // sandy yellow
+    { t: 0.75, r: 0.65, g: 0.48, b: 0.28 }, // brown
+    { t: 0.90, r: 0.78, g: 0.78, b: 0.78 }, // light gray
+    { t: 1.00, r: 1.00, g: 1.00, b: 1.00 }, // white peaks
+  ];
+  let lo = stops[0], hi = stops[stops.length - 1];
+  for (let i = 0; i < stops.length - 1; i++) {
+    if (t >= stops[i].t && t <= stops[i + 1].t) { lo = stops[i]; hi = stops[i + 1]; break; }
+  }
+  const f = lo.t === hi.t ? 0 : (t - lo.t) / (hi.t - lo.t);
+  return {
+    r: lo.r + (hi.r - lo.r) * f,
+    g: lo.g + (hi.g - lo.g) * f,
+    b: lo.b + (hi.b - lo.b) * f,
+  };
 };
 
 const loadPLYFile = (file) => {
@@ -783,7 +1160,8 @@ const loadPLYFile = (file) => {
       
       // Set type metadata
       pointCloud.userData.type = 'pointcloud';
-      
+
+      if (loadingCancelled.value) return;
       scene.value.add(pointCloud);
       
       // Fit camera / update helpers for the whole scene
@@ -1949,9 +2327,11 @@ watch(theme, (newTheme) => {
 defineExpose({
   cancelLoading,
   loadUserObjFile,
+  reloadWithMaterials,
   loadMarkersFile,
   loadModelFromUrl,
   loadPointCloudFile,
+  loadDEMFile,
   loadCamerasFile,
   fitCameraToScene,
   toggleLayerVisibility,
@@ -1971,7 +2351,55 @@ defineExpose({
 
 <style scoped>
 .viewer-canvas {
+  position: relative;
   width: 100%;
   height: 100%;
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(30, 100, 200, 0.18);
+  border: 3px dashed #3388ff;
+  border-radius: 4px;
+  z-index: 5000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.drop-overlay-content {
+  text-align: center;
+  color: #1a4fa0;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 12px;
+  padding: 32px 48px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+}
+
+.theme-dark .drop-overlay-content {
+  color: #90c8ff;
+  background: rgba(30, 40, 60, 0.92);
+}
+
+.drop-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.drop-text {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.drag-fade-enter-active,
+.drag-fade-leave-active {
+  transition: opacity 0.15s ease;
+}
+
+.drag-fade-enter-from,
+.drag-fade-leave-to {
+  opacity: 0;
 }
 </style>
