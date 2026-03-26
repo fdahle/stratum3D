@@ -9,28 +9,110 @@
     >
       <ul>
         <li @click="handleCopyCoordinates">📋 Copy Coordinates</li>
+        <li @click="handleInspectPoint">🔍 Inspect Point</li>
       </ul>
     </div>
   </div>
+
+  <!-- Point Inspection Modal -->
+  <Teleport to="body">
+    <div v-if="inspectVisible" class="pi-backdrop" @click.self="inspectVisible = false">
+      <div class="pi-modal">
+        <div class="pi-header">
+          <span class="pi-header-icon">🔍</span>
+          <h3 class="pi-title">Point Inspection</h3>
+          <button class="pi-close" @click="inspectVisible = false">✕</button>
+        </div>
+
+        <div class="pi-coords" v-if="coordinate">
+          X: {{ coordinate[0].toFixed(2) }} &nbsp; Y: {{ coordinate[1].toFixed(2) }}
+        </div>
+
+        <div class="pi-body">
+          <div v-if="isInspecting" class="pi-loading">
+            <span class="pi-spinner"></span> Reading layers…
+          </div>
+
+          <div v-else-if="inspectResults.length === 0" class="pi-empty">
+            No active overlay layers found at this point.
+          </div>
+
+          <div v-else>
+            <div v-for="result in inspectResults" :key="result.layerId" class="pi-layer">
+              <div class="pi-layer-header">
+                <span class="pi-layer-icon">{{ result.type === 'geotiff' ? '🗺️' : '📐' }}</span>
+                <span class="pi-layer-name">{{ result.name }}</span>
+              </div>
+
+              <!-- Raster -->
+              <template v-if="result.type === 'geotiff'">
+                <div v-if="result.noData" class="pi-nodata">NoData pixel</div>
+                <div v-else-if="result.values.length === 0" class="pi-nodata">Outside rendered extent</div>
+                <table v-else class="pi-table">
+                  <tr v-for="(v, i) in result.values" :key="i">
+                    <td class="pi-k">Band {{ i + 1 }}</td>
+                    <td class="pi-v">{{ v }}</td>
+                  </tr>
+                  <tr v-if="result.unit">
+                    <td class="pi-k">Unit</td>
+                    <td class="pi-v">{{ result.unit }}</td>
+                  </tr>
+                </table>
+              </template>
+
+              <!-- Vector -->
+              <template v-else>
+                <div v-if="result.features.length === 0" class="pi-nodata">No features at this point</div>
+                <div v-for="(feat, fi) in result.features" :key="fi" class="pi-feature">
+                  <div v-if="result.features.length > 1" class="pi-feature-idx">Feature {{ fi + 1 }}</div>
+                  <div class="pi-keys">
+                    <span v-for="k in Object.keys(feat)" :key="k" class="pi-key-tag">{{ k }}</span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup>
 import { ref } from "vue";
+import { storeToRefs } from "pinia";
 import { logger } from "../../utils/logger";
+import { useMapStore } from "../../stores/map/mapStore";
+import { useLayerStore } from "../../stores/map/layerStore";
+import { LAYER_STATUS, LAYER_CATEGORY } from "../../constants/layerConstants";
+
+const mapStore = useMapStore();
+const layerStore = useLayerStore();
+const { layers } = storeToRefs(layerStore);
 
 const visible = ref(false);
 const x = ref(0);
 const y = ref(0);
 const coordinate = ref(null);
+const olPixel = ref(null); // [px, py] in map viewport pixels
+
+// Inspection modal state
+const inspectVisible = ref(false);
+const isInspecting = ref(false);
+const inspectResults = ref([]);
 
 const emit = defineEmits(["action"]);
 
 const open = (event, coord) => {
   const mouseEvent = event.originalEvent || event;
-
   x.value = mouseEvent.clientX;
   y.value = mouseEvent.clientY;
   coordinate.value = coord;
+
+  // Store OL pixel for getData / forEachFeatureAtPixel
+  const map = mapStore.getMap();
+  olPixel.value = map ? map.getEventPixel(mouseEvent) : null;
+
   visible.value = true;
 };
 
@@ -38,26 +120,139 @@ const close = () => {
   visible.value = false;
 };
 
+// ---- Copy Coordinates ----
 const handleCopyCoordinates = async () => {
   if (!coordinate.value) return;
-  
   const [coordX, coordY] = coordinate.value;
   const coordText = `${coordX.toFixed(2)}, ${coordY.toFixed(2)}`;
-  
   try {
     await navigator.clipboard.writeText(coordText);
     logger.debug('ContextMenu', 'Coordinates copied:', coordText);
   } catch (err) {
     logger.error('ContextMenu', 'Failed to copy coordinates:', err);
   }
-  
   close();
+};
+
+// ---- Inspect Point ----
+const handleInspectPoint = async () => {
+  close();
+  inspectVisible.value = true;
+  isInspecting.value = true;
+  inspectResults.value = [];
+
+  const map = mapStore.getMap();
+  if (!map || !olPixel.value) {
+    isInspecting.value = false;
+    return;
+  }
+
+  const pixel = olPixel.value;
+  const results = [];
+
+  const overlays = layers.value.filter(
+    l => l.category === LAYER_CATEGORY.OVERLAY &&
+      l.active &&
+      l.status === LAYER_STATUS.READY &&
+      l.layerInstance
+  );
+
+  for (const layer of overlays) {
+    if (layer.type === 'geotiff') {
+      const data = layer.layerInstance.getData(pixel);
+      if (!data || data.length === 0) continue;
+
+      const { dataMin, dataMax, noDataValue, bands } = layer.metadata ?? {};
+      const numBands = typeof bands === 'number' && bands > 0 ? bands : 1;
+      const hasRange = dataMin !== null && dataMin !== undefined &&
+                       dataMax !== null && dataMax !== undefined &&
+                       dataMax > dataMin;
+
+      // With normalize:true OL stores tile data as Uint8Array (0–255):
+      //   stored = clamp(255 * (raw - min) / (max - min), 0, 255)
+      // When nodata is configured OL appends an extra alpha band after the data
+      // bands: data[numBands] === 0 means the pixel is transparent / nodata.
+      const hasAlpha = data.length > numBands;
+      const isNoData = hasAlpha && data[numBands] === 0;
+
+      if (isNoData) {
+        results.push({
+          layerId: layer._layerId,
+          name: layer.name,
+          type: 'geotiff',
+          noData: true,
+          values: [],
+          unit: null,
+        });
+        continue;
+      }
+
+      const values = [];
+      for (let b = 0; b < numBands && b < data.length; b++) {
+        let val = data[b];
+        if (hasRange) {
+          // Undo OL's 0–255 normalisation to recover the real data value.
+          val = (val / 255) * (dataMax - dataMin) + dataMin;
+          values.push(Number.isInteger(val) ? val : parseFloat(val.toPrecision(6)));
+        } else {
+          // No range info available — report as normalised 0–1.
+          values.push(parseFloat((val / 255).toPrecision(4)));
+        }
+      }
+
+      if (values.length === 0) continue;
+
+      results.push({
+        layerId: layer._layerId,
+        name: layer.name,
+        type: 'geotiff',
+        noData: false,
+        values,
+        unit: hasRange ? null : '(normalized 0–1)',
+      });
+
+    } else {
+      // Vector layer
+      const features = [];
+      map.forEachFeatureAtPixel(pixel, (feature, olLayer) => {
+        const belongsHere = olLayer?.get('id') === layer._layerId ||
+                            feature.get('_layerId') === layer._layerId;
+        if (!belongsHere) return;
+
+        const props = { ...feature.getProperties() };
+        delete props.geometry;
+        delete props._layerId;
+        delete props._featureId;
+        if (Object.keys(props).length > 0) features.push(props);
+      });
+
+      // Only show layers that actually have features at this pixel
+      if (features.length === 0) continue;
+
+      results.push({
+        layerId: layer._layerId,
+        name: layer.name,
+        type: layer.type,
+        features,
+      });
+    }
+  }
+
+  inspectResults.value = results;
+  isInspecting.value = false;
+};
+
+const formatValue = (v) => {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
 };
 
 defineExpose({ open, close });
 </script>
 
 <style scoped>
+/* ---- Context Menu ---- */
 .context-menu {
   position: fixed;
   z-index: 9999;
@@ -65,7 +260,7 @@ defineExpose({ open, close });
   border: 1px solid #ccc;
   box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.2);
   border-radius: 4px;
-  min-width: 160px;
+  min-width: 170px;
   font-family: "Segoe UI", sans-serif;
   font-size: 13px;
   color: #333;
@@ -78,14 +273,13 @@ defineExpose({ open, close });
   color: #e0e0e0;
 }
 
-/* This overlay now catches the clicks */
 .overlay {
   position: fixed;
   top: 0;
   left: 0;
   width: 100vw;
   height: 100vh;
-  z-index: 9998; /* Ensures it sits just behind the menu (9999) */
+  z-index: 9998;
   cursor: default;
 }
 
@@ -100,16 +294,224 @@ li {
   cursor: pointer;
   border-bottom: 1px solid #f5f5f5;
 }
+li:last-child { border-bottom: none; }
 
-.theme-dark li {
-  border-bottom: 1px solid #444;
+.theme-dark li { border-bottom: 1px solid #444; }
+.theme-dark li:last-child { border-bottom: none; }
+
+li:hover { background: #f0f0f0; }
+.theme-dark li:hover { background: #3a3a3a; }
+
+/* ---- Inspection Modal ---- */
+.pi-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-li:hover {
-  background: #f0f0f0;
+.pi-modal {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+  width: 420px;
+  max-width: 95vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  font-family: "Segoe UI", sans-serif;
+  overflow: hidden;
 }
 
-.theme-dark li:hover {
+.theme-dark .pi-modal {
+  background: #2a2a2a;
+  color: #e0e0e0;
+}
+
+.pi-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #343a40;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.pi-header-icon { font-size: 16px; }
+
+.pi-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.pi-close {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.7);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.pi-close:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
+.pi-coords {
+  padding: 6px 16px;
+  font-size: 11px;
+  color: #888;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.theme-dark .pi-coords {
+  background: #222;
+  color: #888;
+  border-bottom-color: #444;
+}
+
+.pi-body {
+  overflow-y: auto;
+  padding: 8px 0 12px;
+  flex: 1;
+}
+
+.pi-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 16px;
+  color: #666;
+  font-size: 13px;
+}
+
+.pi-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ccc;
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: pi-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes pi-spin { to { transform: rotate(360deg); } }
+
+.pi-empty {
+  padding: 20px 16px;
+  color: #888;
+  font-size: 13px;
+  text-align: center;
+}
+
+.pi-layer {
+  margin: 0 0 4px;
+}
+
+.pi-layer-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-top: 1px solid #eee;
+}
+
+.theme-dark .pi-layer-header {
+  color: #aaa;
+  border-top-color: #444;
+}
+
+.pi-layer:first-child .pi-layer-header {
+  border-top: none;
+}
+
+.pi-layer-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+  font-size: 13px;
+  color: #333;
+}
+
+.theme-dark .pi-layer-name { color: #ddd; }
+
+.pi-nodata {
+  padding: 4px 16px 6px;
+  font-size: 12px;
+  color: #999;
+  font-style: italic;
+}
+
+.pi-feature-idx {
+  padding: 2px 16px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+}
+
+.pi-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 16px 8px;
+}
+
+.pi-key-tag {
+  display: inline-block;
+  background: #e9ecef;
+  color: #495057;
+  border-radius: 10px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.theme-dark .pi-key-tag {
   background: #3a3a3a;
+  color: #bbb;
 }
+
+.pi-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.pi-table tr:nth-child(even) { background: #f7f8fa; }
+.theme-dark .pi-table tr:nth-child(even) { background: #313131; }
+
+.pi-k {
+  padding: 5px 16px;
+  font-weight: 600;
+  color: #555;
+  white-space: nowrap;
+  width: 38%;
+  vertical-align: top;
+}
+
+.theme-dark .pi-k { color: #aaa; }
+
+.pi-v {
+  padding: 5px 16px 5px 0;
+  color: #222;
+  word-break: break-word;
+}
+
+.theme-dark .pi-v { color: #ddd; }
 </style>

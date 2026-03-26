@@ -2,25 +2,7 @@
   <div
     ref="viewerRef"
     class="viewer-canvas"
-    @dragenter.prevent="onDragEnter"
-    @dragover.prevent="onDragOver"
-    @dragleave="onDragLeave"
-    @drop.prevent="onDrop"
   >
-    <Transition name="drag-fade">
-      <div v-if="isDragOver" class="drop-overlay">
-        <div class="drop-overlay-content">
-          <div class="drop-icon">
-            <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2"/>
-              <path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>
-              <path d="M12 8v8M8 12l4-4 4 4" stroke-width="1.3"/>
-            </svg>
-          </div>
-          <div class="drop-text">Drop files to load</div>
-        </div>
-      </div>
-    </Transition>
   </div>
 </template>
 
@@ -60,37 +42,10 @@ const emit = defineEmits(['scene-ready', 'model-loaded', 'loading-error', 'loadi
 
 const viewerRef = ref(null);
 const fileLoadedCount = ref(0); // Track number of models loaded from files
-const isDragOver = ref(false);
 const pendingObjData = ref(null); // Stores last OBJ-only load so materials can be applied later
-let dragCounter = 0;
 
-const onDragEnter = (event) => {
-  dragCounter++;
-  if (event.dataTransfer?.types?.includes('Files')) {
-    isDragOver.value = true;
-  }
-};
-
-const onDragOver = (event) => {
-  if (event.dataTransfer?.types?.includes('Files')) {
-    event.dataTransfer.dropEffect = 'copy';
-  }
-};
-
-const onDragLeave = () => {
-  dragCounter--;
-  if (dragCounter <= 0) {
-    dragCounter = 0;
-    isDragOver.value = false;
-  }
-};
-
-const onDrop = (event) => {
-  dragCounter = 0;
-  isDragOver.value = false;
-
-  const files = Array.from(event.dataTransfer?.files ?? []);
-  if (files.length === 0) return;
+const processDroppedFiles = (files) => {
+  if (!files || files.length === 0) return;
 
   const objFiles = [];
   const mtlFiles = [];
@@ -115,6 +70,17 @@ const onDrop = (event) => {
     } else {
       emit('unsupported-file', { ext: lower.split('.').pop() });
     }
+  }
+
+  if (objFiles.length === 0) {
+    // Material / texture files without an OBJ — give helpful feedback
+    if (mtlFiles.length > 0 || imageFiles.length > 0) {
+      emit('unsupported-file', {
+        ext: mtlFiles[0]?.name.split('.').pop() ?? imageFiles[0]?.name.split('.').pop(),
+        message: 'Drop an .obj file together with the .mtl / texture files to load a model.',
+      });
+    }
+    return;
   }
 
   for (const file of objFiles) {
@@ -1013,6 +979,29 @@ const loadDEMFile = async (file) => {
       return;
     }
 
+    // Extract georeferencing: bbox = [minX, minY, maxX, maxY] in the file's native CRS
+    const bbox = image.getBoundingBox();
+    const geoKeys = image.getGeoKeys();
+    // GTModelTypeGeoKey: 1 = Projected, 2 = Geographic (degrees)
+    const isGeographic = geoKeys?.GTModelTypeGeoKey === 2;
+    let planeWidth, planeHeight;
+    if (bbox && bbox.length === 4 && isFinite(bbox[0]) && isFinite(bbox[3])) {
+      if (isGeographic) {
+        // Convert degrees → approximate metres using mid-latitude scale
+        const midLat = (bbox[1] + bbox[3]) / 2;
+        planeWidth  = Math.abs(bbox[2] - bbox[0]) * 111320 * Math.cos(midLat * Math.PI / 180);
+        planeHeight = Math.abs(bbox[3] - bbox[1]) * 110540;
+      } else {
+        // Projected CRS — units are already metres
+        planeWidth  = Math.abs(bbox[2] - bbox[0]);
+        planeHeight = Math.abs(bbox[3] - bbox[1]);
+      }
+    } else {
+      // No valid geotransform — fall back to pixel dimensions
+      planeWidth  = width;
+      planeHeight = height;
+    }
+
     if (loadingCancelled.value) return;
 
     emit('loading-progress', {
@@ -1070,7 +1059,9 @@ const loadDEMFile = async (file) => {
     // Build a PlaneGeometry in the XY plane and displace vertices along Z by elevation.
     // After mesh.rotation.x = -Math.PI/2 (Z-up → Y-up), Y becomes the elevation axis.
     // PlaneGeometry vertex layout: row-major, row 0 = top (+H/2 in Y), col 0 = left (-W/2 in X).
-    const geometry = new THREE.PlaneGeometry(gridW, gridH, gridW - 1, gridH - 1);
+    // Use real-world dimensions from the GeoTIFF bounding box so that the XY scale
+    // matches the elevation units (both in metres for projected CRS).
+    const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight, gridW - 1, gridH - 1);
     const positions = geometry.attributes.position;
 
     for (let row = 0; row < gridH; row++) {
@@ -1108,6 +1099,9 @@ const loadDEMFile = async (file) => {
     mesh.userData.maxElev = maxElev;
     mesh.userData.nodata = nodata;        // null if not present
     mesh.userData.verticalExaggeration = 1;
+    mesh.userData.bbox = bbox ?? null;           // [minX, minY, maxX, maxY] in file CRS
+    mesh.userData.planeWidth = planeWidth;
+    mesh.userData.planeHeight = planeHeight;
     // Store raw elevations so vertical exaggeration can be applied without reloading
     mesh.userData.rawElevations = elevations;
     mesh.userData.gridW = gridW;
@@ -1123,7 +1117,9 @@ const loadDEMFile = async (file) => {
 
     console.log(
       `DEM loaded: ${gridW}×${gridH} grid (source ${width}×${height}), ` +
-      `elevation ${minElev.toFixed(1)}–${maxElev.toFixed(1)} m`
+      `real-world size ${planeWidth.toFixed(1)}×${planeHeight.toFixed(1)} m, ` +
+      `elevation ${minElev.toFixed(1)}–${maxElev.toFixed(1)} m` +
+      (bbox ? `, bbox [${bbox.map(v => v.toFixed(2)).join(', ')}]` : ' (no georef)')
     );
   } catch (error) {
     if (error.message !== 'cancelled') {
@@ -2501,6 +2497,7 @@ defineExpose({
   resetToInitialCamera,
   zoomToLayer,
   applyVerticalExaggeration,
+  processDroppedFiles,
 });
 </script>
 
@@ -2511,50 +2508,4 @@ defineExpose({
   height: 100%;
 }
 
-.drop-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(30, 100, 200, 0.18);
-  border: 3px dashed #3388ff;
-  border-radius: 4px;
-  z-index: 5000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-}
-
-.drop-overlay-content {
-  text-align: center;
-  color: #1a4fa0;
-  background: rgba(255, 255, 255, 0.92);
-  border-radius: 12px;
-  padding: 32px 48px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
-}
-
-.theme-dark .drop-overlay-content {
-  color: #90c8ff;
-  background: rgba(30, 40, 60, 0.92);
-}
-
-.drop-icon {
-  font-size: 48px;
-  margin-bottom: 12px;
-}
-
-.drop-text {
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.drag-fade-enter-active,
-.drag-fade-leave-active {
-  transition: opacity 0.15s ease;
-}
-
-.drag-fade-enter-from,
-.drag-fade-leave-to {
-  opacity: 0;
-}
 </style>

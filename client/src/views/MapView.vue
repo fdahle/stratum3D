@@ -13,7 +13,12 @@
       @extended-search="isExtendedSearchOpen = true"
     />
 
-    <div class="content-row">
+    <div
+      class="content-row"
+      @dragover.prevent="handleDragOver"
+      @dragleave="handleDragLeave"
+      @drop.prevent="handleDrop"
+    >
       <button class="menu-toggle" @click="isLayerPanelOpen = !isLayerPanelOpen">
         ☰
       </button>
@@ -36,12 +41,7 @@
         @click="isLayerPanelOpen = false"
       ></div>
 
-      <div
-        class="map-area"
-        @dragover.prevent="handleDragOver"
-        @dragleave="handleDragLeave"
-        @drop.prevent="handleDrop"
-      >
+      <div class="map-area">
       <MapWidget />
       <SearchBar />
       <div
@@ -54,7 +54,19 @@
       <InformationBar v-if="settingsStore.showInfoBar" />
       <AttributePanel />
 
-      <!-- Drag-and-drop overlay -->
+      <!-- Notification toast -->
+      <Transition name="notification">
+        <div
+          v-if="notification"
+          class="drop-notification"
+          :class="'drop-notification--' + notification.type"
+        >
+          {{ notification.message }}
+        </div>
+      </Transition>
+      </div>
+
+      <!-- Drag-and-drop overlay covering the full content row -->
       <div v-if="isDragging" class="drop-overlay">
         <div class="drop-overlay-content">
           <div class="drop-icon">
@@ -66,18 +78,6 @@
           </div>
           <div class="drop-text">Drop file to add layer</div>
         </div>
-      </div>
-
-      <!-- Notification toast -->
-      <Transition name="notification">
-        <div
-          v-if="notification"
-          class="drop-notification"
-          :class="'drop-notification--' + notification.type"
-        >
-          {{ notification.message }}
-        </div>
-      </Transition>
       </div>
     </div>
 
@@ -109,6 +109,7 @@
       @close="closeElevationModal"
       @toggle-draw="onToggleElevationDraw"
       @finish-draw="onFinishElevationDraw"
+      @hover-profile="onElevationHoverProfile"
     />
 
     <CsvColumnPickerModal
@@ -126,6 +127,8 @@
 
 <script setup>
 import { ref, inject, markRaw, onUnmounted } from "vue";
+import Feature from "ol/Feature";
+import { Point } from "ol/geom";
 import Draw from "ol/interaction/Draw";
 import VectorLayer from "ol/layer/Vector";
 import { transform as olTransform, get as getOlProjection } from "ol/proj";
@@ -529,6 +532,8 @@ const elevationProfile = ref(null);
 let elevationDrawInteraction = null;
 let elevationDrawLayer = null;
 let elevationDrawSource = null;
+let elevationDrawGeom = null;
+let elevationHoverFeature = null;
 
 const elevationLineStyle = new Style({
   stroke: new Stroke({ color: '#f59e0b', width: 2, lineDash: [6, 4] }),
@@ -536,6 +541,14 @@ const elevationLineStyle = new Style({
     radius: 4,
     fill: new Fill({ color: '#f59e0b' }),
     stroke: new Stroke({ color: '#fff', width: 1.5 }),
+  }),
+});
+
+const elevationHoverStyle = new Style({
+  image: new CircleStyle({
+    radius: 7,
+    fill: new Fill({ color: '#f59e0b' }),
+    stroke: new Stroke({ color: '#fff', width: 2.5 }),
   }),
 });
 
@@ -550,6 +563,8 @@ const stopElevationDraw = () => {
     elevationDrawLayer = null;
     elevationDrawSource = null;
   }
+  elevationDrawGeom = null;
+  elevationHoverFeature = null;
   isElevationDrawing.value = false;
 };
 
@@ -586,6 +601,8 @@ const onToggleElevationDraw = (layerId, noDataOverride) => {
     elevationDrawLayer = null;
     elevationDrawSource = null;
   }
+  elevationDrawGeom = null;
+  elevationHoverFeature = null;
 
   elevationDrawSource = new VectorSource();
   elevationDrawLayer = markRaw(new VectorLayer({
@@ -602,9 +619,17 @@ const onToggleElevationDraw = (layerId, noDataOverride) => {
     isElevationDrawing.value = false;
 
     const geom = evt.feature.getGeometry();
+    elevationDrawGeom = geom;
     isElevationLoading.value = true;
     try {
       elevationProfile.value = await computeElevationProfile(layerId, geom, noDataOverride);
+      // Create a hidden hover-marker feature on the drawn layer
+      if (elevationDrawSource) {
+        const hoverPt = markRaw(new Feature(new Point([0, 0])));
+        hoverPt.setStyle([]);  // empty = invisible until hover
+        elevationDrawSource.addFeature(hoverPt);
+        elevationHoverFeature = hoverPt;
+      }
     } catch (e) {
       console.error('Elevation profile failed:', e.message);
     } finally {
@@ -620,6 +645,18 @@ const onFinishElevationDraw = () => {
   if (elevationDrawInteraction) {
     elevationDrawInteraction.finishDrawing();
   }
+};
+
+const onElevationHoverProfile = (fraction) => {
+  if (!elevationHoverFeature || !elevationDrawGeom) return;
+  if (fraction === null) {
+    elevationHoverFeature.setStyle([]);
+    return;
+  }
+  const coord = elevationDrawGeom.getCoordinateAt(fraction);
+  if (!coord) return;
+  elevationHoverFeature.getGeometry().setCoordinates(coord);
+  elevationHoverFeature.setStyle(elevationHoverStyle);
 };
 
 const _sampleLinePoints = (coords, numSamples) => {
@@ -856,6 +893,7 @@ const processDroppedFile = async (file) => {
           dataMax: metadata.dataMax,
           extent: metadata.extent,
           tiffProjection: metadata.projection,
+          noDataValue: metadata.noDataValue,
         },
         "overlay",
       );

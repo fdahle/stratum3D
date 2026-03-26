@@ -31,7 +31,13 @@
     />
 
     <!-- Body: Layer panel + Canvas -->
-    <div class="viewer-body">
+    <div
+      class="viewer-body"
+      @dragenter.prevent="onDragEnter"
+      @dragover.prevent="onDragOver"
+      @dragleave="onDragLeave"
+      @drop.prevent="onDrop"
+    >
       <!-- Layer Manager fixed at left -->
       <LayerManager 
         ref="layerManagerRef"
@@ -56,7 +62,7 @@
           @parsing-started="onParsingStarted"
           @parsing-progress="onParsingProgress"
           @building-geometry="onBuildingGeometry"
-          @unsupported-file="({ ext }) => showError(`Unsupported file format: .${ext}`)"
+          @unsupported-file="({ ext, message }) => showError(message ?? `Unsupported file format: .${ext}`)"
           @suggest-materials="onSuggestMaterials"
         />
 
@@ -95,6 +101,22 @@
         </div>
         <input ref="mtlFileInputRef" type="file" multiple accept=".mtl,.jpg,.jpeg,.png,.bmp,.gif,.webp" style="display:none" @change="onMaterialFilePicked" />
       </div>
+
+      <!-- Drag-and-drop overlay covering the full scene area -->
+      <Transition name="drag-fade">
+        <div v-if="isDragOver" class="drop-overlay">
+          <div class="drop-overlay-content">
+            <div class="drop-icon">
+              <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>
+                <path d="M12 8v8M8 12l4-4 4 4" stroke-width="1.3"/>
+              </svg>
+            </div>
+            <div class="drop-text">Drop files to load</div>
+          </div>
+        </div>
+      </Transition>
     </div>
 
     <!-- Measurement Modal -->
@@ -129,6 +151,39 @@ const route = useRoute();
 const canvasRef = ref(null);
 const layerManagerRef = ref(null);
 const selectedLayer3D = ref(null);
+
+// Drag-and-drop state
+const isDragOver = ref(false);
+let dragCounter = 0;
+
+const onDragEnter = (event) => {
+  dragCounter++;
+  if (event.dataTransfer?.types?.includes('Files')) {
+    isDragOver.value = true;
+  }
+};
+
+const onDragOver = (event) => {
+  if (event.dataTransfer?.types?.includes('Files')) {
+    event.dataTransfer.dropEffect = 'copy';
+  }
+};
+
+const onDragLeave = () => {
+  dragCounter--;
+  if (dragCounter <= 0) {
+    dragCounter = 0;
+    isDragOver.value = false;
+  }
+};
+
+const onDrop = (event) => {
+  dragCounter = 0;
+  isDragOver.value = false;
+  const files = Array.from(event.dataTransfer?.files ?? []);
+  if (files.length === 0 || !canvasRef.value) return;
+  canvasRef.value.processDroppedFiles(files);
+};
 const isLoading = ref(false);
 const isStopping = ref(false);
 const loadingProgress = ref(0);
@@ -659,12 +714,60 @@ const handleStopLoading = () => {
   flex: 1;
   display: flex;
   overflow: hidden;
+  position: relative;
 }
 
 .canvas-area {
   flex: 1;
   position: relative;
   overflow: hidden;
+}
+
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(30, 100, 200, 0.18);
+  border: 3px dashed #3388ff;
+  border-radius: 4px;
+  z-index: 5000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.drop-overlay-content {
+  text-align: center;
+  color: #1a4fa0;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 12px;
+  padding: 32px 48px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+}
+
+.theme-dark .drop-overlay-content {
+  color: #90c8ff;
+  background: rgba(30, 40, 60, 0.92);
+}
+
+.drop-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.drop-text {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.drag-fade-enter-active,
+.drag-fade-leave-active {
+  transition: opacity 0.15s ease;
+}
+
+.drag-fade-enter-from,
+.drag-fade-leave-to {
+  opacity: 0;
 }
 
 .loading-overlay {

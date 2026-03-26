@@ -160,6 +160,35 @@
               <!-- Profile line -->
               <path :d="linePath" class="chart-line" />
             </svg>
+
+            <!-- Hover crosshair (vertical line over SVG) -->
+            <div
+              v-if="hoverInfo"
+              class="hover-crosshair"
+              :style="{ left: `${hoverInfo.fraction * 100}%` }"
+            ></div>
+
+            <!-- Hover dot at the elevation value -->
+            <div
+              v-if="hoverInfo && hoverInfo.svgY !== null"
+              class="hover-dot"
+              :style="{ left: `${hoverInfo.fraction * 100}%`, top: `${hoverInfo.svgY / 100 * 90}px` }"
+            ></div>
+
+            <!-- Hover elevation label -->
+            <div
+              v-if="hoverInfo"
+              class="hover-label"
+              :style="{ left: `${hoverInfo.fraction * 100}%` }"
+            >{{ fmtElev(hoverInfo.elevation) }}</div>
+
+            <!-- Transparent mouse-capture overlay (sits over the SVG) -->
+            <div
+              class="chart-hover-overlay"
+              @mousemove="onChartMouseMove"
+              @mouseleave="onChartMouseLeave"
+            ></div>
+
             <div class="x-axis">
               <span>0</span>
               <span>{{ fmtDist(profileData.totalLength / 2) }}</span>
@@ -193,7 +222,7 @@ const props = defineProps({
   isLoading:   { type: Boolean, default: false },
   profileData: { type: Object,  default: null  },
 });
-defineEmits(['close', 'toggle-draw', 'finish-draw']);
+const emit = defineEmits(['close', 'toggle-draw', 'finish-draw', 'hover-profile']);
 
 const layerStore = useLayerStore();
 const { layers } = storeToRefs(layerStore);
@@ -375,6 +404,27 @@ onUnmounted(() => {
   document.removeEventListener('mousemove', onDrag);
   document.removeEventListener('mouseup', stopDrag);
 });
+
+// ── Chart hover ──────────────────────────────────────────────────────────────
+const hoverInfo = ref(null);
+
+const onChartMouseMove = (evt) => {
+  if (!hasData.value) return;
+  const rect = evt.currentTarget.getBoundingClientRect();
+  const fraction = Math.max(0, Math.min(1, (evt.clientX - rect.left) / rect.width));
+  const elevs = props.profileData.elevations;
+  const idx = Math.round(fraction * (elevs.length - 1));
+  const elevation = elevs[idx];
+  const svgY = isFinite(elevation) ? elevToSvgY(elevation) : null;
+  const distance = fraction * props.profileData.totalLength;
+  hoverInfo.value = { fraction, elevation, svgY, distance };
+  emit('hover-profile', fraction);
+};
+
+const onChartMouseLeave = () => {
+  hoverInfo.value = null;
+  emit('hover-profile', null);
+};
 </script>
 
 <style scoped>
@@ -721,6 +771,7 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  position: relative;
 }
 .elevation-svg {
   width: 100%;
@@ -768,4 +819,52 @@ onUnmounted(() => {
   padding: 8px 0;
 }
 .theme-light .empty-state { color: #999; }
+
+/* ── Hover interaction ── */
+.chart-hover-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 90px;
+  cursor: crosshair;
+  z-index: 3;
+}
+.hover-crosshair {
+  position: absolute;
+  width: 1px;
+  top: 0;
+  height: 90px;
+  background: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+  z-index: 4;
+  transform: translateX(-50%);
+}
+.theme-light .hover-crosshair { background: rgba(0, 0, 0, 0.25); }
+.hover-dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--chart-color);
+  border: 2px solid #fff;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 5;
+}
+.hover-label {
+  position: absolute;
+  top: 4px;
+  transform: translateX(-50%);
+  background: var(--chart-color);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 10px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 6;
+  line-height: 1.6;
+}
 </style>

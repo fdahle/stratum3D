@@ -4,22 +4,27 @@
     
     <!-- Map Context Menu -->
     <ContextMenuMap ref="mapContextMenuRef" />
+
+    <!-- Scale bar rendered here so Vue scoped CSS applies cleanly -->
+    <div ref="scalebarRef" class="scalebar-anchor" :style="{ bottom: showInfoBar ? '36px' : '8px' }"></div>
   </div>
 </template>
 
 <script setup>
 import { onMounted, onUnmounted, inject, ref } from "vue";
+import { storeToRefs } from "pinia";
 import "ol/ol.css"; // OpenLayers CSS
 
 import Map from "ol/Map";
 import View from "ol/View";
 import { fromLonLat } from "ol/proj";
-import { defaults as defaultControls } from "ol/control";
+import { defaults as defaultControls, ScaleLine } from "ol/control";
 import { defaults as defaultInteractions } from "ol/interaction";
 
 import { registerCustomProjections } from "../../utils/crs";
 import { useMapStore } from "../../stores/map/mapStore";
 import { useLayerStore } from "../../stores/map/layerStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 import { useLayerManager } from "../../composables/useLayerManager";
 import ContextMenuMap from "../contextMenus/ContextMenuMap.vue";
 
@@ -31,6 +36,9 @@ const layerStore = useLayerStore();
 
 const mapContainer = ref(null);
 const mapContextMenuRef = ref(null);
+const scalebarRef = ref(null);
+const settingsStore = useSettingsStore();
+const { showInfoBar } = storeToRefs(settingsStore);
 let map = null;
 let layerManager = null;
 
@@ -98,6 +106,9 @@ onMounted(async () => {
 
   mapStore.setMap(map);
 
+  // Add scale bar into our own container div so Vue scoped CSS controls it
+  map.addControl(new ScaleLine({ units: 'metric', target: scalebarRef.value }));
+
   // 4. Initialize Manager and load layers
   layerManager = useLayerManager(map);
   // Fill the shared ref so LayerPanel / SearchBar can see the manager
@@ -139,5 +150,37 @@ onUnmounted(() => {
 #map {
   width: 100%;
   height: 100%;
+}
+
+.scalebar-anchor {
+  position: absolute;
+  /* bottom is set reactively via :style to account for the InformationBar */
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 999;
+  pointer-events: none;
+  transition: bottom 0.3s ease;
+}
+
+/* OL renders into scalebar-anchor; reset its default absolute positioning */
+.scalebar-anchor :deep(.ol-scale-line) {
+  position: static;
+  display: inline-block;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 4px 4px 0 0;
+  padding: 2px 4px;
+  left: unset;
+  bottom: unset;
+}
+
+.scalebar-anchor :deep(.ol-scale-line-inner) {
+  color: #fff;
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  border-top: none;
+  font-size: 10px;
+  font-family: "Segoe UI", sans-serif;
+  padding: 1px 5px;
+  white-space: nowrap;
+  text-align: center;
 }
 </style>

@@ -66,7 +66,7 @@ export const CONFIG_SCHEMA = {
     },
     geotiff: {
       required: ["url"],
-      optional: ["bands", "normalize", "overviews", "opacity", "style"],
+      optional: ["bands", "normalize", "overviews", "opacity", "style", "noDataValue"],
     },
   },
 

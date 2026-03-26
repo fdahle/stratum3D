@@ -210,13 +210,17 @@ export function createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId) {
   const dataMin = layerConf.dataMin ?? null;
   const dataMax = layerConf.dataMax ?? null;
   const hasRange = isSingleBand && dataMin !== null && dataMax !== null && dataMax > dataMin;
+  const hasNoData = layerConf.noDataValue !== null && layerConf.noDataValue !== undefined;
 
   let resolvedStyle;
   if (layerConf.style) {
     resolvedStyle = layerConf.style;
   } else if (isSingleBand) {
     // With normalize:true the band arrives already in [0,1] → direct grayscale.
-    resolvedStyle = { color: ['array', ['band', 1], ['band', 1], ['band', 1], 1] };
+    // When nodata is configured OL appends an alpha band (band 2) that is 0 for
+    // nodata pixels and 1 for valid ones — use it so nodata is fully transparent.
+    const alpha = hasNoData ? ['band', 2] : 1;
+    resolvedStyle = { color: ['array', ['band', 1], ['band', 1], ['band', 1], alpha] };
   } else {
     resolvedStyle = undefined;
   }
@@ -232,6 +236,10 @@ export function createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId) {
         // When we know the real data range, tell OL to normalise against it.
         // OL maps [min, max] → [0, 1]; values outside are clamped.
         ...(hasRange ? { min: dataMin, max: dataMax } : {}),
+        // Mask nodata pixels — OL sets their alpha to 0 in the WebGL shader.
+        ...(layerConf.noDataValue !== null && layerConf.noDataValue !== undefined
+          ? { nodata: layerConf.noDataValue }
+          : {}),
       }
     ],
     normalize: layerConf.normalize !== undefined ? layerConf.normalize : true,

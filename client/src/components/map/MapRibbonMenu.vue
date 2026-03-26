@@ -30,8 +30,8 @@
     </div>
 
     <div class="ribbon-content" :class="{ 'ctx-active': activeTab === 'layer' && selectedLayer }">
-      <!-- Layers Tab -->
-      <div v-if="activeTab === 'layers'" class="ribbon-panel">
+      <!-- Main Tab -->
+      <div v-if="activeTab === 'main'" class="ribbon-panel">
         <div class="ribbon-group">
           <div class="ribbon-group-buttons">
             <button class="ribbon-btn" @click="fileInput.click()">
@@ -168,6 +168,24 @@
           <span class="group-label">Navigate</span>
         </div>
 
+        <!-- Opacity -->
+        <div class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <div class="ctx-opacity-control">
+              <span class="ctx-opacity-value">{{ Math.round(layerOpacity * 100) }}%</span>
+              <input
+                type="range"
+                class="ctx-opacity-slider"
+                min="0" max="1" step="0.01"
+                :value="layerOpacity"
+                @input="changeLayerOpacity($event.target.value)"
+                title="Layer opacity"
+              />
+            </div>
+          </div>
+          <span class="group-label">Opacity</span>
+        </div>
+
         <!-- Style – vector layers only -->
         <div v-if="selectedLayer.type !== 'geotiff'" class="ribbon-group">
           <div class="ribbon-group-buttons">
@@ -270,11 +288,11 @@ const mapStore = useMapStore();
 const layerStore = useLayerStore();
 const layerManager = inject('layerManager');
 
-const activeTab = ref('layers');
+const activeTab = ref('main');
 const fileInput = ref(null);
 
 const tabs = [
-  { id: 'layers', label: 'Layers' },
+  { id: 'main',   label: 'Main'   },
   { id: 'view',   label: 'View'   },
   { id: 'tools',  label: 'Tools'  },
 ];
@@ -297,7 +315,7 @@ watch(() => layerStore.selectedLayerId, (newId) => {
   if (newId) {
     activeTab.value = 'layer';
   } else if (activeTab.value === 'layer') {
-    activeTab.value = 'layers';
+    activeTab.value = 'main';
   }
 });
 
@@ -450,6 +468,21 @@ const changeLayerColor = (color) => {
   if (!layer) return;
   layerStore.updateLayerColor(layer._layerId, color);
   layerManager?.value?.applyLayerColor(layer._layerId);
+};
+
+// ---- Opacity ----
+const layerOpacity = ref(1);
+
+watch(selectedLayer, (layer) => {
+  layerOpacity.value = layer?.layerInstance?.getOpacity() ?? 1;
+}, { immediate: true });
+
+const changeLayerOpacity = (val) => {
+  const layer = selectedLayer.value;
+  if (!layer?.layerInstance) return;
+  const num = parseFloat(val);
+  layer.layerInstance.setOpacity(num);
+  layerOpacity.value = num;
 };
 
 const removeSelected = () => {
@@ -839,6 +872,68 @@ const removeSelected = () => {
 /* Danger button for Remove */
 .ribbon-btn--danger {
   color: #dc2626 !important;
+}
+
+/* Opacity slider in ribbon */
+.ctx-opacity-control {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 4px;
+  padding: 2px 2px 0;
+}
+
+.ctx-opacity-value {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #555;
+  min-width: 32px;
+  text-align: center;
+  line-height: 1;
+}
+
+.theme-dark .ctx-opacity-value {
+  color: #aaa;
+}
+
+.ctx-opacity-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 88px;
+  height: 4px;
+  border-radius: 2px;
+  background: #d1d5db;
+  outline: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.theme-dark .ctx-opacity-slider {
+  background: #555;
+}
+
+.ctx-opacity-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+}
+
+.ctx-opacity-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #3b82f6;
+  cursor: pointer;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.25);
 }
 
 .ribbon-btn--danger:hover {
