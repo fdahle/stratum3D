@@ -28,23 +28,23 @@
       <div v-if="activeTab === 'insert'" class="ribbon-panel">
         <div class="ribbon-group">
           <div class="ribbon-group-buttons">
-            <button @click="openFileDialog('model')" class="ribbon-btn">
+            <button @click="openFileDialog('model')" class="ribbon-btn" :disabled="!allowUpload">
               <span class="btn-icon" v-html="ICON_3D_MODEL"></span>
               <span class="btn-label">3D Model</span>
             </button>
-            <button @click="openFileDialog('pointcloud')" class="ribbon-btn">
+            <button @click="openFileDialog('pointcloud')" class="ribbon-btn" :disabled="!allowUpload">
               <span class="btn-icon" v-html="ICON_POINT_CLOUD"></span>
               <span class="btn-label">Point Cloud</span>
             </button>
-            <button @click="openFileDialog('cameras')" class="ribbon-btn">
+            <button @click="openFileDialog('cameras')" class="ribbon-btn" :disabled="!allowUpload">
               <span class="btn-icon" v-html="ICON_CAMERA"></span>
               <span class="btn-label">Cameras</span>
             </button>
-            <button @click="openFileDialog('markers')" class="ribbon-btn">
+            <button @click="openFileDialog('markers')" class="ribbon-btn" :disabled="!allowUpload">
               <span class="btn-icon" v-html="ICON_MARKER_FLAG"></span>
               <span class="btn-label">Markers</span>
             </button>
-            <button @click="openFileDialog('dem')" class="ribbon-btn">
+            <button @click="openFileDialog('dem')" class="ribbon-btn" :disabled="!allowUpload">
               <span class="btn-icon" v-html="ICON_DEM"></span>
               <span class="btn-label">DEM</span>
             </button>
@@ -291,7 +291,7 @@
 </template>
 
 <script setup>
-import { ref, watch, computed } from 'vue';
+import { ref, watch, computed, inject } from 'vue';
 import { useViewer3DStore } from '@/stores/viewer3D/viewer3dStore';
 import { storeToRefs } from 'pinia';
 import {
@@ -371,6 +371,9 @@ const emit = defineEmits([
 const viewer3DStore = useViewer3DStore();
 const { showGrid, showAxes, showWireframe, showBoundingBox, showNormals } = storeToRefs(viewer3DStore);
 const { toggleWireframe, toggleBoundingBox, toggleGrid, toggleAxes, toggleNormals } = viewer3DStore;
+
+const appConfig = inject('config');
+const allowUpload = computed(() => appConfig?.value?.ui?.allow_upload !== false);
 
 const activeTab = ref('insert');
 const modelInput = ref(null);

@@ -109,6 +109,10 @@
               <span v-html="ICON_INFO"></span>
               <span>About</span>
             </button>
+            <button class="btn-secondary" @click="goToAdmin" title="Open Admin Panel">
+              <span v-html="ICON_SETTINGS"></span>
+              <span>Admin</span>
+            </button>
             <button class="btn-primary" @click="$emit('close')">Done</button>
           </footer>
         </div>
@@ -125,6 +129,7 @@
 
 <script setup>
 import { ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { storeToRefs } from "pinia";
 import { useSettingsStore } from "../../stores/settingsStore";
 import Acknowledgments from './Acknowledgments.vue';
@@ -136,13 +141,19 @@ defineProps({
   },
 });
 
-defineEmits(["close"]);
+const emit = defineEmits(["close"]);
 
+const router = useRouter();
 const settingsStore = useSettingsStore();
 const isAcknowledgmentsOpen = ref(false);
 
 const openAcknowledgments = () => {
   isAcknowledgmentsOpen.value = true;
+};
+
+const goToAdmin = () => {
+  emit('close');
+  router.push('/admin');
 };
 
 // Extract State (Must use storeToRefs to keep it reactive!)

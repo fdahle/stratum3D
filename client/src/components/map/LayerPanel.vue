@@ -1175,6 +1175,12 @@ const handleTouchEnd = (event) => {
   opacity: 0;
   cursor: pointer;
   padding: 0; margin: 0;
+  outline: none;
+}
+
+:global(.scp-custom:focus-within) {
+  outline: none;
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
 }
 
 .subcategory-label {

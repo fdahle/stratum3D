@@ -30,7 +30,7 @@
         <template v-else>
         <li @click="emitAction('info')"><span class="menu-icon" v-html="ICON_INFO_SM"></span> Layer Info</li>
         <li @click="emitAction('zoom')"><span class="menu-icon" v-html="ICON_ZOOM"></span> Zoom to Layer</li>
-        <li @click="emitAction('download')">
+        <li @click="allowDownload && emitAction('download')" :class="{ 'menu-item-disabled': !allowDownload }">
           <span class="menu-icon" v-html="ICON_DOWNLOAD"></span> {{ payload?.type === 'geotiff' ? 'Download TIF' : 'Download GeoJSON' }}
         </li>
         <template v-if="payload?.type !== 'geotiff'">
@@ -75,7 +75,7 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { ref, computed, inject } from "vue";
 import { ICON_INFO, EMOJI_ICONS } from "@/constants/icons.js";
 
 // Ribbon-matching icons (defined locally, matching MapRibbonMenu style)
@@ -84,6 +84,9 @@ const ICON_DOWNLOAD = `<svg viewBox="0 0 24 24" width="15" height="15" fill="non
 const ICON_PALETTE = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="8" cy="10" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="10" r="1.2" fill="currentColor" stroke="none"/><circle cx="16" cy="14" r="1.2" fill="currentColor" stroke="none"/><circle cx="8" cy="14" r="1.2" fill="currentColor" stroke="none"/></svg>`;
 const ICON_TRASH_SM = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>`;
 const ICON_INFO_SM = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><circle cx="12" cy="8" r="0.5" fill="currentColor"/></svg>`;
+
+const appConfig = inject('config');
+const allowDownload = computed(() => appConfig?.value?.ui?.allow_download !== false);
 
 const visible = ref(false);
 const x = ref(0);
@@ -197,6 +200,15 @@ li:hover {
 
 .theme-dark li:hover {
   background: #3a3a3a;
+}
+
+.menu-item-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.menu-item-disabled:hover {
+  background: transparent !important;
 }
 
 .separator {

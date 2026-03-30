@@ -545,7 +545,7 @@ const reloadWithMaterials = async (mtlFile, imageFiles) => {
       pendingObjData.value = { text, file, modelIndex, objectId: object.uuid };
       emit('suggest-materials', { stem: object.name, objectId: object.uuid });
     }
-    emit('model-loaded', { url: file.name, index: modelIndex, object });
+    emit('model-loaded', { url: file.name, index: modelIndex, object, isFileDrop: true });
   }
 };
 
@@ -781,7 +781,7 @@ const loadUserObjFile = async (file, mtlFile = null, imageFiles = []) => {
         pendingObjData.value = null;
       }
       fileLoadedCount.value++;
-      emit('model-loaded', { url: file.name, index: currentIndex, object });
+      emit('model-loaded', { url: file.name, index: currentIndex, object, isFileDrop: true });
     }
   };
   
@@ -922,7 +922,7 @@ const loadLASFile = async (file) => {
               console.log(`LAS/LAZ point cloud loaded: ${data.totalPoints.toLocaleString()} points`);
             }
             fileLoadedCount.value++;
-            emit('model-loaded', { url: file.name, index: currentIndex, object: pointCloud });
+            emit('model-loaded', { url: file.name, index: currentIndex, object: pointCloud, isFileDrop: true });
           }
           resolve();
         } else if (data.type === 'error') {
@@ -1113,7 +1113,7 @@ const loadDEMFile = async (file) => {
     addModel(mesh);
     adjustCameraToModel();
     fileLoadedCount.value++;
-    emit('model-loaded', { url: file.name, index: currentIndex, object: mesh });
+    emit('model-loaded', { url: file.name, index: currentIndex, object: mesh, isFileDrop: true });
 
     console.log(
       `DEM loaded: ${gridW}×${gridH} grid (source ${width}×${height}), ` +
@@ -1312,7 +1312,7 @@ const loadPLYFile = (file) => {
 
       console.log(`Point cloud loaded: ${sampledCount.toLocaleString()} points`);
       fileLoadedCount.value++;
-      emit('model-loaded', { url: file.name, index: currentIndex, object: pointCloud });
+      emit('model-loaded', { url: file.name, index: currentIndex, object: pointCloud, isFileDrop: true });
     } catch (error) {
       console.error('PLY loading error:', error);
       emit('loading-error', { url: file.name, error: error.message });
@@ -1396,7 +1396,8 @@ const loadCamerasFile = async (file) => {
         emit('model-loaded', { 
           url: file.name, 
           index: 0, 
-          object: cameraGroup 
+          object: cameraGroup,
+          isFileDrop: true
         });
       } catch (error) {
         console.error('Camera loading error:', error);
@@ -1854,6 +1855,7 @@ const enableMeasurementMode = (mode, callback) => {
 
 const disableMeasurementMode = () => {
   currentMeasurementMode = null;
+  measurementMode.value = null;
   measurementCallback = null;
   currentMeasurementPoints = [];
   clearCurrentMeasurementMarkers();

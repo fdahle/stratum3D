@@ -19,6 +19,7 @@ services:
       - /app/server/node_modules
     environment:
       - NODE_ENV=development
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
     command: node index.js
     networks:
       - hist_map_network

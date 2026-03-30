@@ -27,6 +27,7 @@ import { STRINGS } from "./constants/strings";
 import { useSettingsStore } from "./stores/settingsStore";
 import { logger } from "./utils/logger";
 import { enableDevMode } from "./utils/devTools";
+import { getApiUrl } from "./utils/config";
 
 const appConfig = ref(null);
 const isConfigLoaded = ref(false);
@@ -65,7 +66,7 @@ onMounted(async () => {
   }
   
   try {
-    const res = await fetch("/config.yaml");
+    const res = await fetch(getApiUrl('/config'));
     if (!res.ok) throw new Error(`Config not found: ${res.status}`);
     const txt = await res.text();
     const parsed = yaml.load(txt);

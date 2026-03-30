@@ -34,7 +34,7 @@
       <div v-if="activeTab === 'main'" class="ribbon-panel">
         <div class="ribbon-group">
           <div class="ribbon-group-buttons">
-            <button class="ribbon-btn" @click="fileInput.click()">
+            <button class="ribbon-btn" @click="fileInput.click()" :disabled="!allowUpload">
               <span class="btn-icon" v-html="ICON_ADD_LAYER"></span>
               <span class="btn-label">Add Layer</span>
             </button>
@@ -222,6 +222,7 @@
             <button
               class="ribbon-btn"
               @click="downloadLayer"
+              :disabled="!allowDownload"
               :title="selectedLayer.type === 'geotiff' ? 'Download TIF file' : 'Download as GeoJSON'"
             >
               <span class="btn-icon" v-html="ICON_DOWNLOAD"></span>
@@ -287,6 +288,9 @@ const settingsStore = useSettingsStore();
 const mapStore = useMapStore();
 const layerStore = useLayerStore();
 const layerManager = inject('layerManager');
+const appConfig = inject('config');
+const allowDownload = computed(() => appConfig?.value?.ui?.allow_download !== false);
+const allowUpload   = computed(() => appConfig?.value?.ui?.allow_upload   !== false);
 
 const activeTab = ref('main');
 const fileInput = ref(null);
@@ -654,6 +658,23 @@ const removeSelected = () => {
   color: #4a9eff;
 }
 
+.ribbon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ribbon-btn:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.theme-dark .ribbon-btn:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
 .btn-icon {
   display: flex;
   align-items: center;
@@ -792,8 +813,8 @@ const removeSelected = () => {
   width: 44px;
   height: 44px;
   border-radius: 6px;
-  border: 1px solid #ddd;
-  background: #fff;
+  border: 1px solid transparent;
+  background: transparent;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -810,22 +831,23 @@ const removeSelected = () => {
 .ctx-color-custom-btn:focus,
 .ctx-color-custom-btn:focus-within {
   outline: none;
-  border-color: #ddd;
   box-shadow: none;
 }
 
 .ctx-color-custom-btn:hover {
-  background: #f0f0f0;
-  border-color: #aaa;
+  background: #fff;
+  border-color: #ddd;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 .theme-dark .ctx-color-custom-btn {
-  background: #3a3a3a;
-  border-color: #555;
+  background: transparent;
 }
 
 .theme-dark .ctx-color-custom-btn:hover {
-  background: #454545;
+  background: #3a3a3a;
+  border-color: #555;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .ctx-palette-icon {

@@ -63,12 +63,7 @@
               <!-- Vector -->
               <template v-else>
                 <div v-if="result.features.length === 0" class="pi-nodata">No features at this point</div>
-                <div v-for="(feat, fi) in result.features" :key="fi" class="pi-feature">
-                  <div v-if="result.features.length > 1" class="pi-feature-idx">Feature {{ fi + 1 }}</div>
-                  <div class="pi-keys">
-                    <span v-for="k in Object.keys(feat)" :key="k" class="pi-key-tag">{{ k }}</span>
-                  </div>
-                </div>
+                <div v-else class="pi-nodata">{{ result.features.length }} feature{{ result.features.length !== 1 ? 's' : '' }} found</div>
               </template>
             </div>
           </div>

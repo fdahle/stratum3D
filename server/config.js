@@ -28,6 +28,9 @@ export const config = {
   enableHelmet: process.env.ENABLE_HELMET === 'true',
   rateLimitWindow: parseInt(process.env.RATE_LIMIT_WINDOW || '900000', 10), // 15 minutes
   rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
+
+  // Admin
+  adminPassword: process.env.ADMIN_PASSWORD || null,
 };
 
 export const isDevelopment = config.nodeEnv === 'development';

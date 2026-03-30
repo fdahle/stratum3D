@@ -307,7 +307,7 @@ const onBuildingGeometry = ({ index, stage, vertices, faces, triangles }) => {
   }
 };
 
-const onModelLoaded = ({ url, index, object }) => {
+const onModelLoaded = ({ url, index, object, isFileDrop }) => {
   logger.info('3DView', `Model loaded: ${url}${modelUrls.value.length > 0 ? ` (${index + 1}/${modelUrls.value.length})` : ''}`);
   logger.debug('3DView', 'Object:', object, 'LayerManager ref:', layerManagerRef.value);
   
@@ -335,14 +335,22 @@ const onModelLoaded = ({ url, index, object }) => {
     logger.warn('3DView', 'Could not add to layer manager:', { layerManagerRef: layerManagerRef.value, object });
   }
   
-  // For URL-based loading, hide loading indicator when all models are loaded
-  if (modelUrls.value.length > 0 && index === modelUrls.value.length - 1) {
+  // For file drops, always hide the loading indicator after a brief pause
+  if (isFileDrop) {
+    setTimeout(() => {
+      isLoading.value = false;
+      loadingProgress.value = 0;
+      loadingStatus.value = '';
+      loadingTitle.value = 'Loading...';
+    }, 100);
+  } else if (modelUrls.value.length > 0 && index === modelUrls.value.length - 1) {
+    // URL-based loading: hide when all configured models are loaded
     isLoading.value = false;
     loadingProgress.value = 0;
     loadingStatus.value = '';
     loadingTitle.value = 'Loading...';
   } else if (modelUrls.value.length === 0) {
-    // For file-based loading, hide loading indicator after a brief pause
+    // Fallback for any case without URL models
     setTimeout(() => {
       isLoading.value = false;
       loadingProgress.value = 0;
