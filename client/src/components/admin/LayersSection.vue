@@ -67,6 +67,7 @@
       :is-open="isModalOpen"
       :layer="editingLayer"
       :layer-group="layerGroup"
+      :auth-header="authHeader"
       @save="onModalSave"
       @cancel="isModalOpen = false"
     />
@@ -82,6 +83,7 @@ const props = defineProps({
   description: String,
   layerGroup:  String,  // 'base' | 'overlay'
   layers:      Array,
+  authHeader:  { type: String, default: '' },
 });
 
 const emit = defineEmits(['update:layers']);

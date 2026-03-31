@@ -30,6 +30,20 @@ import ContextMenuMap from "../contextMenus/ContextMenuMap.vue";
 
 const configRef = inject("config");
 const config = configRef.value;
+
+// OSM background tile configs keyed by CRS — injected automatically when config.osm_background is true.
+const _GBIF = {
+  tileSize: 512,
+  crs_options: {
+    extent: [-12367396.2185, -12367396.2185, 12367396.2185, 12367396.2185],
+    resolutions: [67733.469, 33866.734, 16933.367, 8466.684, 4233.342, 2116.671, 1058.335, 529.168, 264.584, 132.292],
+  },
+};
+const OSM_BG_CONFIGS = {
+  'EPSG:3031': { name: 'OSM Bright (Antarctic)', type: 'tile', visible: true, url: 'https://tile.gbif.org/3031/omt/{z}/{x}/{y}@1x.png?style=osm-bright-en', attribution: '© OpenStreetMap contributors, GBIF', ..._GBIF },
+  'EPSG:3575': { name: 'OSM Bright (Arctic)',    type: 'tile', visible: true, url: 'https://tile.gbif.org/3575/omt/{z}/{x}/{y}@1x.png?style=osm-bright-en', attribution: '© OpenStreetMap contributors, GBIF', ..._GBIF },
+  default:     { name: 'OpenStreetMap',           type: 'tile', visible: true, url: 'https://{a-c}.tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors' },
+};
 const layerManagerRef = inject("layerManager");
 const mapStore = useMapStore();
 const layerStore = useLayerStore();
@@ -115,6 +129,12 @@ onMounted(async () => {
   layerManagerRef.value = layerManager;
 
   const promises = [];
+  // Inject pinned OSM background layer (URL auto-selected by CRS) when enabled.
+  if (config.osm_background) {
+    const crsKey = (config.crs || 'EPSG:3857').trim().toUpperCase();
+    const bgConf = OSM_BG_CONFIGS[crsKey] ?? OSM_BG_CONFIGS.default;
+    promises.push(layerManager.processLayer(bgConf, 'background'));
+  }
   if (config.base_layers) {
     promises.push(
       ...config.base_layers.map((l) => layerManager.processLayer(l, "base"))

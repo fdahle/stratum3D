@@ -4,6 +4,7 @@ export const PROGRESS_UPDATE_DEBOUNCE = 50;
 
 // Layer z-indexes
 export const Z_INDEX = {
+  BACKGROUND: -1,
   BASE: 0,
   OVERLAY: 100,
   SELECTION: 999,
@@ -21,6 +22,7 @@ export const LAYER_STATUS = {
 
 // Layer categories
 export const LAYER_CATEGORY = {
+  BACKGROUND: 'background', // pinned OSM/system tile — never shown in layer switcher
   BASE: 'base',
   OVERLAY: 'overlay',
 };

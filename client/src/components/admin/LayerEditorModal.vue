@@ -42,6 +42,38 @@
             <input v-model="draft.url" type="text" placeholder="https://..." />
           </div>
 
+          <!-- Select from uploaded files (overlay only) -->
+          <template v-if="layerGroup === 'overlay'">
+            <details class="collapsible server-file-picker">
+              <summary>Select from uploaded files</summary>
+              <div class="collapsible-body">
+                <template v-if="serverFilesLoading">
+                  <p class="picker-hint">Loading…</p>
+                </template>
+                <template v-else-if="serverFilesError">
+                  <p class="picker-hint picker-error">{{ serverFilesError }}</p>
+                </template>
+                <template v-else-if="pickerFiles.length === 0">
+                  <p class="picker-hint">No {{ draft.type === 'geojson' ? 'GeoJSON' : 'GeoTIFF' }} files found on server.</p>
+                </template>
+                <template v-else>
+                  <p class="picker-hint">Click a file to use its URL:</p>
+                  <ul class="picker-list">
+                    <li
+                      v-for="f in pickerFiles"
+                      :key="f.dataPath"
+                      class="picker-item"
+                      :class="{ 'picker-item-active': draft.url === getApiUrl(f.dataPath) }"
+                      @click="selectServerFile(f)"
+                    >
+                      {{ f.filename }}
+                    </li>
+                  </ul>
+                </template>
+              </div>
+            </details>
+          </template>
+
           <!-- ── tile / wmts / wms fields ─────────────────────── -->
           <template v-if="isBaseType">
             <div class="field-group">
@@ -139,14 +171,14 @@
               <div class="field-group">
                 <label>Badge Color</label>
                 <div class="color-row">
-                  <input v-model="draft.color" type="color" class="color-swatch" />
+                  <input type="color" class="color-swatch" :value="/^#[0-9a-f]{6}$/i.test(draft.color) ? draft.color : '#000000'" @input="draft.color = $event.target.value" />
                   <input v-model="draft.color" type="text" placeholder="#ff0000" />
                 </div>
               </div>
               <div class="field-group">
                 <label>Stroke Color</label>
                 <div class="color-row">
-                  <input v-model="draft.stroke_color" type="color" class="color-swatch" />
+                  <input type="color" class="color-swatch" :value="/^#[0-9a-f]{6}$/i.test(draft.stroke_color) ? draft.stroke_color : '#000000'" @input="draft.stroke_color = $event.target.value" />
                   <input v-model="draft.stroke_color" type="text" placeholder="#ff0000" />
                 </div>
               </div>
@@ -156,10 +188,11 @@
                 <label>Fill Color</label>
                 <div class="color-row">
                   <input
-                    v-model="draft.fill_color"
                     type="color"
                     class="color-swatch"
-                    :disabled="draft.fill_color === 'none'"
+                    :value="/^#[0-9a-f]{6}$/i.test(draft.fill_color) ? draft.fill_color : '#000000'"
+                    :disabled="!draft.fill_color || draft.fill_color === 'none'"
+                    @input="draft.fill_color = $event.target.value"
                   />
                   <input v-model="draft.fill_color" type="text" placeholder="none" />
                 </div>
@@ -240,11 +273,13 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
 import FieldHint from './FieldHint.vue';
+import { getApiUrl } from '../../utils/config';
 
 const props = defineProps({
   isOpen: Boolean,
   layer: Object,       // null → new layer
   layerGroup: String,  // 'base' | 'overlay'
+  authHeader: { type: String, default: '' },
 });
 
 const emit = defineEmits(['save', 'cancel']);
@@ -260,6 +295,48 @@ const allowedTypes = computed(() =>
 
 const isNew = computed(() => !props.layer);
 const isBaseType = computed(() => BASE_TYPES.includes(draft.value.type));
+
+// ── Server file picker (overlay only) ─────────────────────────
+const serverFiles        = ref({ shapes: [], geotiffs: [] });
+const serverFilesLoading = ref(false);
+const serverFilesError   = ref('');
+const serverFilesLoaded  = ref(false);
+
+const pickerFiles = computed(() => {
+  if (draft.value.type === 'geojson')  return serverFiles.value.shapes   ?? [];
+  if (draft.value.type === 'geotiff')  return serverFiles.value.geotiffs ?? [];
+  return [];
+});
+
+async function loadServerFiles() {
+  if (serverFilesLoaded.value || serverFilesLoading.value || !props.authHeader) return;
+  serverFilesLoading.value = true;
+  serverFilesError.value   = '';
+  try {
+    const res = await fetch(getApiUrl('/admin/uploads'), {
+      headers: { Authorization: props.authHeader },
+    });
+    if (!res.ok) {
+      serverFilesError.value = `Could not load files (${res.status})`;
+    } else {
+      serverFiles.value      = await res.json();
+      serverFilesLoaded.value = true;
+    }
+  } catch {
+    serverFilesError.value = 'Network error loading server files.';
+  } finally {
+    serverFilesLoading.value = false;
+  }
+}
+
+function selectServerFile(f) {
+  draft.value.url = getApiUrl(f.dataPath);
+}
+
+// Load server files when modal opens for overlay layers
+watch(() => props.isOpen, (open) => {
+  if (open && props.layerGroup === 'overlay') loadServerFiles();
+});
 
 // ── Draft state ────────────────────────────────────────────────
 function blankDraft() {
@@ -630,4 +707,37 @@ details.collapsible:not([open]) > summary {
 /* transition */
 .fade-enter-active, .fade-leave-active { transition: opacity 0.15s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+/* server file picker */
+.server-file-picker > summary { color: #3b82f6; }
+.picker-hint {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  color: var(--admin-muted, #777);
+}
+.picker-error { color: #ef4444 !important; }
+.picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.picker-item {
+  padding: 0.3rem 0.55rem;
+  font-size: 0.8rem;
+  font-family: "Consolas", monospace;
+  border: 1px solid var(--admin-border, #e0e0e0);
+  border-radius: 4px;
+  cursor: pointer;
+  background: var(--admin-surface, #fff);
+  color: var(--admin-text, #333);
+  transition: background 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.picker-item:hover         { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
+.picker-item-active        { background: rgba(59,130,246,0.1); border-color: #3b82f6; color: #1d4ed8; }
 </style>

@@ -6,7 +6,7 @@
 
         <!-- ── Multi-selection overview ── -->
         <template v-if="isMultiSelect">
-          <div v-if="!settingsStore.showMapRibbon" class="panel-header">
+          <div class="panel-header">
             <h3>{{ selectedFeatures.length }} features selected</h3>
             <button @click="clearSelection" class="close-btn">×</button>
           </div>
@@ -41,7 +41,7 @@
 
         <!-- ── Single feature detail ── -->
         <template v-else>
-          <div v-if="!settingsStore.showMapRibbon" class="panel-header">
+          <div class="panel-header">
             <div class="header-left">
               <button v-if="activeDetailFeature" @click="selectionStore.clearActiveDetail()" class="back-btn" title="Back to selection">‹</button>
               <h3>Feature Details</h3>

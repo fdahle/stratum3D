@@ -104,9 +104,11 @@ export function stampFeatureIds(geojson) {
  * feature.properties._pointcloudUrls so the client can open them.
  */
 export function linkAssetsToFeatures(geojson, modelMap, pointcloudMap) {
-  if (!modelMap.size && !pointcloudMap.size) return { geojson, linkedCount: 0 };
+  if (!modelMap.size && !pointcloudMap.size) return { geojson, linkedCount: 0, linkedAssets: { models: {}, pointclouds: {} } };
 
   let linkedCount = 0;
+  const modelCounts = {};
+  const pointcloudCounts = {};
 
   geojson.features = geojson.features.map((feature) => {
     if (!feature.properties) feature.properties = {};
@@ -120,6 +122,7 @@ export function linkAssetsToFeatures(geojson, modelMap, pointcloudMap) {
       const stemLower = stem.toLowerCase();
       if (propValues.some((v) => v === stemLower || stemLower.includes(v) || v.includes(stemLower))) {
         models.push(url);
+        modelCounts[stem] = (modelCounts[stem] ?? 0) + 1;
       }
     }
     if (models.length) {
@@ -136,6 +139,7 @@ export function linkAssetsToFeatures(geojson, modelMap, pointcloudMap) {
       const stemLower = stem.toLowerCase();
       if (propValues.some((v) => v === stemLower || stemLower.includes(v) || v.includes(stemLower))) {
         clouds.push(url);
+        pointcloudCounts[stem] = (pointcloudCounts[stem] ?? 0) + 1;
       }
     }
     if (clouds.length) {
@@ -149,7 +153,7 @@ export function linkAssetsToFeatures(geojson, modelMap, pointcloudMap) {
     return feature;
   });
 
-  return { geojson, linkedCount };
+  return { geojson, linkedCount, linkedAssets: { models: modelCounts, pointclouds: pointcloudCounts } };
 }
 
 // ── Full pipeline ──────────────────────────────────────────────────────────────

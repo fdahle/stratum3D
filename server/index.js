@@ -22,6 +22,19 @@ const app = express();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// ── Runtime admin password ─────────────────────────────────────
+// Priority: ADMIN_PASSWORD env var  >  data/.credentials file
+const credentialsFilePath = path.join(__dirname, config.dataPath, '.credentials');
+
+let runtimeAdminPassword = config.adminPassword ?? null;
+
+try {
+  const stored = (await fs.readFile(credentialsFilePath, 'utf8').catch(() => null))?.trim();
+  if (stored && !runtimeAdminPassword) runtimeAdminPassword = stored;
+} catch { /* ignore */ }
+
+function getAdminPassword() { return runtimeAdminPassword; }
+
 // CORS configuration
 const corsOptions = {
   origin: (origin, callback) => {
@@ -35,7 +48,7 @@ const corsOptions = {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
 };
 
@@ -65,8 +78,9 @@ const configFilePath = path.join(__dirname, config.dataPath, 'config.yaml');
 
 // Admin authentication middleware (HTTP Basic Auth, timing-safe)
 function requireAdminAuth(req, res, next) {
-  if (!config.adminPassword) {
-    return res.status(503).json({ error: 'Admin access not configured. Set ADMIN_PASSWORD environment variable.' });
+  const pwd = getAdminPassword();
+  if (!pwd) {
+    return res.status(503).json({ error: 'Admin access not configured. Use the setup wizard to set a password.' });
   }
   const auth = req.headers['authorization'];
   if (!auth || !auth.startsWith('Basic ')) {
@@ -76,7 +90,7 @@ function requireAdminAuth(req, res, next) {
   const decoded = Buffer.from(auth.slice(6), 'base64').toString('utf8');
   const colonIndex = decoded.indexOf(':');
   const password = colonIndex >= 0 ? decoded.slice(colonIndex + 1) : '';
-  const expectedBuf = Buffer.from(config.adminPassword);
+  const expectedBuf = Buffer.from(pwd);
   const actualBuf = Buffer.alloc(expectedBuf.length);
   Buffer.from(password).copy(actualBuf);
   if (!crypto.timingSafeEqual(expectedBuf, actualBuf)) {
@@ -84,6 +98,34 @@ function requireAdminAuth(req, res, next) {
   }
   next();
 }
+
+// Setup status — public, tells the client what first-run steps remain
+app.get('/admin/setup-status', async (req, res) => {
+  const hasPassword = !!getAdminPassword();
+  let hasConfig = false;
+  try { await fs.access(configFilePath); hasConfig = true; } catch { /* no config */ }
+  res.json({ hasPassword, hasConfig });
+});
+
+// Set admin password — only usable during initial setup (no password configured yet)
+app.post('/admin/set-password', express.json(), async (req, res) => {
+  if (getAdminPassword()) {
+    return res.status(409).json({ error: 'Admin password is already configured.' });
+  }
+  const { password } = req.body ?? {};
+  if (!password || typeof password !== 'string' || password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+  }
+  try {
+    await fs.writeFile(credentialsFilePath, password, { mode: 0o600 });
+    runtimeAdminPassword = password;
+    logger.info('Admin password set via setup wizard');
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Failed to save credentials:', err.message);
+    res.status(500).json({ error: 'Failed to save password.' });
+  }
+});
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -101,6 +143,9 @@ app.get('/config', async (req, res) => {
     res.setHeader('Content-Type', 'text/yaml; charset=utf-8');
     res.send(yamlText);
   } catch (err) {
+    if (err.code === 'ENOENT') {
+      return res.status(404).json({ error: 'No configuration found. Use the admin panel to create one.' });
+    }
     logger.error('Failed to read config file:', err.message);
     res.status(500).json({ error: 'Failed to read configuration' });
   }
@@ -120,6 +165,19 @@ app.put('/config', requireAdminAuth, express.text({ type: 'text/yaml', limit: '2
     }
     logger.error('Failed to write config file:', err.message);
     res.status(500).json({ error: 'Failed to save configuration' });
+  }
+});
+
+// Delete the app config (admin only) — triggers first-run setup on next visit
+app.delete('/config', requireAdminAuth, async (req, res) => {
+  try {
+    await fs.unlink(configFilePath);
+    logger.info('Config deleted via admin API');
+    res.json({ success: true });
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'No config file to delete.' });
+    logger.error('Failed to delete config file:', err.message);
+    res.status(500).json({ error: 'Failed to delete configuration' });
   }
 });
 
@@ -162,6 +220,67 @@ app.post('/admin/upload', requireAdminAuth, runUploadMiddleware, async (req, res
   }
 });
 
+// Manually assign 3D assets to specific features by feature ID (admin only)
+app.post('/admin/manual-link', requireAdminAuth, async (req, res) => {
+  const { filename, assignments } = req.body ?? {};
+
+  if (!filename || typeof filename !== 'string') {
+    return res.status(400).json({ error: 'filename is required.' });
+  }
+  if (!filename.endsWith('.geojson')) {
+    return res.status(400).json({ error: 'Only .geojson files can be linked.' });
+  }
+  if (!assignments || typeof assignments !== 'object' || Array.isArray(assignments)) {
+    return res.status(400).json({ error: 'assignments must be a plain object.' });
+  }
+
+  // Validate that every asset URL is under an allowed data directory
+  const allowedPrefixes = ['data/3D/', 'data/pointclouds/'];
+  for (const assign of Object.values(assignments)) {
+    for (const url of [...(assign.models ?? []), ...(assign.pointclouds ?? [])]) {
+      if (typeof url !== 'string' || !allowedPrefixes.some(p => url.startsWith(p))) {
+        return res.status(400).json({ error: `Invalid asset URL: ${url}` });
+      }
+      // Prevent path traversal
+      const rel = url.slice('data/'.length);
+      if (rel.includes('..') || rel.includes('//') || path.isAbsolute(rel)) {
+        return res.status(400).json({ error: `Invalid asset URL: ${url}` });
+      }
+    }
+  }
+
+  const safe = path.basename(filename);
+  const filePath = path.join(dataDir, 'shapes', safe);
+
+  let geojson;
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    geojson = JSON.parse(raw);
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'File not found.' });
+    return res.status(400).json({ error: 'Could not parse GeoJSON.' });
+  }
+
+  let linkedCount = 0;
+  geojson.features = geojson.features.map((feature) => {
+    if (!feature.properties) feature.properties = {};
+    const fid = feature.properties._featureId;
+    if (fid && Object.prototype.hasOwnProperty.call(assignments, fid)) {
+      const assign = assignments[fid];
+      feature.properties._model3dUrls   = Array.isArray(assign.models)      ? assign.models      : [];
+      feature.properties._pointcloudUrls = Array.isArray(assign.pointclouds) ? assign.pointclouds : [];
+      if (feature.properties._model3dUrls.length + feature.properties._pointcloudUrls.length > 0) {
+        linkedCount++;
+      }
+    }
+    return feature;
+  });
+
+  await fs.writeFile(filePath, JSON.stringify(geojson), 'utf8');
+  logger.info(`Manual link: ${safe} — ${linkedCount} feature(s) with assets`);
+  res.json({ success: true, filename: safe, linkedCount });
+});
+
 // Re-link a GeoJSON file against currently stored 3D/pointcloud assets (admin only)
 app.post('/admin/relink', requireAdminAuth, async (req, res) => {
   const { filename } = req.body;
@@ -198,6 +317,53 @@ app.get('/admin/uploads', requireAdminAuth, async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete all uploaded data files (admin only) — keeps directory structure intact
+app.delete('/admin/uploads', requireAdminAuth, async (req, res) => {
+  const subdirs = ['shapes', 'geotiffs', '3D', 'pointclouds'];
+  let deleted = 0;
+  for (const sub of subdirs) {
+    const dir = path.join(dataDir, sub);
+    const files = await fs.readdir(dir).catch(() => []);
+    for (const file of files) {
+      if (file.startsWith('.')) continue;
+      await fs.unlink(path.join(dir, file)).catch(() => {});
+      deleted++;
+    }
+  }
+  logger.info(`Admin deleted all uploaded files: ${deleted} file(s) removed`);
+  res.json({ success: true, deleted });
+});
+
+// Delete a single uploaded file (admin only)
+app.delete('/admin/uploads/:category/:filename', requireAdminAuth, async (req, res) => {
+  const CATEGORY_DIRS = { shapes: 'shapes', geotiffs: 'geotiffs', models: '3D', pointclouds: 'pointclouds' };
+  const { category, filename } = req.params;
+
+  const subdir = CATEGORY_DIRS[category];
+  if (!subdir) return res.status(400).json({ error: 'Invalid category.' });
+
+  // Reject filenames containing path separators to prevent traversal
+  if (filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
+    return res.status(400).json({ error: 'Invalid filename.' });
+  }
+
+  const resolved = path.resolve(dataDir, subdir, filename);
+  const allowed  = path.resolve(dataDir, subdir) + path.sep;
+  if (!resolved.startsWith(allowed)) {
+    return res.status(400).json({ error: 'Invalid filename.' });
+  }
+
+  try {
+    await fs.unlink(resolved);
+    logger.info(`Admin deleted file: ${category}/${filename}`);
+    res.json({ success: true, deleted: filename });
+  } catch (err) {
+    if (err.code === 'ENOENT') return res.status(404).json({ error: 'File not found.' });
+    logger.error('Delete file error:', err);
+    res.status(500).json({ error: 'Failed to delete file.' });
   }
 });
 

@@ -2,6 +2,12 @@
   <!-- ── Password Gate ─────────────────────────────────────────── -->
   <div v-if="!isAuthenticated" class="admin-gate">
     <div class="gate-card">
+      <div v-if="isSetupMode" class="setup-welcome-banner">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+        </svg>
+        <span>First-run setup — enter your admin password to configure the map.</span>
+      </div>
       <div class="gate-icon">
         <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
@@ -49,13 +55,18 @@
           Hist Map Admin
         </span>
         <nav class="admin-nav">
-          <a href="/" class="nav-back">← Back to map</a>
-          <button class="btn-signout" @click="logout">Sign out</button>
+          <template v-if="!isSetupMode">
+            <a href="/" class="nav-back">← Back to map</a>
+            <button class="btn-signout" @click="logout">Sign out</button>
+          </template>
         </nav>
       </div>
     </header>
 
     <main class="admin-main">
+      <div v-if="isSetupMode" class="banner banner-setup">
+        🎉 Welcome! Configure your map below, then click <strong>Save Configuration</strong> to launch it.
+      </div>
       <div v-if="loadError" class="banner banner-error">{{ loadError }}</div>
       <div v-if="saveSuccess" class="banner banner-success">Configuration saved successfully.</div>
 
@@ -140,8 +151,11 @@
           <div class="fields-stack">
             <div class="field-group">
               <label>EPSG Code <span class="required">*</span><FieldHint text="Standard CRS identifier. Common values: EPSG:3857 (Web Mercator), EPSG:4326 (WGS84), EPSG:3031 (Antarctic)." /></label>
-              <input v-model="draft.crs" type="text" placeholder="EPSG:3857" />
+              <input v-model="draft.crs" type="text" placeholder="EPSG:3857" @input="crsChangeSaveConfirming = false" @change="onCrsChange" />
               <p v-if="crsWarning" class="field-warn">⚠ {{ crsWarning }}</p>
+              <p v-if="crsChangedWithData" class="field-warn">
+                ⚠ CRS changed from <strong>{{ loadedCrs }}</strong> — server-uploaded data layers were preprocessed for the old CRS. Re-process your data files after saving.
+              </p>
             </div>
             <details class="collapsible">
               <summary>Custom Projection Parameters</summary>
@@ -159,44 +173,172 @@
           </div>
         </section>
 
+        <!-- ── 4a. Map Background ───────────────────────────────── -->
+        <section class="admin-section">
+          <div class="section-header-simple">
+            <h2 class="section-title">Map Background</h2>
+            <p class="section-desc">Pinned OSM tile layer — URL auto-selected by CRS. Independent of the Base Layers list below.</p>
+          </div>
+          <label class="perm-card" :class="{ 'perm-card-on': osmBackground }">
+            <div class="perm-card-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20"/>
+              </svg>
+            </div>
+            <div class="perm-card-body">
+              <span class="perm-card-title">OSM Background</span>
+              <span class="perm-card-desc">{{ osmBgLabel }}</span>
+            </div>
+            <div class="perm-toggle-wrap">
+              <input id="osm-bg-toggle" v-model="osmBackground" type="checkbox" class="perm-toggle-input" />
+              <label for="osm-bg-toggle" class="perm-slider"></label>
+            </div>
+          </label>
+        </section>
+
         <!-- ── 4. Base Layers ─────────────────────────────────── -->
         <LayersSection
           title="Base Layers"
-          description="Background tile layers. Exactly one must be visible at a time."
+          description="Additional base tile layers shown in the map's switcher, rendered above the OSM background."
           layer-group="base"
           :layers="draft.base_layers"
           @update:layers="draft.base_layers = $event"
         />
 
-        <!-- ── 5. Overlay Layers ──────────────────────────────── -->
+        <!-- ── 5. Upload Data ─────────────────────────────────── -->
+        <UploadSection :auth-header="currentAuthHeader" />
+
+        <!-- ── 6. Overlay Layers ──────────────────────────────── -->
         <LayersSection
           title="Overlay Layers"
           description="Data layers (GeoJSON, GeoTIFF) rendered on top of the base map."
           layer-group="overlay"
           :layers="draft.overlay_layers"
+          :auth-header="currentAuthHeader"
           @update:layers="draft.overlay_layers = $event"
         />
 
-        <!-- ── 6. Viewer Permissions ──────────────────────────── -->
+        <!-- ── 7. Viewer Permissions ──────────────────────────── -->
         <section class="admin-section">
           <div class="section-header-simple">
             <h2 class="section-title">Viewer Permissions</h2>
             <p class="section-desc">Control which actions are available to users in the map and 3D viewer.</p>
           </div>
-          <div class="fields-stack">
-            <label class="toggle-row">
-              <input type="checkbox" v-model="draft.ui.allow_download" />
-              Allow layer download (map &amp; 3D viewer)
+          <div class="permissions-grid">
+            <label class="perm-card" :class="{ 'perm-card-on': draft.ui.map_download }">
+              <div class="perm-card-icon">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+              </div>
+              <div class="perm-card-body">
+                <span class="perm-card-title">Map — Download</span>
+                <span class="perm-card-desc">Users can download map data files</span>
+              </div>
+              <div class="perm-toggle-wrap">
+                <input :id="`perm-map-dl`" v-model="draft.ui.map_download" type="checkbox" class="perm-toggle-input" />
+                <label :for="`perm-map-dl`" class="perm-slider"></label>
+              </div>
             </label>
-            <label class="toggle-row">
-              <input type="checkbox" v-model="draft.ui.allow_upload" />
-              Allow file upload (map &amp; 3D viewer)
+
+            <label class="perm-card" :class="{ 'perm-card-on': draft.ui.map_upload }">
+              <div class="perm-card-icon">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+              </div>
+              <div class="perm-card-body">
+                <span class="perm-card-title">Map — Upload</span>
+                <span class="perm-card-desc">Users can drag &amp; drop files onto the map</span>
+              </div>
+              <div class="perm-toggle-wrap">
+                <input :id="`perm-map-ul`" v-model="draft.ui.map_upload" type="checkbox" class="perm-toggle-input" />
+                <label :for="`perm-map-ul`" class="perm-slider"></label>
+              </div>
+            </label>
+
+            <label class="perm-card" :class="{ 'perm-card-on': draft.ui.viewer_download }">
+              <div class="perm-card-icon">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                  <circle cx="19" cy="5" r="3" fill="currentColor" opacity="0.35" stroke="none"/>
+                </svg>
+              </div>
+              <div class="perm-card-body">
+                <span class="perm-card-title">3D Viewer — Download</span>
+                <span class="perm-card-desc">Users can export 3D scene data</span>
+              </div>
+              <div class="perm-toggle-wrap">
+                <input :id="`perm-v-dl`" v-model="draft.ui.viewer_download" type="checkbox" class="perm-toggle-input" />
+                <label :for="`perm-v-dl`" class="perm-slider"></label>
+              </div>
+            </label>
+
+            <label class="perm-card" :class="{ 'perm-card-on': draft.ui.viewer_upload }">
+              <div class="perm-card-icon">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                  <circle cx="19" cy="5" r="3" fill="currentColor" opacity="0.35" stroke="none"/>
+                </svg>
+              </div>
+              <div class="perm-card-body">
+                <span class="perm-card-title">3D Viewer — Upload</span>
+                <span class="perm-card-desc">Users can load 3D files into the viewer</span>
+              </div>
+              <div class="perm-toggle-wrap">
+                <input :id="`perm-v-ul`" v-model="draft.ui.viewer_upload" type="checkbox" class="perm-toggle-input" />
+                <label :for="`perm-v-ul`" class="perm-slider"></label>
+              </div>
             </label>
           </div>
         </section>
 
-        <!-- ── 7. Upload Data ─────────────────────────────────── -->
-        <UploadSection :auth-header="currentAuthHeader" />
+        <!-- ── 8. Danger Zone ────────────────────────────────────── -->
+        <section v-if="!isSetupMode" class="admin-section danger-zone">
+          <div class="section-header-simple">
+            <h2 class="section-title danger-title">Danger Zone</h2>
+            <p class="section-desc">Irreversible actions — use with care.</p>
+          </div>
+          <div class="fields-stack">
+            <div class="danger-row">
+              <div class="danger-row-text">
+                <strong>Reset configuration</strong>
+                <span>Deletes the active config file. The map will show the first-run setup screen until a new configuration is saved.</span>
+              </div>
+              <div v-if="!resetConfirming" class="danger-row-action">
+                <button class="btn-danger" @click="resetConfirming = true">Reset Config…</button>
+              </div>
+              <div v-else class="danger-row-action danger-confirm">
+                <span class="danger-confirm-label">Are you sure?</span>
+                <button class="btn-danger" :disabled="isResetting" @click="resetConfig">
+                  <span v-if="isResetting">Resetting…</span>
+                  <span v-else>Yes, delete it</span>
+                </button>
+                <button class="btn-secondary" @click="resetConfirming = false">Cancel</button>
+              </div>
+            </div>
+
+            <hr class="danger-divider" />
+
+            <div class="danger-row">
+              <div class="danger-row-text">
+                <strong>Delete all uploaded files</strong>
+                <span>Permanently removes all GeoTIFFs, GeoJSON shapes, 3D models and point clouds from the server. Layer URLs referencing these files will break.</span>
+              </div>
+              <div v-if="!deleteFilesConfirming" class="danger-row-action">
+                <button class="btn-danger" @click="deleteFilesConfirming = true">Delete All Files…</button>
+              </div>
+              <div v-else class="danger-row-action danger-confirm">
+                <span class="danger-confirm-label">Are you sure?</span>
+                <button class="btn-danger" :disabled="isDeletingFiles" @click="deleteAllFiles">
+                  <span v-if="isDeletingFiles">Deleting…</span>
+                  <span v-else>Yes, delete all</span>
+                </button>
+                <button class="btn-secondary" @click="deleteFilesConfirming = false">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
 
     </main>
@@ -204,10 +346,39 @@
     <!-- Save bar — outside the scroll region so it's always visible -->
     <div class="save-bar">
       <p v-if="validationError" class="save-error">{{ validationError }}</p>
-      <button class="btn-save" :disabled="isSaving" @click="saveConfig">
-        <span v-if="isSaving">Saving…</span>
-        <span v-else>Save Configuration</span>
-      </button>
+      <template v-if="crsChangeSaveConfirming">
+        <p class="save-error">
+          ⚠ CRS changed from <strong>{{ loadedCrs }}</strong> to <strong>{{ draft.crs }}</strong>. Server-uploaded layers may not display correctly until re-processed. Save anyway?
+        </p>
+        <div class="save-confirm-row">
+          <button class="btn-save btn-save-warn" :disabled="isSaving" @click="saveConfig">
+            <span v-if="isSaving">Saving…</span>
+            <span v-else>Yes, save anyway</span>
+          </button>
+          <button class="btn-secondary" @click="crsChangeSaveConfirming = false">Cancel</button>
+        </div>
+      </template>
+      <template v-else>
+        <button class="btn-yaml" @click="showYamlPanel = true">View YAML</button>
+        <button class="btn-save" :disabled="isSaving" @click="saveConfig">
+          <span v-if="isSaving">Saving…</span>
+          <span v-else>Save Configuration</span>
+        </button>
+      </template>
+    </div>
+
+    <!-- YAML viewer modal -->
+    <div v-if="showYamlPanel" class="yaml-overlay" @click.self="showYamlPanel = false">
+      <div class="yaml-panel">
+        <div class="yaml-panel-header">
+          <span>Current Config (YAML)</span>
+          <div style="display:flex;gap:0.4rem">
+            <button class="btn-secondary" @click="navigator.clipboard.writeText(yamlPanelText)">Copy</button>
+            <button class="btn-secondary" @click="showYamlPanel = false">✕</button>
+          </div>
+        </div>
+        <pre class="yaml-pre">{{ yamlPanelText }}</pre>
+      </div>
     </div>
   </div>
 </template>
@@ -215,6 +386,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
 import yaml from 'js-yaml';
+import { useRoute, useRouter } from 'vue-router';
 import { getApiUrl } from '../utils/config';
 import { validateConfig } from '../constants/configValidation';
 import LayersSection from '../components/admin/LayersSection.vue';
@@ -222,17 +394,31 @@ import FieldHint from '../components/admin/FieldHint.vue';
 import UploadSection from '../components/admin/UploadSection.vue';
 
 // ── State ──────────────────────────────────────────────────────
+const route = useRoute();
+const router = useRouter();
+const isSetupMode = computed(() => route.query.setup === 'true');
 const isAuthenticated  = ref(false);
 const isLoading        = ref(false);
 const isSaving         = ref(false);
+const isResetting           = ref(false);
+const resetConfirming       = ref(false);
+const deleteFilesConfirming = ref(false);
+const isDeletingFiles       = ref(false);
+const backupFiles           = ref(null);
+const backupFilesLoading    = ref(false);
+const backupFilesError      = ref('');
+const isDownloadingAll      = ref(false);
 const password         = ref('');
 const loginError       = ref('');
 const loadError        = ref('');
 const saveSuccess      = ref(false);
 const validationError  = ref('');
 const passwordFieldRef = ref(null);
+const loadedCrs             = ref(null);  // CRS from the last saved config
+const crsChangeSaveConfirming = ref(false); // waiting for user to ack CRS change before saving
 
 const SESSION_KEY = 'admin_auth';
+const osmBackground = ref(true);  // separate from base_layers — MapWidget injects the right tile per CRS
 
 // ── Draft config ───────────────────────────────────────────────
 function blankDraft() {
@@ -243,7 +429,7 @@ function blankDraft() {
     projection_params: { proj_string: '', extent: null },
     base_layers: [],
     overlay_layers: [],
-    ui: { allow_download: true, allow_upload: true },
+    ui: { map_download: true, map_upload: true, viewer_download: true, viewer_upload: true },
   };
 }
 
@@ -273,12 +459,75 @@ const viewWarnings = computed(() => {
   return warnings;
 });
 
+// CRS presets: view settings applied automatically when the user sets a matching EPSG code.
+// The OSM background tile is handled separately (MapWidget picks the right URL per CRS).
+const CRS_VIEW_PRESETS = {
+  'EPSG:3031': { label: 'WGS 84 / Antarctic Polar Stereographic', center: [0, -75], zoom: 3, minZoom: 0, maxZoom: 14 },
+  'EPSG:3575': { label: 'WGS 84 / North Pole LAEA Europe',        center: [0, 85],  zoom: 3, minZoom: 0, maxZoom: 14 },
+  'EPSG:4326': { label: 'WGS 84 (geographic / flat)',             center: [0, 20],  zoom: 3, minZoom: 0, maxZoom: 19 },
+};
+
+const crsPreset = computed(() => {
+  const code = (draft.value.crs || '').trim().toUpperCase();
+  return CRS_VIEW_PRESETS[code] ?? null;
+});
+
+// Human-readable description of the OSM background tile source for the current CRS.
+const osmBgLabel = computed(() => {
+  const crs = (draft.value.crs || 'EPSG:3857').trim().toUpperCase();
+  if (crs === 'EPSG:3031') return 'GBIF OSM Bright — Antarctic Polar (EPSG:3031)';
+  if (crs === 'EPSG:3575') return 'GBIF OSM Bright — Arctic (EPSG:3575)';
+  return 'OpenStreetMap (standard tiles)';
+});
+
+const showYamlPanel = ref(false);
+const yamlPanelText = computed(() => {
+  try { return yaml.dump(buildConfig(), { lineWidth: 120, noRefs: true }); }
+  catch { return '(error generating YAML)'; }
+});
+
+// Called when user commits a CRS value (on blur/enter). Auto-applies the matching
+// view settings so the map is immediately usable.
+function onCrsChange() {
+  crsChangeSaveConfirming.value = false;
+  const preset = crsPreset.value;
+  if (!preset) return;
+  draft.value.view.center  = [...preset.center];
+  draft.value.view.zoom    = preset.zoom;
+  draft.value.view.minZoom = preset.minZoom;
+  draft.value.view.maxZoom = preset.maxZoom;
+  viewExtentStr.value      = '';
+  draft.value.view.extent  = null;
+}
+
 const crsWarning = computed(() => {
   const crs = (draft.value.crs || '').trim();
   if (!crs) return '';
   if (!/^EPSG:\d+$/i.test(crs))
     return 'CRS should be in the format EPSG:XXXX (e.g. EPSG:3857 for Web Mercator).';
   return '';
+});
+
+// True when overlay layers reference server-uploaded files that were preprocessed
+// for a specific CRS, so changing the map CRS would misalign them.
+const hasServerLayers = computed(() =>
+  draft.value.overlay_layers.some(l => l.url?.startsWith(getApiUrl('data/')))
+);
+const crsChangedWithData = computed(() =>
+  loadedCrs.value !== null &&
+  draft.value.crs !== loadedCrs.value &&
+  hasServerLayers.value
+);
+
+// ── Backup file list ───────────────────────────────────────────
+const CATEGORY_LABELS = { shapes: 'GeoJSON Shapes', geotiffs: 'GeoTIFFs', models: '3D Models', pointclouds: 'Point Clouds' };
+const totalFileCount = computed(() => {
+  if (!backupFiles.value) return 0;
+  return Object.values(backupFiles.value).reduce((sum, arr) => sum + arr.length, 0);
+});
+const nonEmptyCategories = computed(() => {
+  if (!backupFiles.value) return {};
+  return Object.fromEntries(Object.entries(backupFiles.value).filter(([, files]) => files.length > 0));
 });
 
 function parseViewExtent() {
@@ -314,11 +563,16 @@ function loadConfigIntoDraft(config) {
     d.projection_params.extent      = config.projection_params.extent      ?? null;
     projExtentStr.value = d.projection_params.extent ? d.projection_params.extent.join(', ') : '';
   }
-  d.base_layers    = config.base_layers    ?? [];
-  d.overlay_layers = config.overlay_layers ?? [];
+  d.base_layers    = config.base_layers    ?? d.base_layers;
+  // Auto-detect migration: if old config has tile layers in base_layers but no explicit
+  // osm_background field, keep osmBackground off so the existing base tiles still render.
+  osmBackground.value = config.osm_background ?? (config.base_layers?.length > 0 ? false : true);
+  d.overlay_layers = config.overlay_layers ?? d.overlay_layers;
   if (config.ui) {
-    d.ui.allow_download = config.ui.allow_download ?? true;
-    d.ui.allow_upload   = config.ui.allow_upload   ?? true;
+    d.ui.map_download    = config.ui.map_download    ?? config.ui.allow_download ?? true;
+    d.ui.map_upload      = config.ui.map_upload      ?? config.ui.allow_upload   ?? true;
+    d.ui.viewer_download = config.ui.viewer_download ?? config.ui.allow_download ?? true;
+    d.ui.viewer_upload   = config.ui.viewer_upload   ?? config.ui.allow_upload   ?? true;
   }
   draft.value = d;
 }
@@ -339,9 +593,15 @@ function buildConfig() {
     out.projection_params = { proj_string: d.projection_params.proj_string };
     if (d.projection_params.extent) out.projection_params.extent = d.projection_params.extent;
   }
+  out.osm_background = osmBackground.value;
   out.base_layers    = d.base_layers;
   out.overlay_layers = d.overlay_layers;
-  out.ui = { allow_download: d.ui.allow_download, allow_upload: d.ui.allow_upload };
+  out.ui = {
+    map_download:    d.ui.map_download,
+    map_upload:      d.ui.map_upload,
+    viewer_download: d.ui.viewer_download,
+    viewer_upload:   d.ui.viewer_upload,
+  };
   return out;
 }
 
@@ -359,6 +619,7 @@ async function fetchConfig(pwd) {
     headers: { Authorization: buildAuthHeader(pwd) },
   });
   if (res.status === 401 || res.status === 403) throw new Error('Invalid password');
+  if (res.status === 404) return null;  // No config yet — fresh install
   if (!res.ok) throw new Error(`Server error: ${res.status}`);
   return yaml.load(await res.text());
 }
@@ -370,9 +631,11 @@ async function attemptLogin() {
   loginError.value = '';
   try {
     const config = await fetchConfig(password.value);
-    loadConfigIntoDraft(config);
+    loadConfigIntoDraft(config ?? {});
+    loadedCrs.value = config ? (config.crs ?? null) : null;
     sessionStorage.setItem(SESSION_KEY, password.value);
     isAuthenticated.value = true;
+    loadBackupFiles();
   } catch (err) {
     loginError.value = err.message;
     password.value   = '';
@@ -386,6 +649,7 @@ async function attemptLogin() {
 function logout() {
   sessionStorage.removeItem(SESSION_KEY);
   isAuthenticated.value = false;
+  osmBackground.value   = true;
   draft.value           = blankDraft();
   password.value        = '';
   loginError.value      = '';
@@ -400,6 +664,12 @@ async function saveConfig() {
     validateConfig(config);
   } catch (err) {
     validationError.value = err.message;
+    crsChangeSaveConfirming.value = false;
+    return;
+  }
+  // If server-hosted layers exist and the CRS changed, require an explicit acknowledgment
+  if (crsChangedWithData.value && !crsChangeSaveConfirming.value) {
+    crsChangeSaveConfirming.value = true;
     return;
   }
   isSaving.value = true;
@@ -416,7 +686,13 @@ async function saveConfig() {
       throw new Error(body.error || `Server error: ${res.status}`);
     }
     saveSuccess.value = true;
+    loadedCrs.value = draft.value.crs;
+    crsChangeSaveConfirming.value = false;
     setTimeout(() => { saveSuccess.value = false; }, 5000);
+    // In setup mode, redirect to the map once config is saved for the first time
+    if (isSetupMode.value) {
+      window.location.href = '/';
+    }
   } catch (err) {
     validationError.value = err.message;
   } finally {
@@ -424,15 +700,140 @@ async function saveConfig() {
   }
 }
 
+// ── Backup ────────────────────────────────────────────────────
+function backupConfig() {
+  const config = buildConfig();
+  const yamlText = yaml.dump(config, { lineWidth: 120, noRefs: true });
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  const a = document.createElement('a');
+  a.href = 'data:text/yaml;charset=utf-8,' + encodeURIComponent(yamlText);
+  a.download = `config-backup-${ts}.yaml`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+// ── Reset ─────────────────────────────────────────────────────
+async function resetConfig() {
+  isResetting.value = true;
+  try {
+    const res = await fetch(getApiUrl('/config'), {
+      method: 'DELETE',
+      headers: { Authorization: buildAuthHeader(getStoredPassword()) },
+    });
+    if (res.status === 401 || res.status === 403) throw new Error('Session expired. Please sign out and sign back in.');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Server error: ${res.status}`);
+    }
+    // Config deleted — clear session so the password gate shows on next visit
+    sessionStorage.removeItem(SESSION_KEY);
+    window.location.href = '/';
+  } catch (err) {
+    validationError.value = err.message;
+    resetConfirming.value = false;
+  } finally {
+    isResetting.value = false;
+  }
+}
+
+// ── Backup file operations ─────────────────────────────────────
+async function loadBackupFiles() {
+  backupFilesLoading.value = true;
+  backupFilesError.value = '';
+  try {
+    const res = await fetch(getApiUrl('/admin/uploads'), {
+      headers: { Authorization: currentAuthHeader.value },
+    });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    backupFiles.value = await res.json();
+  } catch (err) {
+    backupFilesError.value = err.message;
+  } finally {
+    backupFilesLoading.value = false;
+  }
+}
+
+async function downloadFile(file) {
+  try {
+    const res = await fetch(getApiUrl(file.dataPath));
+    if (!res.ok) throw new Error(`${res.status}`);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    // silent — file may have been removed
+  }
+}
+
+async function downloadAllFiles() {
+  isDownloadingAll.value = true;
+  const all = Object.values(backupFiles.value || {}).flat();
+  for (const file of all) {
+    await downloadFile(file);
+    await new Promise(r => setTimeout(r, 300));
+  }
+  isDownloadingAll.value = false;
+}
+
+// ── Delete all files ───────────────────────────────────────────
+async function deleteAllFiles() {
+  isDeletingFiles.value = true;
+  try {
+    const res = await fetch(getApiUrl('/admin/uploads'), {
+      method: 'DELETE',
+      headers: { Authorization: buildAuthHeader(getStoredPassword()) },
+    });
+    if (res.status === 401 || res.status === 403) throw new Error('Session expired. Please sign out and sign back in.');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Server error: ${res.status}`);
+    }
+    deleteFilesConfirming.value = false;
+    await loadBackupFiles();
+  } catch (err) {
+    validationError.value = err.message;
+    deleteFilesConfirming.value = false;
+  } finally {
+    isDeletingFiles.value = false;
+  }
+}
+
 // ── Auto-restore session ───────────────────────────────────────
 onMounted(async () => {
+  // In setup mode, ensure the password-set step has been completed first.
+  // If not, send the user back to the first-run screen at /.
+  if (isSetupMode.value) {
+    try {
+      const res = await fetch(getApiUrl('/admin/setup-status'));
+      if (res.ok) {
+        const s = await res.json();
+        if (!s.hasPassword) { window.location.replace('/'); return; }
+      }
+    } catch { /* ignore — proceed normally */ }
+  }
+
   const stored = getStoredPassword();
   if (!stored) return;
   isLoading.value = true;
   try {
     const config = await fetchConfig(stored);
+    if (config === null) {
+      // No config on server yet — don't restore the session; require a fresh login
+      // so the full setup flow always starts from the password gate until a config is saved.
+      sessionStorage.removeItem(SESSION_KEY);
+      return;
+    }
     loadConfigIntoDraft(config);
+    loadedCrs.value = config.crs ?? null;
     isAuthenticated.value = true;
+    loadBackupFiles();
   } catch {
     sessionStorage.removeItem(SESSION_KEY);
   } finally {
@@ -685,6 +1086,123 @@ onMounted(async () => {
   user-select: none;
 }
 .toggle-row input[type="checkbox"] { cursor: pointer; }
+.toggle-label-text { flex: 1; }
+
+.permissions-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+@media (max-width: 600px) {
+  .permissions-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Permission cards ──────────────────────────────────────── */
+.perm-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--admin-border, #e0e0e0);
+  border-radius: 8px;
+  background: var(--admin-bg, #f9fafb);
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.perm-card:hover {
+  border-color: #93c5fd;
+  background: rgba(59,130,246,0.04);
+}
+.perm-card-on {
+  border-color: rgba(59,130,246,0.45);
+  background: rgba(59,130,246,0.06);
+}
+.perm-card-icon {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  background: var(--admin-surface, #fff);
+  border: 1px solid var(--admin-border, #e0e0e0);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--admin-muted, #777);
+  transition: color 0.15s, border-color 0.15s;
+}
+.perm-card-on .perm-card-icon {
+  color: #3b82f6;
+  border-color: rgba(59,130,246,0.35);
+  background: rgba(59,130,246,0.08);
+}
+.perm-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.perm-card-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--admin-text, #1a1a1a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.perm-card-desc {
+  font-size: 0.73rem;
+  color: var(--admin-muted, #777);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.perm-toggle-wrap {
+  flex-shrink: 0;
+  position: relative;
+  width: 36px;
+  height: 20px;
+}
+.perm-toggle-input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+.perm-slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 20px;
+  background: var(--admin-border, #ccc);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.perm-slider::before {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  left: 3px;
+  top: 3px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  transition: transform 0.2s;
+}
+.perm-toggle-input:checked + .perm-slider { background: #3b82f6; }
+.perm-toggle-input:checked + .perm-slider::before { transform: translateX(16px); }
+.perm-toggle-input:focus-visible + .perm-slider {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* ── Danger zone divider ───────────────────────────────────── */
+.danger-divider {
+  border: none;
+  border-top: 1px solid rgba(239, 68, 68, 0.2);
+  margin: 0.25rem 0;
+}
 
 .field-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
 .field-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
@@ -760,6 +1278,154 @@ details.collapsible:not([open]) > summary {
 }
 .btn-save:hover:not(:disabled) { background: #2563eb; }
 .btn-save:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-save-warn { background: #d97706 !important; }
+.btn-save-warn:hover:not(:disabled) { background: #b45309 !important; }
+.save-confirm-row { display: flex; gap: 0.5rem; align-items: center; }
+
+/* ── Backup section ────────────────────────────────────────── */
+.backup-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.backup-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.88rem;
+}
+.backup-item-info span { color: #888; font-size: 0.82rem; }
+.backup-files-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 0.7rem;
+}
+.backup-files-bar-label {
+  font-size: 0.88rem;
+  font-weight: 600;
+  flex: 1;
+}
+.btn-icon-refresh {
+  display: flex;
+  align-items: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #9ca3af;
+  padding: 3px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+.btn-icon-refresh:hover:not(:disabled) { color: #374151; }
+.btn-icon-refresh:disabled { opacity: 0.4; cursor: default; }
+.backup-msg { font-size: 0.85rem; color: #9ca3af; padding: 2px 0; }
+.backup-msg--err { color: #ef4444; }
+.backup-group { display: flex; flex-direction: column; gap: 3px; }
+.backup-group-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9ca3af;
+  padding: 6px 0 3px;
+}
+.backup-file-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 4px 8px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 5px;
+}
+.backup-file-name {
+  font-size: 0.82rem;
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.btn-dl {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.9rem;
+  background: transparent;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  font-family: "Segoe UI", sans-serif;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn-dl:hover:not(:disabled) { background: #f3f4f6; border-color: #9ca3af; }
+.btn-dl:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-dl--all { align-self: flex-start; }
+.btn-dl--file {
+  padding: 3px 8px;
+  color: #3b82f6;
+  border-color: rgba(59, 130, 246, 0.3);
+}
+.btn-dl--file:hover { background: rgba(59, 130, 246, 0.07); border-color: rgba(59, 130, 246, 0.5); }
+
+/* ── Danger Zone ───────────────────────────────────────────── */
+.danger-zone { border-color: rgba(239, 68, 68, 0.35) !important; }
+.danger-title { color: #ef4444 !important; }
+.danger-row {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+.danger-row-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.88rem;
+}
+.danger-row-text strong { color: inherit; }
+.danger-row-text span { color: #888; font-size: 0.82rem; }
+.danger-row-action { flex-shrink: 0; display: flex; align-items: center; gap: 0.5rem; }
+.danger-confirm { flex-wrap: wrap; }
+.danger-confirm-label { font-size: 0.85rem; color: #ef4444; font-weight: 600; margin-right: 0.25rem; }
+.btn-danger {
+  padding: 0.5rem 1rem;
+  background: transparent;
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-family: "Segoe UI", sans-serif;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  white-space: nowrap;
+}
+.btn-danger:hover:not(:disabled) { background: rgba(239, 68, 68, 0.08); border-color: #ef4444; }
+.btn-danger:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn-secondary {
+  padding: 0.5rem 1rem;
+  background: transparent;
+  color: #555;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-family: "Segoe UI", sans-serif;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-secondary:hover { background: #f3f4f6; }
 
 /* ── Banners ───────────────────────────────────────────────── */
 .banner {
@@ -778,6 +1444,27 @@ details.collapsible:not([open]) > summary {
   border: 1px solid rgba(34, 197, 94, 0.35);
   color: #22c55e;
 }
+.banner-setup {
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  color: #3b82f6;
+}
+
+/* ── Setup welcome banner (gate screen) ───────────────────── */
+.setup-welcome-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #2563eb;
+  border-radius: 8px;
+  padding: 0.65rem 0.9rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  text-align: left;
+}
 
 /* ── Inline warnings ───────────────────────────────────────── */
 .warnings-block {
@@ -793,6 +1480,60 @@ details.collapsible:not([open]) > summary {
   background: rgba(217, 119, 6, 0.09);
   border: 1px solid rgba(217, 119, 6, 0.25);
   border-radius: 4px;
+}
+
+.btn-yaml {
+  flex-shrink: 0;
+  padding: 0.55rem 1.1rem;
+  background: transparent;
+  color: var(--admin-text, #374151);
+  border: 1px solid var(--admin-border, #e0e0e0);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-yaml:hover { background: #f3f4f6; }
+
+.yaml-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.yaml-panel {
+  background: var(--admin-header-bg, #fff);
+  border-radius: 8px;
+  width: min(860px, 94vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+}
+.yaml-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.1rem;
+  border-bottom: 1px solid var(--admin-border, #e0e0e0);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.yaml-pre {
+  flex: 1;
+  overflow: auto;
+  margin: 0;
+  padding: 1rem 1.2rem;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  font-family: 'Fira Code', 'Consolas', monospace;
+  color: var(--admin-text, #374151);
+  background: #f8f9fb;
+  white-space: pre;
 }
 </style>
 

@@ -118,76 +118,174 @@
         <span v-if="existingLoading" class="manage-spin">⟳</span>
       </summary>
 
-      <div v-if="!existingLoaded && !existingLoading" class="manage-empty">
+      <div v-if="!existingLoaded && !existingLoading && !errorMsg" class="manage-empty">
         Expand to load…
       </div>
+      <div v-if="errorMsg && !existingLoaded" class="manage-empty manage-error">⚠ {{ errorMsg }}</div>
 
       <div v-if="existingLoaded" class="manage-grid">
         <!-- GeoJSON files with Re-link -->
         <template v-if="existing.shapes.length">
-          <p class="manage-group-label">
-            GeoJSON shapes
-            <FieldHint text="Re-link scans all 3D models and point clouds currently on the server and embeds matching URLs into the features of this GeoJSON. Run it if you added new 3D/pointcloud files after the original upload." />
-          </p>
-          <div v-for="f in existing.shapes" :key="f.dataPath" class="manage-row">
-            <span class="manage-filename">{{ f.filename }}</span>
+          <div class="manage-group-header">
+            <p class="manage-group-label">GeoJSON shapes</p>
+            <button
+              v-if="existing.shapes.length > 1"
+              class="btn-manage btn-relink btn-relink-all"
+              :disabled="existing.shapes.some(f => relinkPending[f.filename])"
+              title="Auto-assign 3D assets to ALL GeoJSON files at once"
+              @click="relinkAll"
+            >
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" style="margin-right:3px;flex-shrink:0">
+                <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>
+              </svg>
+              Assign 3D — all
+            </button>
+          </div>
+          <div v-for="f in existing.shapes" :key="f.dataPath" class="manage-row-wrap">
+            <div class="manage-row">
+            <div class="manage-file-info">
+              <span class="manage-filename">{{ f.filename }}</span>
+            </div>
             <div class="manage-row-actions">
               <button
-                class="btn-relink"
-                :class="{ success: relinkResults[f.filename]?.ok, error: relinkResults[f.filename]?.err }"
+                class="btn-manage btn-link3d"
+                :title="'Manually link 3D models and point clouds to specific features via drag & drop'"
+                @click="openLinkingModal(f.filename)"
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:3px;flex-shrink:0"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+                Link 3D
+              </button>
+              <button
+                class="btn-manage btn-relink"
+                :class="{ 'btn-relink-ok': relinkResults[f.filename]?.ok, 'btn-relink-err': relinkResults[f.filename]?.err }"
                 :disabled="relinkPending[f.filename]"
+                :title="'Auto-assign 3D: scans all 3D models and point clouds on the server and embeds matching URLs into this GeoJSON\'s features. Run after uploading new 3D or point cloud files.'"
                 @click="doRelink(f.filename)"
               >
+                <svg v-if="!relinkPending[f.filename] && !relinkResults[f.filename]" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:3px;flex-shrink:0">
+                  <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>
+                </svg>
                 <span v-if="relinkPending[f.filename]">Linking…</span>
                 <span v-else-if="relinkResults[f.filename]?.ok">✓ {{ relinkResults[f.filename].msg }}</span>
                 <span v-else-if="relinkResults[f.filename]?.err">✗ {{ relinkResults[f.filename].msg }}</span>
-                <span v-else>Re-link</span>
+                <span v-else>Assign 3D</span>
               </button>
-              <a class="btn-copy btn-copy-sm" :href="getApiUrl(f.dataPath)" :download="f.filename" title="Download file">↓</a>
-              <button class="btn-copy btn-copy-sm" :class="{ copied: copiedPath === f.dataPath }" @click="copyUrl(f.dataPath)">
-                {{ copiedPath === f.dataPath ? '✓' : 'URL' }}
+              <a class="btn-manage btn-file-download" :href="getApiUrl(f.dataPath)" :download="f.filename" title="Download file">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:3px;flex-shrink:0"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Download
+              </a>
+              <button class="btn-manage btn-file-copy" :class="{ 'btn-file-copy-ok': copiedPath === f.dataPath }" :title="'Copy URL to clipboard'" @click="copyUrl(f.dataPath)">
+                <svg v-if="copiedPath !== f.dataPath" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:3px;flex-shrink:0"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                {{ copiedPath === f.dataPath ? '✓ Copied' : 'Copy URL' }}
               </button>
+              <button
+                class="btn-manage btn-file-delete"
+                :disabled="deletePending[`shapes/${f.filename}`]"
+                title="Delete file from server"
+                @click="deleteFile('shapes', f.filename)"
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:2px;flex-shrink:0"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                {{ deletePending[`shapes/${f.filename}`] ? 'Deleting…' : 'Delete' }}
+              </button>
+            </div>
+            </div>
+            <div
+              v-if="relinkResults[f.filename]?.ok && relinkResults[f.filename]?.details"
+              class="relink-details"
+            >
+              <template v-if="Object.keys(relinkResults[f.filename].details.models).length || Object.keys(relinkResults[f.filename].details.pointclouds).length">
+                <span
+                  v-for="(count, stem) in relinkResults[f.filename].details.models"
+                  :key="'m-' + stem"
+                  class="relink-detail-tag relink-detail-model"
+                >{{ stem }} <span class="relink-detail-count">{{ count }}</span></span>
+                <span
+                  v-for="(count, stem) in relinkResults[f.filename].details.pointclouds"
+                  :key="'pc-' + stem"
+                  class="relink-detail-tag relink-detail-pc"
+                >{{ stem }} <span class="relink-detail-count">{{ count }}</span></span>
+              </template>
+              <span v-else class="relink-detail-none">No assets matched</span>
             </div>
           </div>
         </template>
 
-        <!-- 3D models (read-only list) -->
+        <!-- 3D models -->
         <template v-if="existing.models?.length">
           <p class="manage-group-label">3D models</p>
           <div v-for="f in existing.models" :key="f.dataPath" class="manage-row">
             <span class="manage-filename">{{ f.filename }}</span>
             <div class="manage-row-actions">
-              <a class="btn-copy btn-copy-sm" :href="getApiUrl(f.dataPath)" :download="f.filename" title="Download file">↓</a>
-              <button class="btn-copy btn-copy-sm" :class="{ copied: copiedPath === f.dataPath }" @click="copyUrl(f.dataPath)">
-                {{ copiedPath === f.dataPath ? '✓' : 'URL' }}
+              <a class="btn-manage btn-file-download" :href="getApiUrl(f.dataPath)" :download="f.filename" title="Download file">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:3px;flex-shrink:0"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Download
+              </a>
+              <button class="btn-manage btn-file-copy" :class="{ 'btn-file-copy-ok': copiedPath === f.dataPath }" :title="'Copy URL to clipboard'" @click="copyUrl(f.dataPath)">
+                <svg v-if="copiedPath !== f.dataPath" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:3px;flex-shrink:0"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                {{ copiedPath === f.dataPath ? '✓ Copied' : 'Copy URL' }}
+              </button>
+              <button
+                class="btn-manage btn-file-delete"
+                :disabled="deletePending[`models/${f.filename}`]"
+                title="Delete file from server"
+                @click="deleteFile('models', f.filename)"
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:2px;flex-shrink:0"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                {{ deletePending[`models/${f.filename}`] ? 'Deleting…' : 'Delete' }}
               </button>
             </div>
           </div>
         </template>
 
-        <!-- Point clouds (read-only list) -->
+        <!-- Point clouds -->
         <template v-if="existing.pointclouds?.length">
           <p class="manage-group-label">Point clouds</p>
           <div v-for="f in existing.pointclouds" :key="f.dataPath" class="manage-row">
             <span class="manage-filename">{{ f.filename }}</span>
             <div class="manage-row-actions">
-              <a class="btn-copy btn-copy-sm" :href="getApiUrl(f.dataPath)" :download="f.filename" title="Download file">↓</a>
-              <button class="btn-copy btn-copy-sm" :class="{ copied: copiedPath === f.dataPath }" @click="copyUrl(f.dataPath)">
-                {{ copiedPath === f.dataPath ? '✓' : 'URL' }}
+              <a class="btn-manage btn-file-download" :href="getApiUrl(f.dataPath)" :download="f.filename" title="Download file">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:3px;flex-shrink:0"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Download
+              </a>
+              <button class="btn-manage btn-file-copy" :class="{ 'btn-file-copy-ok': copiedPath === f.dataPath }" :title="'Copy URL to clipboard'" @click="copyUrl(f.dataPath)">
+                <svg v-if="copiedPath !== f.dataPath" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:3px;flex-shrink:0"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                {{ copiedPath === f.dataPath ? '✓ Copied' : 'Copy URL' }}
+              </button>
+              <button
+                class="btn-manage btn-file-delete"
+                :disabled="deletePending[`pointclouds/${f.filename}`]"
+                title="Delete file from server"
+                @click="deleteFile('pointclouds', f.filename)"
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:2px;flex-shrink:0"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                {{ deletePending[`pointclouds/${f.filename}`] ? 'Deleting…' : 'Delete' }}
               </button>
             </div>
           </div>
         </template>
 
-        <!-- GeoTIFFs (read-only list) -->
+        <!-- GeoTIFFs -->
         <template v-if="existing.geotiffs?.length">
           <p class="manage-group-label">GeoTIFFs</p>
           <div v-for="f in existing.geotiffs" :key="f.dataPath" class="manage-row">
             <span class="manage-filename">{{ f.filename }}</span>
             <div class="manage-row-actions">
-              <a class="btn-copy btn-copy-sm" :href="getApiUrl(f.dataPath)" :download="f.filename" title="Download file">↓</a>
-              <button class="btn-copy btn-copy-sm" :class="{ copied: copiedPath === f.dataPath }" @click="copyUrl(f.dataPath)">
-                {{ copiedPath === f.dataPath ? '✓' : 'URL' }}
+              <a class="btn-manage btn-file-download" :href="getApiUrl(f.dataPath)" :download="f.filename" title="Download file">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:3px;flex-shrink:0"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Download
+              </a>
+              <button class="btn-manage btn-file-copy" :class="{ 'btn-file-copy-ok': copiedPath === f.dataPath }" :title="'Copy URL to clipboard'" @click="copyUrl(f.dataPath)">
+                <svg v-if="copiedPath !== f.dataPath" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:3px;flex-shrink:0"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                {{ copiedPath === f.dataPath ? '✓ Copied' : 'Copy URL' }}
+              </button>
+              <button
+                class="btn-manage btn-file-delete"
+                :disabled="deletePending[`geotiffs/${f.filename}`]"
+                title="Delete file from server"
+                @click="deleteFile('geotiffs', f.filename)"
+              >
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:2px;flex-shrink:0"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/></svg>
+                {{ deletePending[`geotiffs/${f.filename}`] ? 'Deleting…' : 'Delete' }}
               </button>
             </div>
           </div>
@@ -198,16 +296,32 @@
       </div>
     </details>
   </section>
+
+  <!-- Linking modal — rendered outside the section so it isn't constrained by its layout -->
+  <LinkingModal
+    :is-open="linkingModal.open"
+    :filename="linkingModal.filename"
+    :auth-header="authHeader"
+    @close="linkingModal.open = false"
+  />
 </template>
 
 <script setup>
 import { ref } from 'vue';
 import { getApiUrl } from '../../utils/config';
 import FieldHint from './FieldHint.vue';
+import LinkingModal from './LinkingModal.vue';
 
 const props = defineProps({
   authHeader: { type: String, required: true },
 });
+
+// ── Linking modal ──────────────────────────────────────────────────────────────
+const linkingModal = ref({ open: false, filename: '' });
+
+function openLinkingModal(filename) {
+  linkingModal.value = { open: true, filename };
+}
 
 const ALLOWED_EXTS = new Set([
   'geojson', 'json', 'tif', 'tiff',
@@ -239,6 +353,7 @@ const existingLoaded  = ref(false);
 const existingLoading = ref(false);
 const relinkPending   = ref({});  // filename → bool
 const relinkResults   = ref({});  // filename → { ok, err, msg }
+const deletePending   = ref({});  // "category/filename" → bool
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -361,22 +476,30 @@ function doUpload() {
   xhr.send(formData);
 }
 
-// ── Manage / Re-link ──────────────────────────────────────────────────────────
+// Manage / Re-link ──────────────────────────────────────────────────────────────
 
 async function loadExisting() {
   // Only fetch once per open; re-open the <details> will call this again but guard it
   if (existingLoaded.value || existingLoading.value) return;
   existingLoading.value = true;
+  errorMsg.value = '';
   try {
     const res = await fetch(getApiUrl('/admin/uploads'), {
       headers: { Authorization: props.authHeader },
     });
-    if (res.ok) {
+    if (res.status === 503) {
+      errorMsg.value = 'Admin access is not configured on the server.';
+    } else if (!res.ok) {
+      errorMsg.value = `Could not load files: server error ${res.status}.`;
+    } else {
       existing.value = await res.json();
       existingLoaded.value = true;
     }
-  } catch { /* non-fatal */ }
-  finally { existingLoading.value = false; }
+  } catch {
+    errorMsg.value = 'Network error — could not reach the server.';
+  } finally {
+    existingLoading.value = false;
+  }
 }
 
 async function doRelink(filename) {
@@ -397,7 +520,7 @@ async function doRelink(filename) {
       const msg = data.linkedCount
         ? `${data.linkedCount} feature(s) linked`
         : 'No matches found';
-      relinkResults.value = { ...relinkResults.value, [filename]: { ok: true, msg } };
+      relinkResults.value = { ...relinkResults.value, [filename]: { ok: true, msg, details: data.linkedAssets ?? null } };
     } else {
       relinkResults.value = { ...relinkResults.value, [filename]: { err: true, msg: data.error ?? 'Error' } };
     }
@@ -405,6 +528,12 @@ async function doRelink(filename) {
     relinkResults.value = { ...relinkResults.value, [filename]: { err: true, msg: 'Network error' } };
   } finally {
     relinkPending.value = { ...relinkPending.value, [filename]: false };
+  }
+}
+
+async function relinkAll() {
+  for (const f of existing.value.shapes) {
+    await doRelink(f.filename);
   }
 }
 
@@ -416,6 +545,32 @@ async function copyUrl(dataPath) {
     copiedPath.value = dataPath;
     setTimeout(() => { copiedPath.value = ''; }, 2000);
   } catch { /* clipboard may be blocked */ }
+}
+
+// ── Delete file ────────────────────────────────────────────────────────────────
+
+async function deleteFile(category, filename) {
+  const key = `${category}/${filename}`;
+  deletePending.value = { ...deletePending.value, [key]: true };
+  try {
+    const res = await fetch(getApiUrl(`/admin/uploads/${category}/${encodeURIComponent(filename)}`), {
+      method: 'DELETE',
+      headers: { Authorization: props.authHeader },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      alert(body.error ?? `Failed to delete ${filename}`);
+      return;
+    }
+    // Reload file list
+    existingLoaded.value = false;
+    existingLoading.value = false;
+    await loadExisting();
+  } catch {
+    alert(`Network error while deleting ${filename}`);
+  } finally {
+    deletePending.value = { ...deletePending.value, [key]: false };
+  }
 }
 </script>
 
@@ -764,16 +919,37 @@ details[open] > .manage-summary::before { transform: rotate(90deg); }
   align-items: center;
   gap: 0.3rem;
 }
+.manage-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0.5rem 0 0.2rem;
+}
+.manage-group-header:first-child { margin-top: 0; }
+.manage-group-header .manage-group-label { margin: 0; }
 .manage-group-label:first-child { margin-top: 0; }
+
+.btn-relink-all {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+}
 
 .manage-row {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.25rem 0;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
   border-bottom: 1px solid var(--admin-border, #f0f0f0);
 }
 .manage-row:last-child { border-bottom: none; }
+
+.manage-file-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
 
 .manage-filename {
   flex: 1;
@@ -788,33 +964,66 @@ details[open] > .manage-summary::before { transform: rotate(90deg); }
 .manage-row-actions {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.3rem;
   flex-shrink: 0;
 }
 
-.btn-relink {
-  padding: 0.2rem 0.6rem;
-  font-size: 0.75rem;
-  border: 1px solid var(--admin-border, #ccc);
-  border-radius: 4px;
-  background: var(--admin-surface, #fff);
-  cursor: pointer;
+/* Base style for all manage action buttons */
+.btn-manage {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.22rem 0.6rem;
+  font-size: 0.73rem;
   font-family: "Segoe UI", sans-serif;
-  color: var(--admin-text, #333);
-  transition: background 0.12s;
+  border-radius: 5px;
+  border: 1px solid var(--admin-border, #d1d5db);
+  background: var(--admin-surface, #fff);
+  color: var(--admin-text, #374151);
+  cursor: pointer;
   white-space: nowrap;
+  text-decoration: none;
+  line-height: 1.6;
+  font-weight: 500;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, box-shadow 0.12s;
 }
-.btn-relink:hover:not(:disabled) { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; }
-.btn-relink:disabled { opacity: 0.6; cursor: not-allowed; }
-.btn-relink.success { background: rgba(34,197,94,0.1); border-color: rgba(34,197,94,0.4); color: #16a34a; }
-.btn-relink.error   { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.3);  color: #b91c1c; }
+.btn-manage:hover:not(:disabled) {
+  background: var(--admin-bg, #f3f4f6);
+  border-color: #9ca3af;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+}
+.btn-manage:disabled { opacity: 0.55; cursor: not-allowed; }
 
-.btn-copy-sm {
-  padding: 0.2rem 0.45rem;
-  font-size: 0.72rem;
-  min-width: 36px;
-  text-align: center;
+.btn-relink { border-color: rgba(99,102,241,0.35); color: #4338ca; background: rgba(99,102,241,0.05); }
+.btn-relink:hover:not(:disabled)      { background: #eef2ff; border-color: #818cf8; color: #3730a3; }
+.btn-relink-ok                         { background: rgba(34,197,94,0.1);   border-color: rgba(34,197,94,0.4); color: #16a34a; }
+.btn-relink-err                        { background: rgba(239,68,68,0.08);  border-color: rgba(239,68,68,0.3); color: #b91c1c; }
+
+.btn-link3d { border-color: rgba(14,165,233,0.35); color: #0369a1; background: rgba(14,165,233,0.05); }
+.btn-link3d:hover { background: #e0f2fe; border-color: #38bdf8; color: #075985; }
+
+.manage-row-wrap { display: flex; flex-direction: column; gap: 4px; margin-bottom: 2px; }
+.relink-details  { display: flex; flex-wrap: wrap; gap: 5px; padding: 4px 6px 2px 6px; }
+.relink-detail-tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 500; line-height: 1.4;
 }
+.relink-detail-model { background: rgba(99,102,241,0.1); color: #4338ca; border: 1px solid rgba(99,102,241,0.3); }
+.relink-detail-pc    { background: rgba(14,165,233,0.1); color: #0369a1; border: 1px solid rgba(14,165,233,0.3); }
+.relink-detail-count { font-weight: 700; font-size: 10px; opacity: 0.85; }
+.relink-detail-none  { font-size: 11px; color: #9ca3af; font-style: italic; }
+
+.btn-file-download { color: #0369a1; border-color: rgba(3,105,161,0.3); background: rgba(3,105,161,0.04); }
+.btn-file-download:hover:not(:disabled) { background: #e0f2fe; border-color: #38bdf8; color: #0369a1; }
+.btn-file-copy { color: var(--admin-text, #374151); }
+.btn-file-copy:hover:not(:disabled)     { background: var(--admin-bg, #f3f4f6); }
+.btn-file-copy-ok                       { background: rgba(34,197,94,0.12); border-color: rgba(34,197,94,0.4); color: #16a34a; }
+
+.btn-file-delete {
+  border-color: rgba(239,68,68,0.3);
+  color: #dc2626;
+  background: rgba(239,68,68,0.04);
+}
+.btn-file-delete:hover:not(:disabled) { background: rgba(239,68,68,0.1); border-color: #f87171; color: #b91c1c; }
 
 .manage-empty {
   padding: 0.5rem 0;
@@ -822,6 +1031,7 @@ details[open] > .manage-summary::before { transform: rotate(90deg); }
   color: var(--admin-muted, #999);
   margin: 0;
 }
+.manage-error { color: #ef4444 !important; font-size: 0.82rem; }
 
 .btn-upload:hover:not(:disabled) { background: #2563eb; }
 .btn-upload:disabled { opacity: 0.5; cursor: not-allowed; }

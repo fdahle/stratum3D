@@ -61,7 +61,12 @@ export const useLayerStore = defineStore("layers", () => {
     }
 
     // Set z-index based on category
-    const zIndex = category === LAYER_CATEGORY.BASE ? Z_INDEX.BASE : Z_INDEX.OVERLAY;
+    const zIndex =
+      category === LAYER_CATEGORY.BACKGROUND
+        ? Z_INDEX.BACKGROUND
+        : category === LAYER_CATEGORY.BASE
+          ? Z_INDEX.BASE
+          : Z_INDEX.OVERLAY;
 
     if (layerInstance) {
       layerInstance.setZIndex(zIndex);
@@ -315,7 +320,9 @@ export const useLayerStore = defineStore("layers", () => {
     
     layers.value.forEach((layer) => {
       let newZIndex;
-      if (layer.category === LAYER_CATEGORY.BASE) {
+      if (layer.category === LAYER_CATEGORY.BACKGROUND) {
+        newZIndex = Z_INDEX.BACKGROUND;
+      } else if (layer.category === LAYER_CATEGORY.BASE) {
         newZIndex = Z_INDEX.BASE;
       } else {
         // Overlay layers: first in array (top of UI) gets highest z-index (renders on top)

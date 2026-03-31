@@ -193,7 +193,11 @@ export function useLayerManager(map) {
 
   const processLayer = async (layerConf, category) => {
     const layerId = layerConf._layerId || generateUUID();
-    const zIndex = category === LAYER_CATEGORY.BASE ? Z_INDEX.BASE : Z_INDEX.OVERLAY;
+    const zIndex = category === LAYER_CATEGORY.BACKGROUND
+      ? Z_INDEX.BACKGROUND
+      : category === LAYER_CATEGORY.BASE
+        ? Z_INDEX.BASE
+        : Z_INDEX.OVERLAY;
 
     let layerConfig;
     
@@ -242,6 +246,21 @@ export function useLayerManager(map) {
       layerStore.setLayerStatus(layerId, LAYER_STATUS.READY);
       // Update z-indexes to respect current layer ordering
       layerStore.updateLayerZIndexes();
+
+      // GeoTIFF: listen for OL source errors (e.g. "No transform available")
+      // so the layer is marked as errored instead of silently failing.
+      if (layerConf.type === 'geotiff') {
+        const src = layerConfig.layerInstance.getSource?.();
+        if (src) {
+          src.once('error', () => {
+            const proj = layerConf.tiffProjection ?? 'unknown CRS';
+            layerStore.setLayerError(
+              layerId,
+              `Could not display GeoTIFF — the file's CRS (${proj}) cannot be reprojected to the map's projection. Re-project the file with GDAL/QGIS first.`,
+            );
+          });
+        }
+      }
     }
 
     // Fire-and-forget CRS probe for base layers — doesn't block map init.

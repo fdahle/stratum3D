@@ -10,6 +10,12 @@ import TileWMS from "ol/source/TileWMS";
 import GeoTIFF from "ol/source/GeoTIFF";
 import { DEFAULT_TILE_SIZE } from "../constants/layerConstants";
 
+// OpenLayers XYZ uses {a-c} for subdomains; Leaflet / common configs use {s}.
+// Convert {s} so browser can resolve the hostname.
+function normalizeTileUrl(url) {
+  return url ? url.replace('{s}', '{a-c}') : url;
+}
+
 /**
  * Create a tile layer configuration object
  * @param {Object} layerConf - Layer configuration
@@ -62,11 +68,11 @@ export function createTileLayerConfig(layerConf, map, zIndex, layerId) {
         resolutions: resolutions,
         tileSize: tileSize,
       });
-      sourceConfig.url = layerConf.url;
+      sourceConfig.url = normalizeTileUrl(layerConf.url);
     }
   } else {
     // No custom tile grid - use URL directly
-    sourceConfig.url = layerConf.url;
+    sourceConfig.url = normalizeTileUrl(layerConf.url);
   }
 
   const source = new XYZ(sourceConfig);

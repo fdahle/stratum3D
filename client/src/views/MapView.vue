@@ -154,6 +154,7 @@ import ExtendedSearchModal from "../components/modals/ExtendedSearchModal.vue";
 import Settings from "../components/modals/Settings.vue";
 import CsvColumnPickerModal from "../components/modals/CsvColumnPickerModal.vue";
 import { useSettingsStore } from "../stores/settingsStore";
+import { tryRegisterProjection } from "../utils/crs";
 // Re-setup the local state
 const settingsStore = useSettingsStore();
 const mapStore = useMapStore();
@@ -877,6 +878,18 @@ const processDroppedFile = async (file) => {
         );
         // Brief pause so the warning is visible before the layer creation work
         await new Promise((r) => setTimeout(r, 150));
+      }
+
+      // Auto-register the TIFF's native CRS so OL can reproject it to the map's
+      // CRS.  Tries our built-in proj4 table first, then falls back to epsg.io.
+      if (metadata.projection) {
+        const registered = await tryRegisterProjection(metadata.projection);
+        if (!registered) {
+          showNotification(
+            `${layerName}: CRS "${metadata.projection}" is not recognised — the file may not display correctly. Consider re-projecting it with GDAL/QGIS first.`,
+            'warning',
+          );
+        }
       }
 
       // --- Create OL layer ---

@@ -1,9 +1,40 @@
 <template>
-  <span class="fh" tabindex="0" :aria-label="text">?<span class="fh-tip" role="tooltip">{{ text }}</span></span>
+  <span ref="triggerRef" class="fh" tabindex="0" :aria-label="text" @mouseenter="showTip" @focus="showTip" @mouseleave="hideTip" @blur="hideTip">?<span ref="tipRef" class="fh-tip" role="tooltip">{{ text }}</span></span>
 </template>
 
 <script setup>
+import { ref } from 'vue';
 defineProps({ text: { type: String, required: true } });
+
+const triggerRef = ref(null);
+const tipRef = ref(null);
+
+function showTip() {
+  const trigger = triggerRef.value;
+  const tip = tipRef.value;
+  if (!trigger || !tip) return;
+
+  const tr = trigger.getBoundingClientRect();
+  const vpw = window.innerWidth;
+  const margin = 10;
+  const tipMaxWidth = 240;
+
+  // Position above trigger center
+  let left = tr.left + tr.width / 2;
+  const top = tr.top - 8; // will use transform translateY(-100%)
+
+  // Clamp so tooltip stays within viewport
+  const halfWidth = Math.min(tipMaxWidth, vpw - 2 * margin) / 2;
+  left = Math.max(margin + halfWidth, Math.min(left, vpw - margin - halfWidth));
+
+  tip.style.left = left + 'px';
+  tip.style.top = top + 'px';
+  tip.style.transform = 'translateY(-100%)';
+}
+
+function hideTip() {
+  // No action needed — CSS transition handles visibility
+}
 </script>
 
 <style scoped>
@@ -21,7 +52,7 @@ defineProps({ text: { type: String, required: true } });
   cursor: default;
   position: relative;
   margin-left: 4px;
-  vertical-align: -0.15em;
+  vertical-align: middle;
   line-height: 1;
   user-select: none;
   flex-shrink: 0;
@@ -36,10 +67,7 @@ defineProps({ text: { type: String, required: true } });
 .fh-tip {
   opacity: 0;
   visibility: hidden;
-  position: absolute;
-  bottom: calc(100% + 7px);
-  left: 50%;
-  transform: translateX(-50%);
+  position: fixed;
   background: #1e293b;
   color: #f1f5f9;
   font-size: 0.72rem;
@@ -59,12 +87,6 @@ defineProps({ text: { type: String, required: true } });
 }
 
 .fh-tip::after {
-  content: '';
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 5px solid transparent;
-  border-top-color: #1e293b;
+  display: none;
 }
 </style>

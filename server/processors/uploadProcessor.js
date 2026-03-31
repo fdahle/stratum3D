@@ -287,12 +287,13 @@ export async function relinkGeojson(filename, dataDir) {
       .map(f => [path.parse(f).name, `data/pointclouds/${f}`])
   );
 
-  const { geojson: linked, linkedCount } = linkAssetsToFeatures(geojson, modelMap, pointcloudMap);
+  const { geojson: linked, linkedCount, linkedAssets } = linkAssetsToFeatures(geojson, modelMap, pointcloudMap);
   await fs.writeFile(filePath, JSON.stringify(linked), 'utf8');
 
   return {
     filename: safe,
     linkedCount,
+    linkedAssets,
     availableModels:      modelMap.size,
     availablePointclouds: pointcloudMap.size,
   };

@@ -126,9 +126,10 @@ function validateLayerVisibility(baseLayers) {
  */
 export function validateConfig(config) {
   validateBasicStructure(config);
-  validateBaseLayers(config.base_layers);
+  if (config.base_layers?.length) {
+    validateBaseLayers(config.base_layers);
+    validateLayerVisibility(config.base_layers);
+  }
   validateOverlayLayers(config.overlay_layers);
-  validateLayerVisibility(config.base_layers);
-
   return true;
 }
