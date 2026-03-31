@@ -35,7 +35,7 @@ function validateBaseLayers(baseLayers) {
   const baseOrders = [];
   
   baseLayers.forEach((layer, index) => {
-    const prefix = `base_layers[${index}] (${layer.name || "unnamed"})`;
+    const prefix = `basemaps[${index}] (${layer.name || "unnamed"})`;
 
     // Check type validity
     if (!CONFIG_SCHEMA.layerTypes[layer.type]) {
@@ -80,7 +80,7 @@ function validateOverlayLayers(overlayLayers) {
   const supportedOverlayTypes = ['geojson', 'geotiff'];
 
   overlayLayers.forEach((layer, index) => {
-    const prefix = `overlay_layers[${index}] (${layer.name || "unnamed"})`;
+    const prefix = `data_layers[${index}] (${layer.name || "unnamed"})`;
 
     if (!supportedOverlayTypes.includes(layer.type)) {
       throw new Error(
@@ -126,10 +126,10 @@ function validateLayerVisibility(baseLayers) {
  */
 export function validateConfig(config) {
   validateBasicStructure(config);
-  if (config.base_layers?.length) {
-    validateBaseLayers(config.base_layers);
-    validateLayerVisibility(config.base_layers);
+  if (config.basemaps?.length) {
+    validateBaseLayers(config.basemaps);
+    validateLayerVisibility(config.basemaps);
   }
-  validateOverlayLayers(config.overlay_layers);
+  validateOverlayLayers(config.data_layers);
   return true;
 }

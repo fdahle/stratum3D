@@ -1,20 +1,34 @@
 /**
- * Upload processor — handles incoming admin file uploads.
+ * uploadProcessor.js — handles incoming admin file uploads.
  *
- * Supported types:
- *   GeoJSON (.geojson, .json) — reproject + simplify + truncate (via shapeProcessor)
- *   GeoTIFF  (.tif, .tiff)   — stored as-is; COG requires gdal_translate
- *   3D Model (.obj, .ply, .stl) — OBJ: also copies .mtl + textures; updates references
- *   Point Cloud (.las, .laz, .copc.laz) — stored as-is; COPC conversion requires PDAL
+ * Each uploaded primary file gets its own UUID directory under data/layers/:
+ *   data/layers/{uuid}/
+ *     {uuid}.{ext}           — main data file (original name preserved in meta)
+ *     {uuid}.meta.json       — sidecar with all metadata
+ *     {subId}.{ext}          — sub-files (MTL, textures, linked 3D, pointclouds, CSV)
  *
- * Multi-file uploads: when a GeoJSON is uploaded together with 3D models / point clouds
- * in the same request, the processor automatically attempts to link the assets to
- * matching features via property values.
+ * Grouping rules when multiple files are uploaded at once:
+ *   • A GeoJSON is the primary; .obj/.ply/.stl/.las/.laz uploaded together become
+ *     sub-files of that GeoJSON and are auto-linked into matching features.
+ *   • If no GeoJSON is present, each model / pointcloud becomes its own layer.
+ *   • GeoTIFFs are always standalone layers.
+ *   • MTL and texture files are companions of the OBJ in the same upload.
+ *
+ * Per-file settings are passed from the client upload modal as a JSON field
+ * keyed by original filename.
  */
-import path from 'path';
-import fs from 'fs/promises';
-import { normalizeFilename } from '../utils.js';
+import path   from 'path';
+import fs     from 'fs/promises';
+import { v4 as uuidv4 } from 'uuid';
+
+import { normalizeFilename }     from '../src/utils.js';
 import { processGeoJsonObject, linkAssetsToFeatures } from './shapeProcessor.js';
+import {
+  createLayerMeta,
+  createSubFileMeta,
+  writeLayerMeta,
+  readLayerMeta,
+} from '../src/layerStore.js';
 
 // ── File-type helpers ──────────────────────────────────────────────────────────
 
@@ -23,278 +37,425 @@ const GEOTIFF_EXTS    = new Set(['.tif', '.tiff']);
 const MODEL_EXTS      = new Set(['.obj', '.ply', '.stl']);
 const POINTCLOUD_EXTS = new Set(['.las', '.laz']);
 
+const TEXTURE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.bmp', '.tga', '.gif', '.webp']);
+
 export function classifyExt(filename) {
-  const ext = path.extname(filename).toLowerCase();
-  // .copc.laz is a point cloud too
-  if (filename.toLowerCase().endsWith('.copc.laz')) return 'pointcloud';
-  if (GEOJSON_EXTS.has(ext))     return 'geojson';
-  if (GEOTIFF_EXTS.has(ext))     return 'geotiff';
-  if (MODEL_EXTS.has(ext))       return 'model';
-  if (POINTCLOUD_EXTS.has(ext))  return 'pointcloud';
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.copc.laz')) return 'pointcloud';
+  const ext = path.extname(lower);
+  if (GEOJSON_EXTS.has(ext))    return 'geojson';
+  if (GEOTIFF_EXTS.has(ext))    return 'geotiff';
+  if (MODEL_EXTS.has(ext))      return 'model';
+  if (POINTCLOUD_EXTS.has(ext)) return 'pointcloud';
+  if (ext === '.csv')           return 'csv';
   return 'unknown';
 }
 
-async function loadShapeConfig(serverDir) {
-  try {
-    const raw = await fs.readFile(path.join(serverDir, 'preprocess_config.json'), 'utf8');
-    return JSON.parse(raw).shapes ?? {};
-  } catch {
-    return {};
-  }
+function isCompanion(filename) {
+  const ext = path.extname(filename).toLowerCase();
+  return ext === '.mtl' || TEXTURE_EXTS.has(ext);
 }
 
-// ── GeoJSON ────────────────────────────────────────────────────────────────────
+function pointcloudExt(filename) {
+  return filename.toLowerCase().endsWith('.copc.laz') ? '.copc.laz'
+       : path.extname(filename).toLowerCase();
+}
+
+function extractTextureRefs(mtlContent) {
+  return (mtlContent.match(/(?:map_Kd|map_Ka|map_Ks|map_Ns|map_d|map_bump|bump)\s+(\S+)/gi) ?? [])
+    .map(m => m.split(/\s+/)[1]);
+}
+
+// ── Main batch processor ───────────────────────────────────────────────────────
 
 /**
- * Process a GeoJSON buffer through the full pipeline (reproject, simplify, truncate).
- * modelMap and pointcloudMap are Map<stem, serverUrl> built from co-uploaded files.
+ * Process an array of uploaded files into UUID-based layer storage.
+ * @param {Array<{originalname:string,buffer:Buffer}>} files
+ * @param {string} layersDir  — absolute path to data/layers/
+ * @param {Object} allSettings — per-filename settings from the upload modal
  */
-export async function processGeoJsonUpload(buffer, originalFilename, dataDir, serverDir, modelMap, pointcloudMap) {
-  const shapeCfg = await loadShapeConfig(serverDir);
+export async function processUploadBatch(files, layersDir, allSettings = {}) {
+  await fs.mkdir(layersDir, { recursive: true });
 
-  let geojson;
-  try {
-    geojson = JSON.parse(buffer.toString('utf8'));
-  } catch {
-    throw new Error('File is not valid JSON.');
-  }
-  if (!geojson || typeof geojson !== 'object') throw new Error('File is not valid GeoJSON.');
-  if (geojson.type !== 'Feature' && geojson.type !== 'FeatureCollection') {
-    throw new Error('File does not appear to be valid GeoJSON (expected Feature or FeatureCollection).');
-  }
+  const fileMap = new Map(files.map(f => [f.originalname, f.buffer]));
 
-  const { geojson: processed, steps } = processGeoJsonObject(geojson, {
-    targetCrs:          shapeCfg.targetCrs          ?? 'EPSG:3031',
-    simplifyTolerance:  shapeCfg.simplifyTolerance  ?? 50,
-    coordinatePrecision: shapeCfg.coordinatePrecision ?? 0,
-    modelMap:       modelMap      ?? new Map(),
-    pointcloudMap:  pointcloudMap ?? new Map(),
-  });
-
-  await fs.mkdir(path.join(dataDir, 'shapes'), { recursive: true });
-  const stem           = normalizeFilename(path.parse(originalFilename).name);
-  const outputFilename = stem + '.geojson';
-  const outputPath     = path.join(dataDir, 'shapes', outputFilename);
-  await fs.writeFile(outputPath, JSON.stringify(processed), 'utf8');
-
-  return {
-    type:         'geojson',
-    filename:     outputFilename,
-    dataPath:     `data/shapes/${outputFilename}`,
-    featureCount: processed.features?.length ?? 0,
-    steps,
-  };
-}
-
-// ── GeoTIFF ────────────────────────────────────────────────────────────────────
-
-export async function saveGeoTiffUpload(buffer, originalFilename, dataDir) {
-  await fs.mkdir(path.join(dataDir, 'geotiffs'), { recursive: true });
-  const stem           = normalizeFilename(path.parse(originalFilename).name);
-  const ext            = path.extname(originalFilename).toLowerCase() || '.tif';
-  const outputFilename = stem + ext;
-  const outputPath     = path.join(dataDir, 'geotiffs', outputFilename);
-  await fs.writeFile(outputPath, buffer);
-
-  return {
-    type:     'geotiff',
-    filename: outputFilename,
-    dataPath: `data/geotiffs/${outputFilename}`,
-    steps:    ['Stored as-is (Cloud Optimised GeoTIFF output requires gdal_translate — run manually if needed)'],
-  };
-}
-
-// ── 3D Models ──────────────────────────────────────────────────────────────────
-
-/**
- * Save a 3D model buffer to data/3D/.
- * For OBJ files: also writes any co-uploaded MTL and texture files,
- * and patches the mtllib reference inside the OBJ so the browser can load it.
- */
-export async function save3DModelUpload(fileMap, primaryFilename, dataDir) {
-  await fs.mkdir(path.join(dataDir, '3D'), { recursive: true });
-
-  const steps = [];
-  const ext     = path.extname(primaryFilename).toLowerCase();
-  const stem    = normalizeFilename(path.parse(primaryFilename).name);
-  const outName = stem + ext;
-  const outPath = path.join(dataDir, '3D', outName);
-
-  // Write primary model file
-  await fs.writeFile(outPath, fileMap.get(primaryFilename));
-  steps.push(`Saved model: ${outName}`);
-
-  // OBJ: handle companion MTL + textures
-  if (ext === '.obj') {
-    const mtlOrigName = path.parse(primaryFilename).name + '.mtl';
-    const mtlNormName = normalizeFilename(mtlOrigName);
-
-    const mtlBuffer = fileMap.get(mtlOrigName) ?? fileMap.get(mtlNormName);
-    if (mtlBuffer) {
-      await fs.writeFile(path.join(dataDir, '3D', mtlNormName), mtlBuffer);
-      steps.push(`Saved material: ${mtlNormName}`);
-
-      // Patch OBJ to reference the (possibly renamed) MTL
-      try {
-        let objContent = (await fs.readFile(outPath)).toString('utf8');
-        objContent = objContent.replace(/^mtllib\s+.+$/m, `mtllib ${mtlNormName}`);
-        await fs.writeFile(outPath, objContent, 'utf8');
-      } catch { /* non-fatal */ }
-
-      // Copy textures referenced in MTL
-      const mtlText = mtlBuffer.toString('utf8');
-      const textureRefs = (mtlText.match(/(?:map_Kd|map_Ka|map_Ks|map_Ns|map_d|map_bump|bump)\s+(\S+)/gi) ?? [])
-        .map((m) => m.split(/\s+/)[1]);
-
-      for (const texRef of textureRefs) {
-        const texNorm  = normalizeFilename(texRef);
-        const texBuf   = fileMap.get(texRef) ?? fileMap.get(texNorm);
-        if (texBuf) {
-          await fs.writeFile(path.join(dataDir, '3D', texNorm), texBuf);
-          steps.push(`Saved texture: ${texNorm}`);
-          // Patch MTL texture reference to normalized name
-          const updatedMtl = (await fs.readFile(path.join(dataDir, '3D', mtlNormName)))
-            .toString('utf8')
-            .replace(new RegExp(texRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), texNorm);
-          await fs.writeFile(path.join(dataDir, '3D', mtlNormName), updatedMtl, 'utf8');
-        }
-      }
-    } else {
-      steps.push('No MTL file found in upload — model may render without materials');
-    }
-  }
-
-  return {
-    type:     'model',
-    filename: outName,
-    dataPath: `data/3D/${outName}`,
-    steps,
-  };
-}
-
-// ── Point Clouds ───────────────────────────────────────────────────────────────
-
-export async function savePointcloudUpload(buffer, originalFilename, dataDir) {
-  await fs.mkdir(path.join(dataDir, 'pointclouds'), { recursive: true });
-  const stem           = normalizeFilename(path.parse(originalFilename).name);
-  const ext            = originalFilename.toLowerCase().endsWith('.copc.laz') ? '.copc.laz'
-                       : path.extname(originalFilename).toLowerCase();
-  const outputFilename = stem + ext;
-  const outputPath     = path.join(dataDir, 'pointclouds', outputFilename);
-  await fs.writeFile(outputPath, buffer);
-
-  const isCOPC = outputFilename.endsWith('.copc.laz');
-  return {
-    type:     'pointcloud',
-    filename: outputFilename,
-    dataPath: `data/pointclouds/${outputFilename}`,
-    steps:    [
-      isCOPC
-        ? 'Stored as Cloud Optimised Point Cloud (COPC) — ready to use'
-        : 'Stored as-is (converting to .copc.laz with PDAL is recommended for streaming)',
-    ],
-  };
-}
-
-// ── Multi-file batch processor ─────────────────────────────────────────────────
-
-/**
- * Process an array of uploaded files { originalname, buffer }.
- * Returns an array of result objects, one per "primary" file.
- * MTL and texture files are handled transparently when an OBJ is present.
- *
- * Linking: if a GeoJSON and 3D/pointcloud files are uploaded together,
- * assets are linked into matching features automatically.
- */
-export async function processBatchUpload(files, dataDir, serverDir) {
-  // Index all buffers by original name for companion-file lookups
-  const fileMap = new Map(files.map((f) => [f.originalname, f.buffer]));
-
-  // Classify files
-  const byType = { geojson: [], geotiff: [], model: [], pointcloud: [], companion: [] };
+  const byType = { geojson: [], geotiff: [], model: [], pointcloud: [], companion: [], csv: [] };
   for (const f of files) {
-    const kind = classifyExt(f.originalname);
-    const ext  = path.extname(f.originalname).toLowerCase();
-
-    // MTL and image files (textures) are companions to OBJ — handled inside save3DModelUpload
-    if (ext === '.mtl' || ['.jpg', '.jpeg', '.png', '.bmp', '.tga', '.gif', '.webp'].includes(ext)) {
-      byType.companion.push(f);
-    } else if (kind !== 'unknown') {
-      byType[kind].push(f);
+    if (isCompanion(f.originalname)) byType.companion.push(f);
+    else {
+      const kind = classifyExt(f.originalname);
+      if (kind !== 'unknown') byType[kind].push(f);
     }
   }
 
   const results = [];
 
-  // 1. Save 3D models (also uses companion MTL/textures via fileMap)
-  for (const f of byType.model) {
-    results.push(await save3DModelUpload(fileMap, f.originalname, dataDir));
+  if (byType.geojson.length > 0) {
+    for (const geoFile of byType.geojson) {
+      results.push(await _processGeoJsonLayer(geoFile, byType.model, byType.pointcloud, fileMap, layersDir, allSettings));
+    }
+  } else {
+    for (const modelFile of byType.model) {
+      results.push(await _processStandaloneModel(modelFile, fileMap, layersDir, allSettings));
+    }
+    for (const pcFile of byType.pointcloud) {
+      results.push(await _processStandalonePointcloud(pcFile, layersDir, allSettings));
+    }
   }
 
-  // 2. Save point clouds
-  for (const f of byType.pointcloud) {
-    results.push(await savePointcloudUpload(f.buffer, f.originalname, dataDir));
+  for (const tifFile of byType.geotiff) {
+    results.push(await _processGeoTiffLayer(tifFile, layersDir, allSettings));
   }
 
-  // 3. Build maps of stem → serverUrl for linking into GeoJSON features
-  const modelMap      = new Map(results.filter(r => r.type === 'model')
-    .map(r => [path.parse(r.filename).name, r.dataPath]));
-  const pointcloudMap = new Map(results.filter(r => r.type === 'pointcloud')
-    .map(r => [path.parse(r.filename).name, r.dataPath]));
-
-  // 4. Process GeoJSON (with linking)
-  for (const f of byType.geojson) {
-    results.push(await processGeoJsonUpload(f.buffer, f.originalname, dataDir, serverDir, modelMap, pointcloudMap));
-  }
-
-  // 5. Save GeoTIFFs
-  for (const f of byType.geotiff) {
-    results.push(await saveGeoTiffUpload(f.buffer, f.originalname, dataDir));
+  for (const csvFile of byType.csv) {
+    results.push(await _processCsvLayer(csvFile, layersDir, allSettings));
   }
 
   return results;
 }
 
-// ── Re-link existing GeoJSON against currently stored assets ───────────────────
+// ── GeoJSON layer ──────────────────────────────────────────────────────────────
 
-/**
- * Re-run feature linking for an already-processed GeoJSON file on disk.
- * Scans all files currently in data/3D/ and data/pointclouds/ and attempts
- * to match them to features. Existing _model3dUrls / _pointcloudUrls are replaced.
- */
-export async function relinkGeojson(filename, dataDir) {
-  const safe     = path.basename(filename); // prevent path traversal
-  const filePath = path.join(dataDir, 'shapes', safe);
+async function _processGeoJsonLayer(geoFile, modelFiles, pointcloudFiles, fileMap, layersDir, allSettings) {
+  const id       = uuidv4();
+  const layerDir = path.join(layersDir, id);
+  await fs.mkdir(layerDir, { recursive: true });
 
+  const settings = allSettings[geoFile.originalname] ?? {};
+  const meta     = createLayerMeta({ id, originalName: geoFile.originalname, fileType: 'geojson', options: settings });
+
+  const modelMap      = new Map();
+  const pointcloudMap = new Map();
+
+  for (const modelFile of modelFiles) {
+    const subRes = await _saveModelSubFile(modelFile, fileMap, id, layerDir);
+    modelMap.set(path.parse(modelFile.originalname).name, subRes.url);
+    meta.subFiles.push(subRes.subMeta);
+  }
+
+  for (const pcFile of pointcloudFiles) {
+    const subId  = uuidv4();
+    const ext    = pointcloudExt(pcFile.originalname);
+    await fs.writeFile(path.join(layerDir, `${subId}${ext}`), pcFile.buffer);
+    const url    = `data/layers/${id}/${subId}${ext}`;
+    pointcloudMap.set(path.parse(pcFile.originalname).name, url);
+    meta.subFiles.push(createSubFileMeta({ id: subId, originalName: pcFile.originalname, fileType: 'pointcloud', role: 'pointcloud' }));
+  }
+
+  let geojson;
+  try {
+    geojson = JSON.parse(geoFile.buffer.toString('utf8'));
+  } catch {
+    throw new Error(`${geoFile.originalname} is not valid JSON.`);
+  }
+  if (!geojson || (geojson.type !== 'Feature' && geojson.type !== 'FeatureCollection')) {
+    throw new Error(`${geoFile.originalname} does not appear to be valid GeoJSON.`);
+  }
+
+  const shapeCfg = settings.shapeSettings ?? {};
+  const { geojson: processed, steps } = processGeoJsonObject(geojson, {
+    targetCrs:           shapeCfg.targetCrs           ?? 'EPSG:3031',
+    simplifyTolerance:   shapeCfg.simplifyTolerance   ?? 50,
+    coordinatePrecision: shapeCfg.coordinatePrecision ?? 0,
+    modelMap,
+    pointcloudMap,
+  });
+
+  await fs.writeFile(path.join(layerDir, `${id}.geojson`), JSON.stringify(processed), 'utf8');
+  meta.processingLog = steps;
+  await writeLayerMeta(layersDir, id, meta);
+
+  return {
+    id,
+    type:         'geojson',
+    originalName: geoFile.originalname,
+    displayName:  meta.layerConfig.displayName,
+    dataPath:     `data/layers/${id}/${id}.geojson`,
+    featureCount: processed.features?.length ?? 0,
+    steps,
+    status:       'ready',
+  };
+}
+
+// ── OBJ/MTL/texture sub-file helper ───────────────────────────────────────────
+
+async function _saveModelSubFile(modelFile, fileMap, parentLayerId, layerDir) {
+  const subId   = uuidv4();
+  const ext     = path.extname(modelFile.originalname).toLowerCase();
+  const outFile = `${subId}${ext}`;
+  const url     = `data/layers/${parentLayerId}/${outFile}`;
+  const subMeta = createSubFileMeta({ id: subId, originalName: modelFile.originalname, fileType: 'model', role: 'model' });
+
+  if (ext === '.obj') {
+    let objContent = modelFile.buffer.toString('utf8');
+    const mtlOrigName = path.parse(modelFile.originalname).name + '.mtl';
+    const mtlBuf      = fileMap.get(mtlOrigName) ?? fileMap.get(normalizeFilename(mtlOrigName));
+
+    if (mtlBuf) {
+      const mtlSubId  = uuidv4();
+      const mtlFile   = `${mtlSubId}.mtl`;
+      objContent      = objContent.replace(/^mtllib\s+.+$/m, `mtllib ${mtlFile}`);
+
+      const textureRefs = extractTextureRefs(mtlBuf.toString('utf8'));
+      let mtlContent    = mtlBuf.toString('utf8');
+      const texMeta     = [];
+
+      for (const texRef of textureRefs) {
+        const texBuf = fileMap.get(texRef) ?? fileMap.get(normalizeFilename(texRef));
+        if (texBuf) {
+          const texExt   = path.extname(texRef).toLowerCase();
+          const texSubId = uuidv4();
+          const texFile  = `${texSubId}${texExt}`;
+          await fs.writeFile(path.join(layerDir, texFile), texBuf);
+          mtlContent = mtlContent.replace(
+            new RegExp(texRef.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), texFile
+          );
+          texMeta.push(createSubFileMeta({ id: texSubId, originalName: texRef, fileType: 'texture', role: 'texture' }));
+        }
+      }
+
+      await fs.writeFile(path.join(layerDir, mtlFile), mtlContent, 'utf8');
+      subMeta.companions = [
+        createSubFileMeta({ id: mtlSubId, originalName: mtlOrigName, fileType: 'material', role: 'material' }),
+        ...texMeta,
+      ];
+    }
+    await fs.writeFile(path.join(layerDir, outFile), objContent, 'utf8');
+  } else {
+    await fs.writeFile(path.join(layerDir, outFile), modelFile.buffer);
+  }
+
+  return { subMeta, url };
+}
+
+// ── Standalone model layer ─────────────────────────────────────────────────────
+
+async function _processStandaloneModel(modelFile, fileMap, layersDir, allSettings) {
+  const id       = uuidv4();
+  const layerDir = path.join(layersDir, id);
+  await fs.mkdir(layerDir, { recursive: true });
+
+  const settings = allSettings[modelFile.originalname] ?? {};
+  const meta     = createLayerMeta({ id, originalName: modelFile.originalname, fileType: 'model', options: settings });
+
+  const ext     = path.extname(modelFile.originalname).toLowerCase();
+  const outFile = `${id}${ext}`;
+
+  // Use a temp id for sub-file helper then rename to main id
+  const subRes  = await _saveModelSubFile(modelFile, fileMap, id, layerDir);
+  const tmpFile = path.join(layerDir, `${subRes.subMeta.id}${ext}`);
+  await fs.rename(tmpFile, path.join(layerDir, outFile)).catch(() => {});
+  if (subRes.subMeta.companions) meta.subFiles.push(...subRes.subMeta.companions);
+
+  meta.processingLog = [`Saved 3D model: ${modelFile.originalname}`];
+  await writeLayerMeta(layersDir, id, meta);
+
+  return {
+    id,
+    type:         'model',
+    originalName: modelFile.originalname,
+    displayName:  meta.layerConfig.displayName,
+    dataPath:     `data/layers/${id}/${outFile}`,
+    steps:        meta.processingLog,
+    status:       'ready',
+  };
+}
+
+// ── Standalone pointcloud layer ────────────────────────────────────────────────
+
+async function _processStandalonePointcloud(pcFile, layersDir, allSettings) {
+  const id       = uuidv4();
+  const layerDir = path.join(layersDir, id);
+  await fs.mkdir(layerDir, { recursive: true });
+
+  const settings = allSettings[pcFile.originalname] ?? {};
+  const meta     = createLayerMeta({ id, originalName: pcFile.originalname, fileType: 'pointcloud', options: settings });
+
+  const ext      = pointcloudExt(pcFile.originalname);
+  const mainFile = `${id}${ext}`;
+  await fs.writeFile(path.join(layerDir, mainFile), pcFile.buffer);
+
+  const isCOPC = ext.endsWith('.copc.laz');
+  const wantsCOPC = settings.optimize === 'copc';
+  const step   = isCOPC
+    ? 'Stored as Cloud Optimised Point Cloud (COPC) — ready for streaming'
+    : wantsCOPC
+      ? 'Point cloud saved — COPC conversion queued (will be optimised in the background)'
+      : 'Stored as-is — enable "Optimise as COPC" in upload settings for better streaming performance';
+
+  meta.processingLog = [step];
+  meta.status        = wantsCOPC && !isCOPC ? 'optimizing' : 'ready';
+  if (wantsCOPC && !isCOPC) meta.optimizationType = 'copc';
+  await writeLayerMeta(layersDir, id, meta);
+
+  return {
+    id,
+    type:              'pointcloud',
+    originalName:      pcFile.originalname,
+    displayName:       meta.layerConfig.displayName,
+    dataPath:          `data/layers/${id}/${mainFile}`,
+    steps:             meta.processingLog,
+    status:            meta.status,
+    optimizationType:  meta.optimizationType ?? null,
+  };
+}
+
+// ── GeoTIFF layer ──────────────────────────────────────────────────────────────
+
+async function _processGeoTiffLayer(tifFile, layersDir, allSettings) {
+  const id       = uuidv4();
+  const layerDir = path.join(layersDir, id);
+  await fs.mkdir(layerDir, { recursive: true });
+
+  const settings = allSettings[tifFile.originalname] ?? {};
+  const meta     = createLayerMeta({ id, originalName: tifFile.originalname, fileType: 'geotiff', options: settings });
+
+  const ext      = path.extname(tifFile.originalname).toLowerCase() || '.tif';
+  const mainFile = `${id}${ext}`;
+  await fs.writeFile(path.join(layerDir, mainFile), tifFile.buffer);
+
+  const wantsCOG = settings.optimize === 'cog';
+  const step     = wantsCOG
+    ? 'GeoTIFF saved — COG conversion queued (will be optimised in the background)'
+    : 'GeoTIFF stored as-is (enable "Optimise as COG" for better streaming performance)';
+
+  meta.processingLog = [step];
+  meta.status        = wantsCOG ? 'optimizing' : 'ready';
+  if (wantsCOG) meta.optimizationType = 'cog';
+  if (settings.keepOriginal) meta.keepOriginal = true;
+  await writeLayerMeta(layersDir, id, meta);
+
+  return {
+    id,
+    type:             'geotiff',
+    originalName:     tifFile.originalname,
+    displayName:      meta.layerConfig.displayName,
+    dataPath:         `data/layers/${id}/${mainFile}`,
+    steps:            meta.processingLog,
+    status:           meta.status,
+    optimizationType: meta.optimizationType ?? null,
+  };
+}
+
+// ── CSV layer ──────────────────────────────────────────────────────────────────
+
+async function _processCsvLayer(csvFile, layersDir, allSettings) {
+  const settings    = allSettings[csvFile.originalname] ?? {};
+  const csvSettings = settings.csvSettings ?? {};
+  const xCol        = csvSettings.xColumn ?? '';
+  const yCol        = csvSettings.yColumn ?? '';
+
+  if (!xCol || !yCol) {
+    throw new Error(`${csvFile.originalname}: X and Y column names must be specified.`);
+  }
+
+  // Parse CSV
+  const text  = csvFile.buffer.toString('utf8');
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) throw new Error(`${csvFile.originalname}: CSV has no data rows.`);
+
+  const rawHeader = lines[0];
+  const delim     = rawHeader.includes(';') ? ';' : ',';
+  const headers   = rawHeader.split(delim).map(h => h.trim().replace(/^"|"$/g, ''));
+
+  const xIdx = headers.indexOf(xCol);
+  const yIdx = headers.indexOf(yCol);
+  if (xIdx === -1) throw new Error(`${csvFile.originalname}: column "${xCol}" not found.`);
+  if (yIdx === -1) throw new Error(`${csvFile.originalname}: column "${yCol}" not found.`);
+
+  const features = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cells = lines[i].split(delim).map(c => c.trim().replace(/^"|"$/g, ''));
+    const x = parseFloat(cells[xIdx]);
+    const y = parseFloat(cells[yIdx]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;  // skip bad rows
+
+    const props = {};
+    headers.forEach((h, idx) => { if (idx !== xIdx && idx !== yIdx) props[h] = cells[idx] ?? ''; });
+
+    features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [x, y] }, properties: props });
+  }
+
+  const geojson = { type: 'FeatureCollection', features };
+
+  const id       = uuidv4();
+  const layerDir = path.join(layersDir, id);
+  await fs.mkdir(layerDir, { recursive: true });
+
+  // Apply optional processing (reproject / simplify) via shapeProcessor
+  const processed = processGeoJsonObject(geojson, settings.shapeSettings ?? {});
+
+  await fs.writeFile(path.join(layerDir, `${id}.geojson`), JSON.stringify(processed));
+
+  const meta = createLayerMeta({
+    id,
+    originalName: csvFile.originalname,
+    fileType:     'geojson',
+    options:      { ...settings, sourceFormat: 'csv', xColumn: xCol, yColumn: yCol },
+  });
+  // Override: stored file is .geojson even though it came from a .csv
+  meta.extension    = '.geojson';
+  meta.featureCount = features.length;
+  meta.steps        = [`Converted ${features.length} rows from CSV to GeoJSON Points`];
+  await writeLayerMeta(layersDir, id, meta);
+
+  return { id, filename: csvFile.originalname, type: 'geojson', dataPath: `data/layers/${id}/${id}.geojson`, featureCount: features.length, steps: meta.steps };
+}
+
+// ── Sub-file addition (for POST /admin/layers/:id/subfiles) ───────────────────
+
+export async function addSubFile(layerId, file, role, layersDir) {
+  const meta     = await readLayerMeta(layersDir, layerId);
+  const layerDir = path.join(layersDir, layerId);
+  const subId    = uuidv4();
+  const ext      = path.extname(file.originalname).toLowerCase() || '';
+  const outFile  = `${subId}${ext}`;
+  await fs.writeFile(path.join(layerDir, outFile), file.buffer);
+
+  const subMeta = createSubFileMeta({
+    id:           subId,
+    originalName: file.originalname,
+    fileType:     classifyExt(file.originalname) !== 'unknown' ? classifyExt(file.originalname) : ext.slice(1) || 'binary',
+    role,
+  });
+  meta.subFiles.push(subMeta);
+  await writeLayerMeta(layersDir, layerId, meta);
+
+  return { subId, filename: outFile, dataPath: `data/layers/${layerId}/${outFile}`, role, meta: subMeta };
+}
+
+// ── Legacy re-link helper (kept for backward compatibility) ───────────────────
+
+export async function relinkGeojson(filePath, layersDir) {
   const raw = await fs.readFile(filePath, 'utf8');
   let geojson;
   try { geojson = JSON.parse(raw); }
-  catch { throw new Error(`Could not parse ${safe} as JSON.`); }
+  catch { throw new Error(`Could not parse ${path.basename(filePath)} as JSON.`); }
 
-  const [modelFiles, pcFiles] = await Promise.all([
-    fs.readdir(path.join(dataDir, '3D')).catch(() => []),
-    fs.readdir(path.join(dataDir, 'pointclouds')).catch(() => []),
-  ]);
+  const modelMap      = new Map();
+  const pointcloudMap = new Map();
 
-  const modelMap = new Map(
-    modelFiles
-      .filter(f => /\.(obj|ply|stl)$/i.test(f))
-      .map(f => [path.parse(f).name, `data/3D/${f}`])
-  );
-  const pointcloudMap = new Map(
-    pcFiles
-      .filter(f => /\.(las|laz)$/i.test(f))
-      .map(f => [path.parse(f).name, `data/pointclouds/${f}`])
-  );
+  try {
+    const layerDirs = await fs.readdir(layersDir, { withFileTypes: true });
+    for (const entry of layerDirs) {
+      if (!entry.isDirectory()) continue;
+      const files = await fs.readdir(path.join(layersDir, entry.name)).catch(() => []);
+      for (const f of files) {
+        if (/\.(obj|ply|stl)$/i.test(f)) modelMap.set(path.parse(f).name, `data/layers/${entry.name}/${f}`);
+        if (/\.(las|laz)$/i.test(f))     pointcloudMap.set(path.parse(f).name, `data/layers/${entry.name}/${f}`);
+      }
+    }
+  } catch { /* no layers dir yet */ }
 
   const { geojson: linked, linkedCount, linkedAssets } = linkAssetsToFeatures(geojson, modelMap, pointcloudMap);
   await fs.writeFile(filePath, JSON.stringify(linked), 'utf8');
 
   return {
-    filename: safe,
+    filename:             path.basename(filePath),
     linkedCount,
     linkedAssets,
     availableModels:      modelMap.size,
     availablePointclouds: pointcloudMap.size,
   };
 }
+

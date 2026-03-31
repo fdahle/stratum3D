@@ -7,7 +7,7 @@ export const CONFIG_SCHEMA = {
   website: {
     required: false,
     fields: {
-      title: { type: "string", default: "Hist Map" },
+      title: { type: "string", default: "MapViewer" },
       favicon: { type: "string", default: "/vite.svg" },
       search: {
         required: false,

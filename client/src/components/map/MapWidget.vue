@@ -135,14 +135,14 @@ onMounted(async () => {
     const bgConf = OSM_BG_CONFIGS[crsKey] ?? OSM_BG_CONFIGS.default;
     promises.push(layerManager.processLayer(bgConf, 'background'));
   }
-  if (config.base_layers) {
+  if (config.basemaps) {
     promises.push(
-      ...config.base_layers.map((l) => layerManager.processLayer(l, "base"))
+      ...config.basemaps.map((l) => layerManager.processLayer(l, "base"))
     );
   }
-  if (config.overlay_layers) {
+  if (config.data_layers) {
     promises.push(
-      ...config.overlay_layers.map((l) =>
+      ...config.data_layers.map((l) =>
         layerManager.processLayer(l, "overlay")
       )
     );

@@ -2,11 +2,11 @@
   <!-- ── Password Gate ─────────────────────────────────────────── -->
   <div v-if="!isAuthenticated" class="admin-gate">
     <div class="gate-card">
-      <div v-if="isSetupMode" class="setup-welcome-banner">
+      <div v-if="isFirstRun" class="setup-welcome-banner">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
         </svg>
-        <span>First-run setup — enter your admin password to configure the map.</span>
+        <span>First-run setup — choose a password to protect this admin panel.</span>
       </div>
       <div class="gate-icon">
         <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -15,31 +15,72 @@
         </svg>
       </div>
 
-      <h2 class="gate-title">Admin Access</h2>
-      <p class="gate-subtitle">Hist Map Configuration</p>
+      <!-- First-run: create a new password -->
+      <template v-if="isFirstRun">
+        <h2 class="gate-title">Create Admin Password</h2>
+        <p class="gate-subtitle">Choose a password to protect this panel.</p>
 
-      <form class="gate-form" @submit.prevent="attemptLogin">
-        <div class="field-group" :class="{ 'field-error': loginError }">
-          <label for="admin-password">Password</label>
-          <input
-            id="admin-password"
-            ref="passwordFieldRef"
-            v-model="password"
-            type="password"
-            placeholder="Enter admin password"
-            autocomplete="current-password"
-            :disabled="isLoading"
-          />
-          <p v-if="loginError" class="error-hint">{{ loginError }}</p>
-        </div>
+        <form class="gate-form" @submit.prevent="createPassword">
+          <div class="field-group" :class="{ 'field-error': loginError }">
+            <label for="admin-password">Password</label>
+            <input
+              id="admin-password"
+              ref="passwordFieldRef"
+              v-model="password"
+              type="password"
+              placeholder="Choose a password"
+              autocomplete="new-password"
+              :disabled="isLoading"
+            />
+          </div>
+          <div class="field-group" :class="{ 'field-error': loginError }">
+            <label for="admin-password-confirm">Confirm Password</label>
+            <input
+              id="admin-password-confirm"
+              v-model="passwordConfirm"
+              type="password"
+              placeholder="Repeat your password"
+              autocomplete="new-password"
+              :disabled="isLoading"
+            />
+            <p v-if="loginError" class="error-hint">{{ loginError }}</p>
+          </div>
 
-        <button type="submit" class="btn-primary btn-full" :disabled="isLoading || !password">
-          <span v-if="isLoading">Verifying…</span>
-          <span v-else>Sign In</span>
-        </button>
-      </form>
+          <button type="submit" class="btn-primary btn-full" :disabled="isLoading || !password || !passwordConfirm">
+            <span v-if="isLoading">Creating…</span>
+            <span v-else>Create Password</span>
+          </button>
+        </form>
+      </template>
 
-      <a class="gate-back" href="/">← Back to map</a>
+      <!-- Returning user: sign in -->
+      <template v-else>
+        <h2 class="gate-title">Admin Access</h2>
+        <p class="gate-subtitle">Hist Map Configuration</p>
+
+        <form class="gate-form" @submit.prevent="attemptLogin">
+          <div class="field-group" :class="{ 'field-error': loginError }">
+            <label for="admin-password">Password</label>
+            <input
+              id="admin-password"
+              ref="passwordFieldRef"
+              v-model="password"
+              type="password"
+              placeholder="Enter admin password"
+              autocomplete="current-password"
+              :disabled="isLoading"
+            />
+            <p v-if="loginError" class="error-hint">{{ loginError }}</p>
+          </div>
+
+          <button type="submit" class="btn-primary btn-full" :disabled="isLoading || !password">
+            <span v-if="isLoading">Verifying…</span>
+            <span v-else>Sign In</span>
+          </button>
+        </form>
+
+        <a class="gate-back" href="/">← Back to map</a>
+      </template>
     </div>
   </div>
 
@@ -52,10 +93,10 @@
             <circle cx="12" cy="12" r="3"/>
             <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
           </svg>
-          Hist Map Admin
+          Admin Panel
         </span>
         <nav class="admin-nav">
-          <template v-if="!isSetupMode">
+          <template v-if="hasExistingConfig">
             <a href="/" class="nav-back">← Back to map</a>
             <button class="btn-signout" @click="logout">Sign out</button>
           </template>
@@ -64,8 +105,8 @@
     </header>
 
     <main class="admin-main">
-      <div v-if="isSetupMode" class="banner banner-setup">
-        🎉 Welcome! Configure your map below, then click <strong>Save Configuration</strong> to launch it.
+      <div v-if="!hasExistingConfig" class="banner banner-setup">
+        🎉 Welcome! Configure your map below and click <strong>Save Configuration</strong> to get started.
       </div>
       <div v-if="loadError" class="banner banner-error">{{ loadError }}</div>
       <div v-if="saveSuccess" class="banner banner-success">Configuration saved successfully.</div>
@@ -198,24 +239,17 @@
 
         <!-- ── 4. Base Layers ─────────────────────────────────── -->
         <LayersSection
-          title="Base Layers"
-          description="Additional base tile layers shown in the map's switcher, rendered above the OSM background."
+          title="Basemaps"
+          description="Additional tile/WMS/WMTS basemaps shown in the map's layer switcher, rendered above the OSM background."
           layer-group="base"
-          :layers="draft.base_layers"
-          @update:layers="draft.base_layers = $event"
+          :layers="draft.basemaps"
+          @update:layers="draft.basemaps = $event"
         />
 
-        <!-- ── 5. Upload Data ─────────────────────────────────── -->
-        <UploadSection :auth-header="currentAuthHeader" />
-
-        <!-- ── 6. Overlay Layers ──────────────────────────────── -->
-        <LayersSection
-          title="Overlay Layers"
-          description="Data layers (GeoJSON, GeoTIFF) rendered on top of the base map."
-          layer-group="overlay"
-          :layers="draft.overlay_layers"
+        <!-- ── 5 + 6. Data Layers (upload + manage) ─────────────── -->
+        <DataLayersSection
           :auth-header="currentAuthHeader"
-          @update:layers="draft.overlay_layers = $event"
+          @update:layers="draft.data_layers = $event"
         />
 
         <!-- ── 7. Viewer Permissions ──────────────────────────── -->
@@ -294,7 +328,7 @@
         </section>
 
         <!-- ── 8. Danger Zone ────────────────────────────────────── -->
-        <section v-if="!isSetupMode" class="admin-section danger-zone">
+        <section class="admin-section danger-zone">
           <div class="section-header-simple">
             <h2 class="section-title danger-title">Danger Zone</h2>
             <p class="section-desc">Irreversible actions — use with care.</p>
@@ -303,10 +337,15 @@
             <div class="danger-row">
               <div class="danger-row-text">
                 <strong>Reset configuration</strong>
-                <span>Deletes the active config file. The map will show the first-run setup screen until a new configuration is saved.</span>
+                <span>Deletes the config file <em>and</em> the admin password. On next visit you can set a fresh password and reconfigure everything from scratch.</span>
               </div>
               <div v-if="!resetConfirming" class="danger-row-action">
-                <button class="btn-danger" @click="resetConfirming = true">Reset Config…</button>
+                <button
+                  class="btn-danger"
+                  :disabled="!hasExistingConfig"
+                  :title="!hasExistingConfig ? 'No configuration exists yet' : undefined"
+                  @click="resetConfirming = true"
+                >Reset Config…</button>
               </div>
               <div v-else class="danger-row-action danger-confirm">
                 <span class="danger-confirm-label">Are you sure?</span>
@@ -339,6 +378,23 @@
             </div>
           </div>
         </section>
+
+        <!-- ── 9. Developer ─────────────────────────────────────── -->
+        <section v-if="!isFirstRun" class="admin-section">
+          <div class="section-header-simple">
+            <h2 class="section-title">Developer</h2>
+            <p class="section-desc">Inspect the YAML that will be written when you save.</p>
+          </div>
+          <details class="collapsible yaml-collapsible">
+            <summary>View config YAML</summary>
+            <div class="collapsible-body yaml-collapsible-body">
+              <div class="yaml-inline-header">
+                <button class="btn-secondary btn-sm" @click="navigator.clipboard.writeText(yamlPanelText)">Copy</button>
+              </div>
+              <pre class="yaml-pre yaml-pre-inline">{{ yamlPanelText }}</pre>
+            </div>
+          </details>
+        </section>
       </div>
 
     </main>
@@ -359,44 +415,30 @@
         </div>
       </template>
       <template v-else>
-        <button class="btn-yaml" @click="showYamlPanel = true">View YAML</button>
         <button class="btn-save" :disabled="isSaving" @click="saveConfig">
           <span v-if="isSaving">Saving…</span>
           <span v-else>Save Configuration</span>
         </button>
       </template>
     </div>
-
-    <!-- YAML viewer modal -->
-    <div v-if="showYamlPanel" class="yaml-overlay" @click.self="showYamlPanel = false">
-      <div class="yaml-panel">
-        <div class="yaml-panel-header">
-          <span>Current Config (YAML)</span>
-          <div style="display:flex;gap:0.4rem">
-            <button class="btn-secondary" @click="navigator.clipboard.writeText(yamlPanelText)">Copy</button>
-            <button class="btn-secondary" @click="showYamlPanel = false">✕</button>
-          </div>
-        </div>
-        <pre class="yaml-pre">{{ yamlPanelText }}</pre>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import yaml from 'js-yaml';
 import { useRoute, useRouter } from 'vue-router';
 import { getApiUrl } from '../utils/config';
 import { validateConfig } from '../constants/configValidation';
 import LayersSection from '../components/admin/LayersSection.vue';
 import FieldHint from '../components/admin/FieldHint.vue';
-import UploadSection from '../components/admin/UploadSection.vue';
+import DataLayersSection from '../components/admin/DataLayersSection.vue';
 
 // ── State ──────────────────────────────────────────────────────
 const route = useRoute();
 const router = useRouter();
-const isSetupMode = computed(() => route.query.setup === 'true');
+const isFirstRun = ref(false);          // true when no password is set yet
+const hasExistingConfig = ref(false);   // true once a config has been loaded or saved
 const isAuthenticated  = ref(false);
 const isLoading        = ref(false);
 const isSaving         = ref(false);
@@ -404,11 +446,14 @@ const isResetting           = ref(false);
 const resetConfirming       = ref(false);
 const deleteFilesConfirming = ref(false);
 const isDeletingFiles       = ref(false);
-const backupFiles           = ref(null);
-const backupFilesLoading    = ref(false);
-const backupFilesError      = ref('');
-const isDownloadingAll      = ref(false);
+const newPassword        = ref('');
+const newPasswordConfirm = ref('');
+const changingPassword   = ref(false);
+const changePasswordError = ref('');
+const changePasswordOk   = ref(false);
+
 const password         = ref('');
+const passwordConfirm  = ref('');
 const loginError       = ref('');
 const loadError        = ref('');
 const saveSuccess      = ref(false);
@@ -418,7 +463,7 @@ const loadedCrs             = ref(null);  // CRS from the last saved config
 const crsChangeSaveConfirming = ref(false); // waiting for user to ack CRS change before saving
 
 const SESSION_KEY = 'admin_auth';
-const osmBackground = ref(true);  // separate from base_layers — MapWidget injects the right tile per CRS
+const osmBackground = ref(true);  // separate from basemaps — MapWidget injects the right tile per CRS
 
 // ── Draft config ───────────────────────────────────────────────
 function blankDraft() {
@@ -427,8 +472,8 @@ function blankDraft() {
     view: { center: [0, 0], zoom: 7, minZoom: 0, maxZoom: 28, extent: null },
     crs: 'EPSG:3857',
     projection_params: { proj_string: '', extent: null },
-    base_layers: [],
-    overlay_layers: [],
+    basemaps:     [],
+    data_layers:  [],
     ui: { map_download: true, map_upload: true, viewer_download: true, viewer_upload: true },
   };
 }
@@ -480,7 +525,6 @@ const osmBgLabel = computed(() => {
   return 'OpenStreetMap (standard tiles)';
 });
 
-const showYamlPanel = ref(false);
 const yamlPanelText = computed(() => {
   try { return yaml.dump(buildConfig(), { lineWidth: 120, noRefs: true }); }
   catch { return '(error generating YAML)'; }
@@ -511,7 +555,7 @@ const crsWarning = computed(() => {
 // True when overlay layers reference server-uploaded files that were preprocessed
 // for a specific CRS, so changing the map CRS would misalign them.
 const hasServerLayers = computed(() =>
-  draft.value.overlay_layers.some(l => l.url?.startsWith(getApiUrl('data/')))
+  draft.value.data_layers.some(l => l.url?.startsWith(getApiUrl('data/')))
 );
 const crsChangedWithData = computed(() =>
   loadedCrs.value !== null &&
@@ -520,15 +564,7 @@ const crsChangedWithData = computed(() =>
 );
 
 // ── Backup file list ───────────────────────────────────────────
-const CATEGORY_LABELS = { shapes: 'GeoJSON Shapes', geotiffs: 'GeoTIFFs', models: '3D Models', pointclouds: 'Point Clouds' };
-const totalFileCount = computed(() => {
-  if (!backupFiles.value) return 0;
-  return Object.values(backupFiles.value).reduce((sum, arr) => sum + arr.length, 0);
-});
-const nonEmptyCategories = computed(() => {
-  if (!backupFiles.value) return {};
-  return Object.fromEntries(Object.entries(backupFiles.value).filter(([, files]) => files.length > 0));
-});
+
 
 function parseViewExtent() {
   const nums = viewExtentStr.value.split(',').map(n => parseFloat(n.trim())).filter(n => !isNaN(n));
@@ -563,11 +599,11 @@ function loadConfigIntoDraft(config) {
     d.projection_params.extent      = config.projection_params.extent      ?? null;
     projExtentStr.value = d.projection_params.extent ? d.projection_params.extent.join(', ') : '';
   }
-  d.base_layers    = config.base_layers    ?? d.base_layers;
-  // Auto-detect migration: if old config has tile layers in base_layers but no explicit
+  d.basemaps    = config.basemaps    ?? config.base_layers    ?? d.basemaps;
+  // Auto-detect migration: if old config has tile layers in basemaps but no explicit
   // osm_background field, keep osmBackground off so the existing base tiles still render.
-  osmBackground.value = config.osm_background ?? (config.base_layers?.length > 0 ? false : true);
-  d.overlay_layers = config.overlay_layers ?? d.overlay_layers;
+  osmBackground.value = config.osm_background ?? (config.basemaps?.length > 0 || config.base_layers?.length > 0 ? false : true);
+  d.data_layers = config.data_layers ?? config.overlay_layers ?? d.data_layers;
   if (config.ui) {
     d.ui.map_download    = config.ui.map_download    ?? config.ui.allow_download ?? true;
     d.ui.map_upload      = config.ui.map_upload      ?? config.ui.allow_upload   ?? true;
@@ -594,8 +630,8 @@ function buildConfig() {
     if (d.projection_params.extent) out.projection_params.extent = d.projection_params.extent;
   }
   out.osm_background = osmBackground.value;
-  out.base_layers    = d.base_layers;
-  out.overlay_layers = d.overlay_layers;
+  out.basemaps    = d.basemaps;
+  out.data_layers = d.data_layers;
   out.ui = {
     map_download:    d.ui.map_download,
     map_upload:      d.ui.map_upload,
@@ -614,14 +650,61 @@ function getStoredPassword() {
 }
 // Reactive auth header — passed down to components that make authenticated requests
 const currentAuthHeader = computed(() => buildAuthHeader(getStoredPassword() || ''));
+async function verifyPassword(pwd) {
+  const res = await fetch(getApiUrl('/admin/verify'), {
+    headers: { Authorization: buildAuthHeader(pwd) },
+  });
+  if (res.status === 401 || res.status === 403) throw new Error('Invalid password');
+  if (!res.ok) throw new Error(`Server error: ${res.status}`);
+}
+
 async function fetchConfig(pwd) {
   const res = await fetch(getApiUrl('/config'), {
     headers: { Authorization: buildAuthHeader(pwd) },
   });
-  if (res.status === 401 || res.status === 403) throw new Error('Invalid password');
   if (res.status === 404) return null;  // No config yet — fresh install
   if (!res.ok) throw new Error(`Server error: ${res.status}`);
   return yaml.load(await res.text());
+}
+
+// ── Create password (first run) ───────────────────────────────
+async function createPassword() {
+  loginError.value = '';
+  if (password.value.length < 6) {
+    loginError.value = 'Password must be at least 6 characters.';
+    return;
+  }
+  if (password.value !== passwordConfirm.value) {
+    loginError.value = 'Passwords do not match.';
+    return;
+  }
+  isLoading.value = true;
+  try {
+    const res = await fetch(getApiUrl('/admin/set-password'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: password.value }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Server error: ${res.status}`);
+    }
+    // Auto-login with the new password
+    const pwd = password.value;
+    password.value        = '';
+    passwordConfirm.value = '';
+    isFirstRun.value      = false;
+    sessionStorage.setItem(SESSION_KEY, pwd);
+    const config = await fetchConfig(pwd);
+    loadConfigIntoDraft(config ?? {});
+    loadedCrs.value         = config ? (config.crs ?? null) : null;
+    hasExistingConfig.value = config !== null;
+    isAuthenticated.value   = true;
+  } catch (err) {
+    loginError.value = err.message;
+  } finally {
+    isLoading.value = false;
+  }
 }
 
 // ── Auth ───────────────────────────────────────────────────────
@@ -630,12 +713,13 @@ async function attemptLogin() {
   isLoading.value  = true;
   loginError.value = '';
   try {
+    await verifyPassword(password.value);
     const config = await fetchConfig(password.value);
     loadConfigIntoDraft(config ?? {});
-    loadedCrs.value = config ? (config.crs ?? null) : null;
+    loadedCrs.value         = config ? (config.crs ?? null) : null;
+    hasExistingConfig.value = config !== null;
     sessionStorage.setItem(SESSION_KEY, password.value);
-    isAuthenticated.value = true;
-    loadBackupFiles();
+    isAuthenticated.value   = true;
   } catch (err) {
     loginError.value = err.message;
     password.value   = '';
@@ -652,6 +736,7 @@ function logout() {
   osmBackground.value   = true;
   draft.value           = blankDraft();
   password.value        = '';
+  passwordConfirm.value = '';
   loginError.value      = '';
 }
 
@@ -685,14 +770,11 @@ async function saveConfig() {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || `Server error: ${res.status}`);
     }
-    saveSuccess.value = true;
+    saveSuccess.value       = true;
+    hasExistingConfig.value = true;
     loadedCrs.value = draft.value.crs;
     crsChangeSaveConfirming.value = false;
     setTimeout(() => { saveSuccess.value = false; }, 5000);
-    // In setup mode, redirect to the map once config is saved for the first time
-    if (isSetupMode.value) {
-      window.location.href = '/';
-    }
   } catch (err) {
     validationError.value = err.message;
   } finally {
@@ -726,9 +808,9 @@ async function resetConfig() {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || `Server error: ${res.status}`);
     }
-    // Config deleted — clear session so the password gate shows on next visit
+    // Config deleted — clear session and go back to the admin login gate
     sessionStorage.removeItem(SESSION_KEY);
-    window.location.href = '/';
+    window.location.href = '/admin';
   } catch (err) {
     validationError.value = err.message;
     resetConfirming.value = false;
@@ -737,66 +819,59 @@ async function resetConfig() {
   }
 }
 
-// ── Backup file operations ─────────────────────────────────────
-async function loadBackupFiles() {
-  backupFilesLoading.value = true;
-  backupFilesError.value = '';
+// ── Change password ────────────────────────────────────────────
+async function changePassword() {
+  changePasswordError.value = '';
+  changePasswordOk.value    = false;
+  if (newPassword.value.length < 6) {
+    changePasswordError.value = 'Password must be at least 6 characters.';
+    return;
+  }
+  if (newPassword.value !== newPasswordConfirm.value) {
+    changePasswordError.value = 'Passwords do not match.';
+    return;
+  }
+  changingPassword.value = true;
   try {
-    const res = await fetch(getApiUrl('/admin/uploads'), {
-      headers: { Authorization: currentAuthHeader.value },
+    const res = await fetch(getApiUrl('/admin/change-password'), {
+      method: 'POST',
+      headers: { Authorization: buildAuthHeader(getStoredPassword()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newPassword: newPassword.value }),
     });
-    if (!res.ok) throw new Error(`Server error: ${res.status}`);
-    backupFiles.value = await res.json();
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Server error: ${res.status}`);
+    }
+    // Update stored password so subsequent requests still work
+    sessionStorage.setItem(SESSION_KEY, newPassword.value);
+    newPassword.value        = '';
+    newPasswordConfirm.value = '';
+    changePasswordOk.value   = true;
+    setTimeout(() => { changePasswordOk.value = false; }, 5000);
   } catch (err) {
-    backupFilesError.value = err.message;
+    changePasswordError.value = err.message;
   } finally {
-    backupFilesLoading.value = false;
+    changingPassword.value = false;
   }
-}
-
-async function downloadFile(file) {
-  try {
-    const res = await fetch(getApiUrl(file.dataPath));
-    if (!res.ok) throw new Error(`${res.status}`);
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = file.filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  } catch {
-    // silent — file may have been removed
-  }
-}
-
-async function downloadAllFiles() {
-  isDownloadingAll.value = true;
-  const all = Object.values(backupFiles.value || {}).flat();
-  for (const file of all) {
-    await downloadFile(file);
-    await new Promise(r => setTimeout(r, 300));
-  }
-  isDownloadingAll.value = false;
 }
 
 // ── Delete all files ───────────────────────────────────────────
 async function deleteAllFiles() {
   isDeletingFiles.value = true;
   try {
-    const res = await fetch(getApiUrl('/admin/uploads'), {
-      method: 'DELETE',
+    // Fetch all layers then delete each one
+    const listRes = await fetch(getApiUrl('/admin/layers'), {
       headers: { Authorization: buildAuthHeader(getStoredPassword()) },
     });
-    if (res.status === 401 || res.status === 403) throw new Error('Session expired. Please sign out and sign back in.');
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Server error: ${res.status}`);
-    }
+    if (!listRes.ok) throw new Error(`Server error: ${listRes.status}`);
+    const allLayers = await listRes.json();
+    await Promise.all(allLayers.map(l =>
+      fetch(getApiUrl(`/admin/layers/${l.id}`), {
+        method: 'DELETE',
+        headers: { Authorization: buildAuthHeader(getStoredPassword()) },
+      })
+    ));
     deleteFilesConfirming.value = false;
-    await loadBackupFiles();
   } catch (err) {
     validationError.value = err.message;
     deleteFilesConfirming.value = false;
@@ -805,35 +880,39 @@ async function deleteAllFiles() {
   }
 }
 
+// ── Warn before leaving during first-time setup ─────────────────
+function handleBeforeUnload(e) {
+  if (isAuthenticated.value && !hasExistingConfig.value) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+}
+onUnmounted(() => window.removeEventListener('beforeunload', handleBeforeUnload));
+
 // ── Auto-restore session ───────────────────────────────────────
 onMounted(async () => {
-  // In setup mode, ensure the password-set step has been completed first.
-  // If not, send the user back to the first-run screen at /.
-  if (isSetupMode.value) {
-    try {
-      const res = await fetch(getApiUrl('/admin/setup-status'));
-      if (res.ok) {
-        const s = await res.json();
-        if (!s.hasPassword) { window.location.replace('/'); return; }
-      }
-    } catch { /* ignore — proceed normally */ }
-  }
+  window.addEventListener('beforeunload', handleBeforeUnload);
+  // Always check whether a password exists — determines which gate form to show
+  try {
+    const res = await fetch(getApiUrl('/admin/setup-status'));
+    if (res.ok) {
+      const s = await res.json();
+      isFirstRun.value = !s.hasPassword;
+    }
+  } catch { /* ignore, fall through to login form */ }
+
+  if (isFirstRun.value) return;  // show create-password form, nothing to restore
 
   const stored = getStoredPassword();
   if (!stored) return;
   isLoading.value = true;
   try {
+    await verifyPassword(stored);
     const config = await fetchConfig(stored);
-    if (config === null) {
-      // No config on server yet — don't restore the session; require a fresh login
-      // so the full setup flow always starts from the password gate until a config is saved.
-      sessionStorage.removeItem(SESSION_KEY);
-      return;
-    }
-    loadConfigIntoDraft(config);
-    loadedCrs.value = config.crs ?? null;
-    isAuthenticated.value = true;
-    loadBackupFiles();
+    loadConfigIntoDraft(config ?? {});
+    loadedCrs.value         = config ? (config.crs ?? null) : null;
+    hasExistingConfig.value = config !== null;
+    isAuthenticated.value   = true;
   } catch {
     sessionStorage.removeItem(SESSION_KEY);
   } finally {
@@ -1481,51 +1560,25 @@ details.collapsible:not([open]) > summary {
   border: 1px solid rgba(217, 119, 6, 0.25);
   border-radius: 4px;
 }
+.field-ok {
+  margin: 0.25rem 0 0;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.78rem;
+  color: #15803d;
+  background: rgba(21, 128, 61, 0.09);
+  border: 1px solid rgba(21, 128, 61, 0.25);
+  border-radius: 4px;
+}
 
-.btn-yaml {
-  flex-shrink: 0;
-  padding: 0.55rem 1.1rem;
-  background: transparent;
-  color: var(--admin-text, #374151);
-  border: 1px solid var(--admin-border, #e0e0e0);
-  border-radius: 6px;
-  font-size: 0.85rem;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.btn-yaml:hover { background: #f3f4f6; }
-
-.yaml-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.45);
-  z-index: 9000;
+.yaml-collapsible { margin-top: 0; }
+.yaml-collapsible-body { padding: 0; }
+.yaml-inline-header {
   display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.yaml-panel {
-  background: var(--admin-header-bg, #fff);
-  border-radius: 8px;
-  width: min(860px, 94vw);
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
-}
-.yaml-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.85rem 1.1rem;
+  justify-content: flex-end;
+  padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--admin-border, #e0e0e0);
-  font-weight: 600;
-  font-size: 0.9rem;
 }
 .yaml-pre {
-  flex: 1;
-  overflow: auto;
   margin: 0;
   padding: 1rem 1.2rem;
   font-size: 0.8rem;
@@ -1534,6 +1587,11 @@ details.collapsible:not([open]) > summary {
   color: var(--admin-text, #374151);
   background: #f8f9fb;
   white-space: pre;
+}
+.yaml-pre-inline {
+  max-height: 460px;
+  overflow: auto;
+  border-radius: 0 0 6px 6px;
 }
 </style>
 

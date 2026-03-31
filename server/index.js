@@ -12,9 +12,12 @@ import compression from 'compression';
 import yaml from 'js-yaml';
 import multer from 'multer';
 import { fileURLToPath } from 'url';
-import config, { isDevelopment } from './config.js';
-import logger from './logger.js';
-import { processBatchUpload, relinkGeojson } from './processors/uploadProcessor.js';
+import config, { isDevelopment } from './src/config.js';
+import logger from './src/logger.js';
+import { listLayers, readLayerMeta, writeLayerMeta, deleteLayer, metaToConfigLayer, validateLayerId } from './src/layerStore.js';
+import { jobQueue } from './src/jobQueue.js';
+import { processUploadBatch, addSubFile, classifyExt, relinkGeojson } from './processors/uploadProcessor.js';
+import { convertToCog }   from './processors/geotiffProcessor.js';
 
 const app = express();
 
@@ -23,14 +26,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ── Runtime admin password ─────────────────────────────────────
-// Priority: ADMIN_PASSWORD env var  >  data/.credentials file
+// Stored in data/.credentials (plain text, 0o600). Set via the first-run wizard.
+// Reset by deleting the file (e.g. via the Danger Zone "Reset Config" action).
 const credentialsFilePath = path.join(__dirname, config.dataPath, '.credentials');
 
-let runtimeAdminPassword = config.adminPassword ?? null;
-
+let runtimeAdminPassword = null;
 try {
   const stored = (await fs.readFile(credentialsFilePath, 'utf8').catch(() => null))?.trim();
-  if (stored && !runtimeAdminPassword) runtimeAdminPassword = stored;
+  if (stored) runtimeAdminPassword = stored;
 } catch { /* ignore */ }
 
 function getAdminPassword() { return runtimeAdminPassword; }
@@ -84,7 +87,7 @@ function requireAdminAuth(req, res, next) {
   }
   const auth = req.headers['authorization'];
   if (!auth || !auth.startsWith('Basic ')) {
-    res.setHeader('WWW-Authenticate', 'Basic realm="Hist Map Admin"');
+    res.setHeader('WWW-Authenticate', 'Basic realm="Admin panel"');
     return res.status(401).json({ error: 'Authentication required' });
   }
   const decoded = Buffer.from(auth.slice(6), 'base64').toString('utf8');
@@ -107,10 +110,12 @@ app.get('/admin/setup-status', async (req, res) => {
   res.json({ hasPassword, hasConfig });
 });
 
-// Set admin password — only usable during initial setup (no password configured yet)
+// Set admin password — usable during initial setup OR after a config reset (no .credentials file)
 app.post('/admin/set-password', express.json(), async (req, res) => {
-  if (getAdminPassword()) {
-    return res.status(409).json({ error: 'Admin password is already configured.' });
+  // Allow only if no .credentials file exists (env-var-only installs still block this)
+  const fileExists = await fs.access(credentialsFilePath).then(() => true).catch(() => false);
+  if (fileExists) {
+    return res.status(409).json({ error: 'A password is already set. Use change-password to update it.' });
   }
   const { password } = req.body ?? {};
   if (!password || typeof password !== 'string' || password.length < 6) {
@@ -125,6 +130,28 @@ app.post('/admin/set-password', express.json(), async (req, res) => {
     logger.error('Failed to save credentials:', err.message);
     res.status(500).json({ error: 'Failed to save password.' });
   }
+});
+
+// Change admin password — requires current credentials, updates .credentials file
+app.post('/admin/change-password', requireAdminAuth, express.json(), async (req, res) => {
+  const { newPassword } = req.body ?? {};
+  if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+    return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+  }
+  try {
+    await fs.writeFile(credentialsFilePath, newPassword, { mode: 0o600 });
+    runtimeAdminPassword = newPassword;
+    logger.info('Admin password changed');
+    res.json({ success: true });
+  } catch (err) {
+    logger.error('Failed to update credentials:', err.message);
+    res.status(500).json({ error: 'Failed to save new password.' });
+  }
+});
+
+// Verify admin credentials — used by the client login form
+app.get('/admin/verify', requireAdminAuth, (req, res) => {
+  res.json({ ok: true });
 });
 
 // Health check endpoint
@@ -168,29 +195,40 @@ app.put('/config', requireAdminAuth, express.text({ type: 'text/yaml', limit: '2
   }
 });
 
-// Delete the app config (admin only) — triggers first-run setup on next visit
+// Delete the app config (admin only) — also clears .credentials so a new password can be chosen
 app.delete('/config', requireAdminAuth, async (req, res) => {
+  const errors = [];
   try {
     await fs.unlink(configFilePath);
     logger.info('Config deleted via admin API');
-    res.json({ success: true });
   } catch (err) {
-    if (err.code === 'ENOENT') return res.status(404).json({ error: 'No config file to delete.' });
-    logger.error('Failed to delete config file:', err.message);
-    res.status(500).json({ error: 'Failed to delete configuration' });
+    if (err.code !== 'ENOENT') errors.push(`config: ${err.message}`);
   }
+  // Clear .credentials so the next visitor can set a fresh password.
+  // If ADMIN_PASSWORD env var is set it remains as the master override.
+  try {
+    await fs.unlink(credentialsFilePath);
+    runtimeAdminPassword = null;
+    logger.info('Credentials cleared on config reset');
+  } catch (err) {
+    if (err.code !== 'ENOENT') errors.push(`credentials: ${err.message}`);
+  }
+  if (errors.length) return res.status(500).json({ error: errors.join('; ') });
+  res.json({ success: true });
 });
 
-// Upload data files (admin only)
-const dataDir = path.join(__dirname, config.dataPath);
+// ── Data directory ───────────────────────────────────────────────────────────
+const dataDir   = path.join(__dirname, config.dataPath);
+const layersDir = path.join(dataDir, 'layers');
 
+// ── Multer setup ──────────────────────────────────────────────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB
   fileFilter: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     const allowed = ['.geojson', '.json', '.tif', '.tiff', '.obj', '.ply', '.stl', '.las', '.laz', '.mtl',
-                     '.jpg', '.jpeg', '.png', '.bmp', '.tga', '.webp'];
+                     '.jpg', '.jpeg', '.png', '.bmp', '.tga', '.webp', '.csv'];
     if (allowed.includes(ext)) cb(null, true);
     else cb(new Error(`Unsupported file type: ${ext}`));
   },
@@ -208,17 +246,155 @@ function runUploadMiddleware(req, res, next) {
   });
 }
 
+// ── Upload files ──────────────────────────────────────────────────────────────
 app.post('/admin/upload', requireAdminAuth, runUploadMiddleware, async (req, res) => {
   if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No files provided.' });
+
+  // Per-file settings from the client upload modal, keyed by original filename
+  let allSettings = {};
   try {
-    const results = await processBatchUpload(req.files, dataDir, __dirname);
+    if (req.body?.settings) allSettings = JSON.parse(req.body.settings);
+  } catch { /* ignore malformed settings */ }
+
+  try {
+    await fs.mkdir(layersDir, { recursive: true });
+    const results = await processUploadBatch(req.files, layersDir, allSettings);
     for (const r of results) logger.info(`Upload processed: ${r.dataPath} (${r.type})`);
+
+    // Kick off background optimisation for any layers that need it
+    for (const r of results) {
+      if (r.optimizationType) {
+        _startOptimizationJob(r.id, r.optimizationType, r.dataPath);
+      }
+    }
     res.json(results);
   } catch (err) {
     logger.error('Upload processing error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+// ── Layer CRUD ───────────────────────────────────────────────────────────────
+
+// List all layers (reads sidecar files)
+app.get('/admin/layers', requireAdminAuth, async (req, res) => {
+  try {
+    const layers = await listLayers(layersDir);
+    res.json(layers);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get single layer meta
+app.get('/admin/layers/:id', requireAdminAuth, async (req, res) => {
+  try {
+    validateLayerId(req.params.id);
+    const meta = await readLayerMeta(layersDir, req.params.id);
+    res.json(meta);
+  } catch (err) {
+    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Update layer config (display name, visibility, order, extra fields)
+app.patch('/admin/layers/:id', requireAdminAuth, async (req, res) => {
+  try {
+    validateLayerId(req.params.id);
+    const meta = await readLayerMeta(layersDir, req.params.id);
+    const { displayName, visible, order, ...extras } = req.body ?? {};
+    if (displayName != null) meta.layerConfig.displayName = String(displayName);
+    if (visible    != null) meta.layerConfig.visible      = Boolean(visible);
+    if (order      != null) meta.layerConfig.order        = Number(order);
+    // Merge any extra type-specific config fields
+    Object.assign(meta.layerConfig, extras);
+    await writeLayerMeta(layersDir, req.params.id, meta);
+    res.json(meta);
+  } catch (err) {
+    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Delete a layer and its entire folder
+app.delete('/admin/layers/:id', requireAdminAuth, async (req, res) => {
+  try {
+    validateLayerId(req.params.id);
+    await deleteLayer(layersDir, req.params.id);
+    logger.info(`Deleted layer: ${req.params.id}`);
+    res.json({ success: true, deleted: req.params.id });
+  } catch (err) {
+    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// Add sub-file to an existing layer
+const subfileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } });
+app.post('/admin/layers/:id/subfiles', requireAdminAuth, subfileUpload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file provided.' });
+  const role = req.body?.role ?? 'unknown';
+  try {
+    validateLayerId(req.params.id);
+    const result = await addSubFile(req.params.id, req.file, role, layersDir);
+    res.json(result);
+  } catch (err) {
+    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Background optimisation jobs ─────────────────────────────────────────────
+
+function _startOptimizationJob(layerId, type, dataPath) {
+  const job    = jobQueue.add(layerId, type);
+  const absPath = path.join(__dirname, dataPath);
+
+  setImmediate(async () => {
+    jobQueue.markStarted(job.id);
+    try {
+      let meta = await readLayerMeta(layersDir, layerId);
+      if (type === 'cog') {
+        const { success, step, originalBackup } = await convertToCog(absPath, { keepOriginal: meta.keepOriginal });
+        meta = await readLayerMeta(layersDir, layerId);
+        meta.processingLog.push(step);
+        if (success) {
+          meta.status    = 'ready';
+          meta.optimized = true;
+          if (originalBackup) meta.originalBackup = originalBackup;
+        } else {
+          meta.status = 'ready'; // usable even without COG
+        }
+        await writeLayerMeta(layersDir, layerId, meta);
+      }
+      // COPC conversion would go here when PDAL is wired up
+      jobQueue.markDone(job.id);
+      logger.info(`Optimisation job ${job.id} (${type}) done for layer ${layerId}`);
+    } catch (err) {
+      jobQueue.markError(job.id, err);
+      const meta = await readLayerMeta(layersDir, layerId).catch(() => null);
+      if (meta) {
+        meta.status = 'error';
+        meta.processingLog.push(`Optimisation error: ${err.message}`);
+        await writeLayerMeta(layersDir, layerId, meta).catch(() => {});
+      }
+      logger.error(`Optimisation job ${job.id} failed:`, err.message);
+    }
+  });
+}
+
+// Job status endpoints
+app.get('/admin/jobs', requireAdminAuth, (req, res) => {
+  res.json(jobQueue.getAll());
+});
+
+app.get('/admin/jobs/layer/:id', requireAdminAuth, (req, res) => {
+  try { validateLayerId(req.params.id); } catch { return res.status(400).json({ error: 'Invalid layer ID.' }); }
+  res.json(jobQueue.getActiveForLayer(req.params.id));
+});
+
+// ── Legacy manual-link (kept for back-compat) ─────────────────────────────────
 
 // Manually assign 3D assets to specific features by feature ID (admin only)
 app.post('/admin/manual-link', requireAdminAuth, async (req, res) => {
@@ -281,18 +457,20 @@ app.post('/admin/manual-link', requireAdminAuth, async (req, res) => {
   res.json({ success: true, filename: safe, linkedCount });
 });
 
-// Re-link a GeoJSON file against currently stored 3D/pointcloud assets (admin only)
+// Re-link a GeoJSON layer against all stored 3D/pointcloud assets (admin only)
 app.post('/admin/relink', requireAdminAuth, async (req, res) => {
-  const { filename } = req.body;
-  if (!filename || typeof filename !== 'string') {
-    return res.status(400).json({ error: 'filename is required.' });
-  }
-  if (!filename.endsWith('.geojson')) {
-    return res.status(400).json({ error: 'Only .geojson files can be re-linked.' });
+  const { layerId } = req.body;
+  if (!layerId || typeof layerId !== 'string') {
+    return res.status(400).json({ error: 'layerId is required.' });
   }
   try {
-    const result = await relinkGeojson(filename, dataDir);
-    logger.info(`Re-linked ${result.filename}: ${result.linkedCount} feature(s) linked`);
+    validateLayerId(layerId);
+    const meta = await readLayerMeta(layersDir, layerId);
+    if (meta.fileType !== 'geojson') return res.status(400).json({ error: 'Only GeoJSON layers can be re-linked.' });
+    const ext     = meta.extension || '.geojson';
+    const filePath = path.join(layersDir, layerId, `${layerId}${ext}`);
+    const result  = await relinkGeojson(filePath, layersDir);
+    logger.info(`Re-linked layer ${layerId}: ${result.linkedCount} feature(s) linked`);
     res.json(result);
   } catch (err) {
     logger.error('Re-link error:', err.message);
@@ -300,70 +478,17 @@ app.post('/admin/relink', requireAdminAuth, async (req, res) => {
   }
 });
 
-// List uploaded data files (admin only)
-app.get('/admin/uploads', requireAdminAuth, async (req, res) => {
+// Download the original file for a layer (if keepOriginal was set)
+app.get('/admin/layers/:id/original', requireAdminAuth, async (req, res) => {
   try {
-    const [shapes, geotiffs, models, pointclouds] = await Promise.all([
-      fs.readdir(path.join(dataDir, 'shapes')).catch(() => []),
-      fs.readdir(path.join(dataDir, 'geotiffs')).catch(() => []),
-      fs.readdir(path.join(dataDir, '3D')).catch(() => []),
-      fs.readdir(path.join(dataDir, 'pointclouds')).catch(() => []),
-    ]);
-    res.json({
-      shapes:      shapes.filter(f => f.endsWith('.geojson')).map(f => ({ filename: f, dataPath: `data/shapes/${f}`,      type: 'geojson'    })),
-      geotiffs:    geotiffs.filter(f => /\.tiff?$/i.test(f)).map(f => ({ filename: f, dataPath: `data/geotiffs/${f}`,    type: 'geotiff'    })),
-      models:      models.filter(f => /\.(obj|ply|stl)$/i.test(f)).map(f => ({ filename: f, dataPath: `data/3D/${f}`,         type: 'model'      })),
-      pointclouds: pointclouds.filter(f => /\.(las|laz)$/i.test(f)).map(f => ({ filename: f, dataPath: `data/pointclouds/${f}`, type: 'pointcloud' })),
-    });
+    validateLayerId(req.params.id);
+    const meta = await readLayerMeta(layersDir, req.params.id);
+    if (!meta.originalBackup) return res.status(404).json({ error: 'No original backup for this layer.' });
+    const backupPath = path.join(layersDir, req.params.id, meta.originalBackup);
+    res.download(backupPath, meta.originalName);
   } catch (err) {
+    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
     res.status(500).json({ error: err.message });
-  }
-});
-
-// Delete all uploaded data files (admin only) — keeps directory structure intact
-app.delete('/admin/uploads', requireAdminAuth, async (req, res) => {
-  const subdirs = ['shapes', 'geotiffs', '3D', 'pointclouds'];
-  let deleted = 0;
-  for (const sub of subdirs) {
-    const dir = path.join(dataDir, sub);
-    const files = await fs.readdir(dir).catch(() => []);
-    for (const file of files) {
-      if (file.startsWith('.')) continue;
-      await fs.unlink(path.join(dir, file)).catch(() => {});
-      deleted++;
-    }
-  }
-  logger.info(`Admin deleted all uploaded files: ${deleted} file(s) removed`);
-  res.json({ success: true, deleted });
-});
-
-// Delete a single uploaded file (admin only)
-app.delete('/admin/uploads/:category/:filename', requireAdminAuth, async (req, res) => {
-  const CATEGORY_DIRS = { shapes: 'shapes', geotiffs: 'geotiffs', models: '3D', pointclouds: 'pointclouds' };
-  const { category, filename } = req.params;
-
-  const subdir = CATEGORY_DIRS[category];
-  if (!subdir) return res.status(400).json({ error: 'Invalid category.' });
-
-  // Reject filenames containing path separators to prevent traversal
-  if (filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
-    return res.status(400).json({ error: 'Invalid filename.' });
-  }
-
-  const resolved = path.resolve(dataDir, subdir, filename);
-  const allowed  = path.resolve(dataDir, subdir) + path.sep;
-  if (!resolved.startsWith(allowed)) {
-    return res.status(400).json({ error: 'Invalid filename.' });
-  }
-
-  try {
-    await fs.unlink(resolved);
-    logger.info(`Admin deleted file: ${category}/${filename}`);
-    res.json({ success: true, deleted: filename });
-  } catch (err) {
-    if (err.code === 'ENOENT') return res.status(404).json({ error: 'File not found.' });
-    logger.error('Delete file error:', err);
-    res.status(500).json({ error: 'Failed to delete file.' });
   }
 });
 

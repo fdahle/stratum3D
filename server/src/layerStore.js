@@ -1,0 +1,144 @@
+/**
+ * layerStore.js — manages the layer registry.
+ *
+ * Each uploaded file ("layer") lives in its own UUID directory:
+ *   data/layers/{uuid}/
+ *     {uuid}.{ext}           — main data file (renamed on upload)
+ *     {uuid}.meta.json       — sidecar with all metadata
+ *     original_{uuid}.{ext}  — backup of the original (if keepOriginal = true)
+ *     {subId}.{ext}          — sub-files (CSV, MTL, textures, linked 3D, pointclouds)
+ *     {subId}.meta.json      — sub-file metadata (optional, for primary sub-files)
+ *
+ * Sub-file roles:
+ *   attributes   — CSV that gets joined to GeoJSON features
+ *   material     — MTL companion for OBJ models
+ *   texture      — texture image referenced by an MTL
+ *   model        — 3D model linked to GeoJSON features
+ *   pointcloud   — point cloud linked to GeoJSON features
+ */
+
+import fs   from 'fs/promises';
+import path from 'path';
+
+// ── Meta factory ───────────────────────────────────────────────────────────────
+
+export function createLayerMeta({ id, originalName, fileType, options = {} }) {
+  return {
+    id,
+    originalName,
+    extension: path.extname(originalName).toLowerCase(),
+    fileType,                                          // geojson | geotiff | model | pointcloud
+    uploadedAt: new Date().toISOString(),
+    status: 'ready',                                   // ready | optimizing | error
+    optimized: false,
+    optimizationType: null,                            // cog | copc | simplify | decimate
+    keepOriginal:   options.keepOriginal   ?? false,
+    originalBackup: null,                              // backup filename when keepOriginal=true
+    subFiles: [],
+    layerConfig: {
+      displayName: options.displayName ?? path.parse(originalName).name,
+      visible:     options.visible     ?? true,
+      order:       options.order       ?? 0,
+      type:        fileTypeToLayerType(fileType),
+    },
+    processingLog: [],
+  };
+}
+
+export function createSubFileMeta({ id, originalName, fileType, role }) {
+  return {
+    id,
+    originalName,
+    extension: path.extname(originalName).toLowerCase(),
+    fileType,
+    role,                                              // see roles above
+    uploadedAt: new Date().toISOString(),
+    companions: [],                                    // e.g. MTL → texture ids
+  };
+}
+
+export function fileTypeToLayerType(fileType) {
+  switch (fileType) {
+    case 'geojson':    return 'geojson';
+    case 'geotiff':    return 'geotiff';
+    case 'model':      return 'model';
+    case 'pointcloud': return 'pointcloud';
+    default:           return 'unknown';
+  }
+}
+
+// ── CRUD ───────────────────────────────────────────────────────────────────────
+
+export async function readLayerMeta(layersDir, id) {
+  const metaPath = path.join(layersDir, id, `${id}.meta.json`);
+  try {
+    const raw = await fs.readFile(metaPath, 'utf8');
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`Layer ${id} not found: ${err.message}`);
+  }
+}
+
+export async function writeLayerMeta(layersDir, id, meta) {
+  const metaPath = path.join(layersDir, id, `${id}.meta.json`);
+  await fs.writeFile(metaPath, JSON.stringify(meta, null, 2), 'utf8');
+}
+
+export async function listLayers(layersDir) {
+  try {
+    const entries = await fs.readdir(layersDir, { withFileTypes: true });
+    const layers = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      try {
+        const meta = await readLayerMeta(layersDir, entry.name);
+        layers.push(meta);
+      } catch { /* skip dirs without valid sidecar */ }
+    }
+    return layers.sort((a, b) => (a.layerConfig.order ?? 0) - (b.layerConfig.order ?? 0));
+  } catch {
+    return [];
+  }
+}
+
+export async function deleteLayer(layersDir, id) {
+  validateLayerId(id);
+  const layerDir  = path.join(layersDir, id);
+  const resolved  = path.resolve(layerDir);
+  const base      = path.resolve(layersDir);
+  if (!resolved.startsWith(base + path.sep)) throw new Error('Invalid layer ID.');
+  await fs.rm(layerDir, { recursive: true, force: true });
+}
+
+// ── Config serialisation ───────────────────────────────────────────────────────
+
+/**
+ * Convert a layer's sidecar meta into a minimal config.yaml layer entry.
+ * The server URL must be passed in so it can be built into the url field.
+ */
+export function metaToConfigLayer(meta, serverBaseUrl) {
+  const url = `${serverBaseUrl}/data/layers/${meta.id}/${meta.id}${meta.extension}`;
+  const base = {
+    name:    meta.layerConfig.displayName,
+    type:    meta.layerConfig.type,
+    url,
+    visible: meta.layerConfig.visible ?? true,
+    order:   meta.layerConfig.order   ?? 0,
+    _layerId: meta.id,                         // back-reference kept in YAML for admin re-load
+  };
+  // Carry over any additional type-specific config fields that were set on this layer
+  const extras = { ...meta.layerConfig };
+  delete extras.displayName;
+  delete extras.visible;
+  delete extras.order;
+  delete extras.type;
+  return { ...base, ...extras };
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+export function validateLayerId(id) {
+  if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    throw new Error('Invalid layer ID format.');
+  }
+}
