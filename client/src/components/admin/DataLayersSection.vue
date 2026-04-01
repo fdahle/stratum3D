@@ -67,6 +67,21 @@
 
           <!-- Card action buttons -->
           <div class="lc-actions">
+            <!-- Link Data: attach a CSV to this GeoJSON layer (GeoJSON layers only) -->
+            <button
+              v-if="layer.fileType === 'geojson'"
+              class="action-btn action-btn-linkdata"
+              title="Attach a CSV and configure attribute join"
+              :disabled="layer.status === 'optimizing'"
+              @click="openLinkDataModal(layer)"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <line x1="3" y1="9" x2="21" y2="9"/>
+                <line x1="3" y1="15" x2="21" y2="15"/>
+                <line x1="9" y1="9" x2="9" y2="21"/>
+              </svg>
+            </button>
             <!-- Manage 3D: upload & link 3D models/point clouds (GeoJSON layers only) -->
             <button
               v-if="layer.fileType === 'geojson'"
@@ -189,6 +204,42 @@
                 </div>
               </div>
             </div>
+            <div class="edit-row">
+              <div class="edit-field edit-field-grow">
+                <label>Search fields <span class="edit-field-hint">(comma-separated attribute names)</span></label>
+                <input v-model="searchFieldsStr" type="text" placeholder="e.g. name, address, id" />
+              </div>
+            </div>
+
+            <!-- Data head preview -->
+            <div class="data-preview-section">
+              <button class="edit-preview-toggle" @click="toggleDataPreview(layer.id)">
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" :style="{ transform: dataPreviewOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+                {{ dataPreviewOpen ? 'Hide' : 'Show' }} data preview
+                <span v-if="dataPreview" class="edit-field-hint">(first {{ dataPreview.rows.length }} of {{ dataPreview.total }} features)</span>
+              </button>
+              <div v-if="dataPreviewOpen" class="data-preview-body">
+                <div v-if="dataPreviewLoading" class="data-preview-empty">Loading…</div>
+                <div v-else-if="dataPreviewError" class="data-preview-empty data-preview-error">{{ dataPreviewError }}</div>
+                <div v-else-if="dataPreview && dataPreview.columns.length === 0" class="data-preview-empty">No attributes found.</div>
+                <div v-else-if="dataPreview" class="data-preview-scroll">
+                  <table class="data-preview-table">
+                    <thead>
+                      <tr>
+                        <th v-for="col in dataPreview.columns" :key="col" :title="col">{{ col }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(row, ri) in dataPreview.rows" :key="ri">
+                        <td v-for="(cell, ci) in row" :key="ci" :title="cell">{{ cell }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
           </template>
 
           <!-- GeoTIFF extras -->
@@ -200,6 +251,20 @@
               </div>
             </div>
           </template>
+
+          <!-- Config preview (developer mode only) -->
+          <div v-if="props.devMode" class="edit-preview">
+            <button class="edit-preview-toggle" @click="previewOpen = !previewOpen">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" :style="{ transform: previewOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+              {{ previewOpen ? 'Hide' : 'Show' }} config preview
+            </button>
+            <pre v-if="previewOpen" class="edit-preview-body">{{ JSON.stringify(
+              Object.fromEntries(Object.entries({ ...editDraft, search_fields: searchFieldsStr.split(',').map(s => s.trim()).filter(Boolean) }).filter(([, v]) => v !== '' && v != null && !(Array.isArray(v) && !v.length))),
+              null, 2
+            ) }}</pre>
+          </div>
 
           <!-- Edit panel footer -->
           <div class="edit-footer">
@@ -239,6 +304,15 @@
       @saved="fetchLayers"
     />
 
+    <!-- CSV data linking modal -->
+    <LinkDataModal
+      :is-open="linkDataModal.open"
+      :layer-id="linkDataModal.layerId"
+      :auth-header="props.authHeader"
+      @close="linkDataModal.open = false"
+      @saved="fetchLayers"
+    />
+
   </section>
 </template>
 
@@ -247,9 +321,11 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { getApiUrl } from '../../utils/config';
 import UploadSettingsModal from '../modals/admin/UploadSettingsModal.vue';
 import LinkingModal from '../modals/admin/LinkingModal.vue';
+import LinkDataModal from '../modals/admin/LinkDataModal.vue';
 
 const props = defineProps({
   authHeader: { type: String, default: '' },
+  devMode:    { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['update:layers']);
@@ -262,16 +338,23 @@ const uploadError   = ref('');
 const uploadPending = ref(false);
 const deletePending = ref({});
 const deleteConfirmId = ref(null);
-const editingId     = ref(null);
-const editDraft     = ref({});
-const editSaving    = ref(false);
-const editError     = ref('');
+const editingId       = ref(null);
+const editDraft       = ref({});
+const editSaving      = ref(false);
+const editError       = ref('');
+const searchFieldsStr = ref('');
+const previewOpen     = ref(false);
+const dataPreviewOpen    = ref(false);
+const dataPreview        = ref(null);   // { columns, rows, total }
+const dataPreviewLoading = ref(false);
+const dataPreviewError   = ref('');
 const pendingFiles  = ref([]);
 const showUploadModal = ref(false);
 let pollTimer = null;
 
 // Linking modal state
-const linkModal = ref({ open: false, layerId: '' });
+const linkModal     = ref({ open: false, layerId: '' });
+const linkDataModal = ref({ open: false, layerId: '' });
 
 // ── Computed ────────────────────────────────────────────────────
 const sortedLayers = computed(() =>
@@ -336,7 +419,7 @@ function metaToEntry(meta) {
     visible: lc.visible ?? true,
     order:   lc.order   ?? 0,
   };
-  const extras = ['color', 'stroke_color', 'fill_color', 'attribution', 'tileSize'];
+  const extras = ['color', 'stroke_color', 'fill_color', 'attribution', 'tileSize', 'search_fields'];
   for (const k of extras) {
     if (lc[k] != null) entry[k] = lc[k];
   }
@@ -412,8 +495,10 @@ function subfileGroups(layer) {
   const models      = subs.filter(sf => sf.role === 'model');
   const pointclouds = subs.filter(sf => sf.role === 'pointcloud');
   const groups = [];
+  const attributes = subs.filter(sf => sf.role === 'attributes');
   if (models.length)      groups.push({ role: 'model',      count: models.length,      label: models.length === 1 ? 'model' : 'models',             names: models.map(sf => sf.originalName) });
   if (pointclouds.length) groups.push({ role: 'pointcloud', count: pointclouds.length, label: pointclouds.length === 1 ? 'point cloud' : 'point clouds', names: pointclouds.map(sf => sf.originalName) });
+  if (attributes.length)  groups.push({ role: 'attributes', count: attributes.length,  label: attributes.length === 1 ? 'CSV' : 'CSVs',                   names: attributes.map(sf => sf.originalName) });
   return groups;
 }
 
@@ -450,6 +535,10 @@ function openLinkModal(layer) {
   linkModal.value = { open: true, layerId: layer.id };
 }
 
+function openLinkDataModal(layer) {
+  linkDataModal.value = { open: true, layerId: layer.id };
+}
+
 // ── Edit flow ───────────────────────────────────────────────────
 function toggleEdit(layer) {
   if (editingId.value === layer.id) {
@@ -457,6 +546,10 @@ function toggleEdit(layer) {
     return;
   }
   deleteConfirmId.value = null;
+  previewOpen.value = false;
+  dataPreviewOpen.value = false;
+  dataPreview.value = null;
+  dataPreviewError.value = '';
   const lc = layer.layerConfig || {};
   editDraft.value = {
     displayName:  lc.displayName  ?? '',
@@ -469,6 +562,7 @@ function toggleEdit(layer) {
     // GeoTIFF extras
     attribution:  lc.attribution  ?? '',
   };
+  searchFieldsStr.value = (lc.search_fields ?? []).join(', ');
   editingId.value = layer.id;
   editError.value = '';
 }
@@ -476,16 +570,45 @@ function toggleEdit(layer) {
 function cancelEdit() {
   editingId.value = null;
   editError.value = '';
+  searchFieldsStr.value = '';
+  previewOpen.value = false;
+  dataPreviewOpen.value = false;
+  dataPreview.value = null;
+  dataPreviewError.value = '';
+}
+
+async function toggleDataPreview(layerId) {
+  if (dataPreviewOpen.value) {
+    dataPreviewOpen.value = false;
+    return;
+  }
+  dataPreviewOpen.value = true;
+  if (dataPreview.value) return; // already loaded
+  dataPreviewLoading.value = true;
+  dataPreviewError.value = '';
+  try {
+    const res = await fetch(getApiUrl(`/admin/layers/${layerId}/preview`), { headers: authHeaders() });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    dataPreview.value = await res.json();
+  } catch (err) {
+    dataPreviewError.value = err.message;
+  } finally {
+    dataPreviewLoading.value = false;
+  }
 }
 
 async function saveEdit(id) {
   editSaving.value = true;
   editError.value  = '';
   try {
+    // Parse search_fields from comma-separated string
+    const parsedSearchFields = searchFieldsStr.value
+      .split(',').map(s => s.trim()).filter(Boolean);
     // Strip empty strings before sending
     const patch = Object.fromEntries(
       Object.entries(editDraft.value).filter(([, v]) => v !== '' && v != null)
     );
+    patch.search_fields = parsedSearchFields;
     const res = await fetch(getApiUrl(`/admin/layers/${id}`), {
       method: 'PATCH',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -518,19 +641,19 @@ async function saveEdit(id) {
   gap: 1rem;
   margin-bottom: 1.1rem;
 }
-.section-title { font-size: 1.05rem; font-weight: 600; margin: 0 0 0.2rem; }
-.section-desc  { font-size: 0.8rem; color: var(--text-muted, #888); margin: 0; }
+.section-title { font-size: 1rem; font-weight: 600; margin: 0 0 0.2rem; }
+.section-desc  { font-size: 0.8rem; color: var(--admin-muted, #777); margin: 0; }
 
 /* btn-add — label wraps a hidden file input */
 .btn-add {
   display: inline-flex; align-items: center;
   padding: 0.4rem 0.85rem; border-radius: 6px; border: none;
-  background: var(--accent, #3b82f6); color: #fff;
+  background: #3b82f6; color: #fff;
   font-size: 0.82rem; font-weight: 500; cursor: pointer; white-space: nowrap;
   transition: background 0.15s, opacity 0.15s;
   user-select: none;
 }
-.btn-add:hover:not(.btn-add-disabled) { background: var(--accent-hover, #2563eb); }
+.btn-add:hover:not(.btn-add-disabled) { background: #2563eb; }
 .btn-add-disabled { opacity: 0.55; cursor: default; }
 
 /* ── Upload error ───────────────────────────────────────────── */
@@ -546,10 +669,10 @@ async function saveEdit(id) {
 
 /* ── Empty / loading ────────────────────────────────────────── */
 .empty-state {
-  padding: 2rem 1rem; text-align: center;
+  padding: 1.25rem; text-align: center;
   font-size: 0.85rem; color: var(--admin-muted, #777);
-  border: 1px dashed var(--admin-border, #e0e0e0);
-  border-radius: 8px;
+  background: var(--admin-bg, #f3f4f6);
+  border-radius: 6px;
 }
 
 /* ── Layer list ─────────────────────────────────────────────── */
@@ -618,6 +741,8 @@ async function saveEdit(id) {
 .action-btn-danger:hover:not(:disabled) { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.4); color: #dc2626; }
 .action-btn-link3d { color: #7c3aed; border-color: rgba(124,58,237,0.3); }
 .action-btn-link3d:hover:not(:disabled) { background: rgba(124,58,237,0.08); border-color: rgba(124,58,237,0.5); color: #7c3aed; }
+.action-btn-linkdata { color: #059669; border-color: rgba(5,150,105,0.3); }
+.action-btn-linkdata:hover:not(:disabled) { background: rgba(5,150,105,0.08); border-color: rgba(5,150,105,0.5); color: #059669; }
 
 /* ── Sub-files strip ────────────────────────────────────────── */
 .lc-subfile-uploading {
@@ -645,6 +770,7 @@ async function saveEdit(id) {
 }
 .subfile-chip-model      { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
 .subfile-chip-pointcloud { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
+.subfile-chip-attributes { background: #f0fdf4; color: #059669; border-color: #a7f3d0; }
 
 /* ── Delete confirm bar ─────────────────────────────────────── */
 .lc-confirm-bar {
@@ -708,14 +834,72 @@ input:checked + .slider::before { transform: translateX(16px); }
 /* Edit footer */
 .edit-footer { display: flex; align-items: center; gap: 0.5rem; }
 .edit-footer-spacer { flex: 1; }
+.edit-field-hint { font-size: 0.75rem; color: var(--admin-muted, #888); font-weight: 400; }
+
+/* Data head preview */
+.data-preview-section { border-top: 1px solid var(--admin-border, #e8e8e8); margin-top: 0.6rem; padding-top: 0.5rem; }
+.data-preview-body { margin-top: 0.5rem; }
+.data-preview-empty { font-size: 0.8rem; color: var(--admin-muted, #888); padding: 0.3rem 0; }
+.data-preview-error { color: #dc2626; }
+.data-preview-scroll { overflow-x: auto; max-height: 220px; overflow-y: auto; border: 1px solid var(--admin-border, #e0e0e0); border-radius: 5px; }
+.data-preview-table {
+  border-collapse: collapse;
+  font-size: 0.74rem;
+  width: 100%;
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+}
+.data-preview-table th {
+  position: sticky; top: 0;
+  background: var(--admin-bg, #f3f4f6);
+  border-bottom: 1px solid var(--admin-border, #e0e0e0);
+  padding: 0.3rem 0.55rem;
+  text-align: left;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--admin-text, #333);
+}
+.data-preview-table td {
+  padding: 0.25rem 0.55rem;
+  border-bottom: 1px solid var(--admin-border, #f0f0f0);
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--admin-text, #444);
+}
+.data-preview-table tbody tr:last-child td { border-bottom: none; }
+.data-preview-table tbody tr:hover td { background: var(--admin-bg, #f9f9f9); }
+
+/* Config preview */
+.edit-preview { border-top: 1px solid var(--admin-border, #e8e8e8); margin-top: 0.6rem; padding-top: 0.5rem; }
+.edit-preview-toggle {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  background: none; border: none; cursor: pointer; padding: 0.15rem 0;
+  font-size: 0.76rem; color: var(--admin-muted, #888);
+  user-select: none;
+}
+.edit-preview-toggle:hover { color: var(--admin-text, #1a1a1a); }
+.edit-preview-body {
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--admin-bg, #f3f4f6);
+  border: 1px solid var(--admin-border, #e0e0e0);
+  border-radius: 5px;
+  font-size: 0.74rem;
+  line-height: 1.55;
+  color: var(--admin-text, #333);
+  overflow-x: auto;
+  white-space: pre;
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+}
 .edit-error { font-size: 0.78rem; color: #dc2626; }
 
 .btn-primary-sm {
   padding: 0.3rem 0.75rem; border-radius: 5px; border: none; cursor: pointer;
-  background: var(--accent, #3b82f6); color: #fff; font-size: 0.8rem; font-weight: 500;
+  background: #3b82f6; color: #fff; font-size: 0.8rem; font-weight: 500;
   transition: background 0.12s;
 }
-.btn-primary-sm:hover:not(:disabled) { background: var(--accent-hover, #2563eb); }
+.btn-primary-sm:hover:not(:disabled) { background: #2563eb; }
 .btn-primary-sm:disabled { opacity: 0.55; cursor: default; }
 
 .btn-secondary-sm {

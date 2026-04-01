@@ -249,6 +249,7 @@
         <!-- ── 5 + 6. Data Layers (upload + manage) ─────────────── -->
         <DataLayersSection
           :auth-header="currentAuthHeader"
+          :dev-mode="layerDevMode"
           @update:layers="draft.data_layers = $event"
         />
 
@@ -380,6 +381,33 @@
         </section>
 
         <!-- ── 9. Developer ─────────────────────────────────────── -->
+        <!-- Security -->
+        <section class="admin-section">
+          <div class="section-header-simple">
+            <h2 class="section-title">Security</h2>
+            <p class="section-desc">Change the admin password.</p>
+          </div>
+          <div class="fields-stack">
+            <div class="field-row-2">
+              <div class="field-group">
+                <label>New Password</label>
+                <input v-model="newPassword" type="password" placeholder="New password" autocomplete="new-password" :disabled="changingPassword" />
+              </div>
+              <div class="field-group">
+                <label>Confirm Password</label>
+                <input v-model="newPasswordConfirm" type="password" placeholder="Repeat new password" autocomplete="new-password" :disabled="changingPassword" />
+              </div>
+            </div>
+            <p v-if="changePasswordError" class="field-warn">{{ changePasswordError }}</p>
+            <p v-if="changePasswordOk" class="field-ok">Password changed successfully.</p>
+            <button class="btn-secondary btn-change-pw" :disabled="changingPassword || !newPassword || !newPasswordConfirm" @click="changePassword">
+              <span v-if="changingPassword">Changing…</span>
+              <span v-else>Change Password</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- Developer -->
         <section v-if="!isFirstRun" class="admin-section">
           <div class="section-header-simple">
             <h2 class="section-title">Developer</h2>
@@ -389,11 +417,18 @@
             <summary>View config YAML</summary>
             <div class="collapsible-body yaml-collapsible-body">
               <div class="yaml-inline-header">
-                <button class="btn-secondary btn-sm" @click="navigator.clipboard.writeText(yamlPanelText)">Copy</button>
+                <button class="btn-secondary btn-sm" @click="backupConfig">Download</button>
+                <button class="btn-secondary btn-sm" @click="copyYaml">Copy</button>
               </div>
               <pre class="yaml-pre yaml-pre-inline">{{ yamlPanelText }}</pre>
             </div>
           </details>
+          <div class="dev-toggle-row">
+            <label class="dev-toggle-label">
+              <input type="checkbox" v-model="layerDevMode" />
+              Show layer config preview in edit panel
+            </label>
+          </div>
         </section>
       </div>
 
@@ -401,6 +436,7 @@
 
     <!-- Save bar — outside the scroll region so it's always visible -->
     <div class="save-bar">
+      <span v-if="isDirty && !validationError" class="unsaved-badge">Unsaved changes</span>
       <p v-if="validationError" class="save-error">{{ validationError }}</p>
       <template v-if="crsChangeSaveConfirming">
         <p class="save-error">
@@ -425,7 +461,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import yaml from 'js-yaml';
 import { useRoute, useRouter } from 'vue-router';
 import { getApiUrl } from '../utils/config';
@@ -462,8 +498,14 @@ const passwordFieldRef = ref(null);
 const loadedCrs             = ref(null);  // CRS from the last saved config
 const crsChangeSaveConfirming = ref(false); // waiting for user to ack CRS change before saving
 
-const SESSION_KEY = 'admin_auth';
+// Password held in memory only — never written to sessionStorage or localStorage
+const _storedPassword = ref('');
+function storePassword(pwd)   { _storedPassword.value = pwd; }
+function getStoredPassword()  { return _storedPassword.value; }
+function clearStoredPassword() { _storedPassword.value = ''; }
+
 const osmBackground = ref(true);  // separate from basemaps — MapWidget injects the right tile per CRS
+const layerDevMode  = ref(false); // developer mode: shows config preview in layer edit panels
 
 // ── Draft config ───────────────────────────────────────────────
 function blankDraft() {
@@ -507,9 +549,13 @@ const viewWarnings = computed(() => {
 // CRS presets: view settings applied automatically when the user sets a matching EPSG code.
 // The OSM background tile is handled separately (MapWidget picks the right URL per CRS).
 const CRS_VIEW_PRESETS = {
-  'EPSG:3031': { label: 'WGS 84 / Antarctic Polar Stereographic', center: [0, -75], zoom: 3, minZoom: 0, maxZoom: 14 },
-  'EPSG:3575': { label: 'WGS 84 / North Pole LAEA Europe',        center: [0, 85],  zoom: 3, minZoom: 0, maxZoom: 14 },
-  'EPSG:4326': { label: 'WGS 84 (geographic / flat)',             center: [0, 20],  zoom: 3, minZoom: 0, maxZoom: 19 },
+  'EPSG:3031':  { label: 'WGS 84 / Antarctic Polar Stereographic',           center: [0, -75],          zoom: 3, minZoom: 0, maxZoom: 14 },
+  'EPSG:3035':  { label: 'ETRS89-LAEA (Europe)',                             center: [4500000, 3150000], zoom: 3, minZoom: 0, maxZoom: 20 },
+  'EPSG:3413':  { label: 'WGS 84 / NSIDC Sea Ice Polar Stereographic North', center: [0, 0],             zoom: 3, minZoom: 0, maxZoom: 14 },
+  'EPSG:3575':  { label: 'WGS 84 / North Pole LAEA Europe',                  center: [0, 85],            zoom: 3, minZoom: 0, maxZoom: 14 },
+  'EPSG:4326':  { label: 'WGS 84 (geographic / flat)',                       center: [0, 20],            zoom: 3, minZoom: 0, maxZoom: 19 },
+  'EPSG:27700': { label: 'British National Grid (UK)',                        center: [400000, 400000],   zoom: 4, minZoom: 0, maxZoom: 20 },
+  'EPSG:2154':  { label: 'RGF93 / Lambert-93 (France)',                      center: [700000, 6600000],  zoom: 5, minZoom: 0, maxZoom: 20 },
 };
 
 const crsPreset = computed(() => {
@@ -524,6 +570,12 @@ const osmBgLabel = computed(() => {
   if (crs === 'EPSG:3575') return 'GBIF OSM Bright — Arctic (EPSG:3575)';
   return 'OpenStreetMap (standard tiles)';
 });
+
+// Sync the browser tab title with the configured site title while authenticated
+watch(
+  () => draft.value.website.title,
+  (title) => { if (isAuthenticated.value) document.title = title || 'Hist Map'; }
+);
 
 const yamlPanelText = computed(() => {
   try { return yaml.dump(buildConfig(), { lineWidth: 120, noRefs: true }); }
@@ -563,7 +615,13 @@ const crsChangedWithData = computed(() =>
   hasServerLayers.value
 );
 
-// ── Backup file list ───────────────────────────────────────────
+// ── Unsaved changes tracking ───────────────────────────────────
+const savedSnapshot = ref(null);
+const isDirty = computed(() => {
+  if (!hasExistingConfig.value || savedSnapshot.value === null) return false;
+  try { return JSON.stringify(buildConfig()) !== savedSnapshot.value; }
+  catch { return false; }
+});
 
 
 function parseViewExtent() {
@@ -645,9 +703,6 @@ function buildConfig() {
 function buildAuthHeader(pwd) {
   return 'Basic ' + btoa('admin:' + pwd);
 }
-function getStoredPassword() {
-  return sessionStorage.getItem(SESSION_KEY);
-}
 // Reactive auth header — passed down to components that make authenticated requests
 const currentAuthHeader = computed(() => buildAuthHeader(getStoredPassword() || ''));
 async function verifyPassword(pwd) {
@@ -694,12 +749,13 @@ async function createPassword() {
     password.value        = '';
     passwordConfirm.value = '';
     isFirstRun.value      = false;
-    sessionStorage.setItem(SESSION_KEY, pwd);
+    storePassword(pwd);
     const config = await fetchConfig(pwd);
     loadConfigIntoDraft(config ?? {});
     loadedCrs.value         = config ? (config.crs ?? null) : null;
     hasExistingConfig.value = config !== null;
     isAuthenticated.value   = true;
+    resetSessionTimer();
   } catch (err) {
     loginError.value = err.message;
   } finally {
@@ -718,8 +774,10 @@ async function attemptLogin() {
     loadConfigIntoDraft(config ?? {});
     loadedCrs.value         = config ? (config.crs ?? null) : null;
     hasExistingConfig.value = config !== null;
-    sessionStorage.setItem(SESSION_KEY, password.value);
+    savedSnapshot.value     = config ? JSON.stringify(buildConfig()) : null;
+    storePassword(password.value);
     isAuthenticated.value   = true;
+    resetSessionTimer();
   } catch (err) {
     loginError.value = err.message;
     password.value   = '';
@@ -731,13 +789,16 @@ async function attemptLogin() {
 }
 
 function logout() {
-  sessionStorage.removeItem(SESSION_KEY);
+  clearStoredPassword();
+  clearTimeout(_sessionTimeoutId);
   isAuthenticated.value = false;
   osmBackground.value   = true;
   draft.value           = blankDraft();
+  savedSnapshot.value   = null;
   password.value        = '';
   passwordConfirm.value = '';
   loginError.value      = '';
+  document.title        = 'Hist Map';
 }
 
 // ── Save ───────────────────────────────────────────────────────
@@ -774,6 +835,7 @@ async function saveConfig() {
     hasExistingConfig.value = true;
     loadedCrs.value = draft.value.crs;
     crsChangeSaveConfirming.value = false;
+    savedSnapshot.value     = JSON.stringify(buildConfig());
     setTimeout(() => { saveSuccess.value = false; }, 5000);
   } catch (err) {
     validationError.value = err.message;
@@ -782,7 +844,22 @@ async function saveConfig() {
   }
 }
 
-// ── Backup ────────────────────────────────────────────────────
+async function copyYaml() {
+  const text = yamlPanelText.value;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try { document.execCommand('copy'); } catch { /* silent fail */ }
+    ta.remove();
+  }
+}
+
 function backupConfig() {
   const config = buildConfig();
   const yamlText = yaml.dump(config, { lineWidth: 120, noRefs: true });
@@ -809,7 +886,7 @@ async function resetConfig() {
       throw new Error(body.error || `Server error: ${res.status}`);
     }
     // Config deleted — clear session and go back to the admin login gate
-    sessionStorage.removeItem(SESSION_KEY);
+    clearStoredPassword();
     window.location.href = '/admin';
   } catch (err) {
     validationError.value = err.message;
@@ -842,8 +919,8 @@ async function changePassword() {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || `Server error: ${res.status}`);
     }
-    // Update stored password so subsequent requests still work
-    sessionStorage.setItem(SESSION_KEY, newPassword.value);
+    // Update stored in-memory password so subsequent requests still work
+    storePassword(newPassword.value);
     newPassword.value        = '';
     newPasswordConfirm.value = '';
     changePasswordOk.value   = true;
@@ -871,6 +948,7 @@ async function deleteAllFiles() {
         headers: { Authorization: buildAuthHeader(getStoredPassword()) },
       })
     ));
+    draft.value.data_layers     = [];
     deleteFilesConfirming.value = false;
   } catch (err) {
     validationError.value = err.message;
@@ -887,12 +965,30 @@ function handleBeforeUnload(e) {
     e.returnValue = '';
   }
 }
-onUnmounted(() => window.removeEventListener('beforeunload', handleBeforeUnload));
+
+// ── Session timeout (30 min inactivity) ────────────────────────
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+let _sessionTimeoutId = null;
+function resetSessionTimer() {
+  if (!isAuthenticated.value) return;
+  clearTimeout(_sessionTimeoutId);
+  _sessionTimeoutId = setTimeout(() => {
+    logout();
+    loginError.value = 'Signed out automatically after 30 minutes of inactivity.';
+  }, SESSION_TIMEOUT_MS);
+}
+const _activityEvents = ['mousemove', 'keydown', 'click', 'touchstart'];
+
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload);
+  _activityEvents.forEach(ev => window.removeEventListener(ev, resetSessionTimer));
+  clearTimeout(_sessionTimeoutId);
+});
 
 // ── Auto-restore session ───────────────────────────────────────
 onMounted(async () => {
   window.addEventListener('beforeunload', handleBeforeUnload);
-  // Always check whether a password exists — determines which gate form to show
+  _activityEvents.forEach(ev => window.addEventListener(ev, resetSessionTimer, { passive: true }));
   try {
     const res = await fetch(getApiUrl('/admin/setup-status'));
     if (res.ok) {
@@ -900,24 +996,6 @@ onMounted(async () => {
       isFirstRun.value = !s.hasPassword;
     }
   } catch { /* ignore, fall through to login form */ }
-
-  if (isFirstRun.value) return;  // show create-password form, nothing to restore
-
-  const stored = getStoredPassword();
-  if (!stored) return;
-  isLoading.value = true;
-  try {
-    await verifyPassword(stored);
-    const config = await fetchConfig(stored);
-    loadConfigIntoDraft(config ?? {});
-    loadedCrs.value         = config ? (config.crs ?? null) : null;
-    hasExistingConfig.value = config !== null;
-    isAuthenticated.value   = true;
-  } catch {
-    sessionStorage.removeItem(SESSION_KEY);
-  } finally {
-    isLoading.value = false;
-  }
 });
 </script>
 
@@ -1294,7 +1372,8 @@ onMounted(async () => {
   margin-bottom: 0.3rem;
 }
 .admin-section .field-group input[type="text"],
-.admin-section .field-group input[type="number"] {
+.admin-section .field-group input[type="number"],
+.admin-section .field-group input[type="password"] {
   padding: 0.45rem 0.65rem;
   font-size: 0.875rem;
 }
@@ -1592,6 +1671,34 @@ details.collapsible:not([open]) > summary {
   max-height: 460px;
   overflow: auto;
   border-radius: 0 0 6px 6px;
+}
+
+/* ── Developer toggle row ───────────────────────────────── */
+.dev-toggle-row { margin-top: 0.75rem; }
+.dev-toggle-label {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  font-size: 0.82rem; color: var(--admin-muted, #777); cursor: pointer;
+  user-select: none;
+}
+.dev-toggle-label input { accent-color: #3b82f6; cursor: pointer; }
+
+/* ── Unsaved changes badge ─────────────────────────────── */
+.unsaved-badge {
+  font-size: 0.8rem;
+  color: #d97706;
+  font-weight: 500;
+  margin-right: auto;
+}
+
+/* ── Small button modifier ──────────────────────────────── */
+.btn-sm {
+  padding: 0.3rem 0.65rem !important;
+  font-size: 0.8rem !important;
+}
+
+/* ── Change-password button ────────────────────────────── */
+.btn-change-pw {
+  align-self: flex-start;
 }
 </style>
 

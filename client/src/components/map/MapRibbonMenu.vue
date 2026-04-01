@@ -289,8 +289,8 @@ const mapStore = useMapStore();
 const layerStore = useLayerStore();
 const layerManager = inject('layerManager');
 const appConfig = inject('config');
-const allowDownload = computed(() => appConfig?.value?.ui?.allow_download !== false);
-const allowUpload   = computed(() => appConfig?.value?.ui?.allow_upload   !== false);
+const allowDownload = computed(() => appConfig?.value?.ui?.map_download !== false);
+const allowUpload   = computed(() => appConfig?.value?.ui?.map_upload   !== false);
 
 const activeTab = ref('main');
 const fileInput = ref(null);
@@ -445,14 +445,26 @@ const showLayerInfo = () => {
   infoModalVisible.value = true;
 };
 
-const downloadLayer = () => {
+const downloadLayer = async () => {
   const layer = selectedLayer.value;
   if (!layer?.layerInstance) return;
   if (layer.type === 'geotiff') {
-    const a = document.createElement('a');
-    a.href = layer.url;
-    a.download = `${layer.name}.tif`;
-    document.body.appendChild(a); a.click(); a.remove();
+    // Fetch the file as a blob first so the download attribute works regardless
+    // of whether the URL is cross-origin (blob: and data: URLs are always same-origin).
+    try {
+      const resp = await fetch(layer.url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const blob = await resp.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `${layer.name}.tif`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000);
+    } catch (e) {
+      // Fallback: open in new tab
+      window.open(layer.url, '_blank');
+    }
   } else {
     const source = layer.layerInstance.getSource?.();
     if (!source) return;

@@ -324,6 +324,40 @@ app.patch('/admin/layers/:id', requireAdminAuth, async (req, res) => {
   }
 });
 
+// Preview first N features of a GeoJSON layer (pandas.head-style)
+app.get('/admin/layers/:id/preview', requireAdminAuth, async (req, res) => {
+  try {
+    validateLayerId(req.params.id);
+    const meta = await readLayerMeta(layersDir, req.params.id);
+    if (meta.fileType !== 'geojson') return res.status(400).json({ error: 'Preview only available for GeoJSON layers.' });
+    const filePath = path.join(layersDir, req.params.id, `${req.params.id}${meta.extension}`);
+    const raw = await fs.readFile(filePath, 'utf8');
+    const geojson = JSON.parse(raw);
+    const n = Math.min(parseInt(req.query.n ?? '5', 10), 50);
+    const features = (geojson.features ?? []).slice(0, n);
+    const columnSet = new Set();
+    for (const f of features) {
+      for (const k of Object.keys(f.properties ?? {})) columnSet.add(k);
+    }
+    // Filter out internal (_-prefixed) keys and URL-only columns
+    const isUrl = v => typeof v === 'string' && /^https?:\/\//i.test(v.trim());
+    const columns = [...columnSet].filter(col => {
+      if (col.startsWith('_')) return false;
+      const vals = features.map(f => f.properties?.[col]).filter(v => v != null && String(v) !== '');
+      if (vals.length > 0 && vals.every(v => isUrl(v))) return false;
+      return true;
+    });
+    const rows = features.map(f => columns.map(c => {
+      const v = f.properties?.[c];
+      return v == null ? '' : String(v);
+    }));
+    res.json({ columns, rows, total: geojson.features?.length ?? 0 });
+  } catch (err) {
+    if (err.message?.includes('not found')) return res.status(404).json({ error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Delete a layer and its entire folder
 app.delete('/admin/layers/:id', requireAdminAuth, async (req, res) => {
   try {

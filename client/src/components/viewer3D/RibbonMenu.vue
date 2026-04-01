@@ -373,7 +373,7 @@ const { showGrid, showAxes, showWireframe, showBoundingBox, showNormals } = stor
 const { toggleWireframe, toggleBoundingBox, toggleGrid, toggleAxes, toggleNormals } = viewer3DStore;
 
 const appConfig = inject('config');
-const allowUpload = computed(() => appConfig?.value?.ui?.allow_upload !== false);
+const allowUpload = computed(() => appConfig?.value?.ui?.viewer_upload !== false);
 
 const activeTab = ref('insert');
 const modelInput = ref(null);
