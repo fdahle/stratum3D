@@ -11,7 +11,7 @@
               <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/>
               <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>
             </svg>
-            Link 3D Assets &mdash; {{ layerDisplayName || (layerId ? layerId.slice(0,8) + '…' : filename) }}
+            Link 3D Assets &mdash; {{ layerDisplayName || layerId.slice(0, 8) + '…' }}
           </h3>
           <button class="close-btn" @click="$emit('close')" title="Close">✕</button>
         </header>
@@ -70,7 +70,7 @@
             </div>
 
             <!-- ── Upload new sub-files ─── -->
-            <div v-if="layerId" class="panel-section panel-upload">
+            <div class="panel-section panel-upload">
               <div class="panel-section-title">
                 <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2"
                      stroke-linecap="round" stroke-linejoin="round">
@@ -98,7 +98,13 @@
                 @change="onAssetFilesSelected"
               />
             </div>
-
+        <!-- ── Asset upload settings modal ─── -->
+        <Asset3DUploadModal
+          :is-open="showAssetModal"
+          :files="pendingAssets"
+          @confirm="doAssetUpload"
+          @cancel="showAssetModal = false; pendingAssets = []"
+        />
             <p class="drag-hint">Drag assets onto features →</p>
           </aside>
 
@@ -137,7 +143,7 @@
                          stroke-linecap="round" stroke-linejoin="round">
                       <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/>
                     </svg>
-                    {{ shortName(url.split('/').pop()) }}
+                    {{ urlToName(url) }}
                     <button class="chip-rm" @click.stop="removeAsset(f.featureId, 'model', url)">×</button>
                   </span>
                   <span
@@ -152,7 +158,7 @@
                       <circle cx="19" cy="8" r="1.2"/><circle cx="5" cy="8" r="1.2"/>
                       <circle cx="19" cy="16" r="1.2"/><circle cx="5" cy="16" r="1.2"/>
                     </svg>
-                    {{ shortName(url.split('/').pop()) }}
+                    {{ urlToName(url) }}
                     <button class="chip-rm" @click.stop="removeAsset(f.featureId, 'pointcloud', url)">×</button>
                   </span>
                   <span
@@ -192,16 +198,16 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue';
-import { getApiUrl } from '../../utils/config.js';
+import { getApiUrl } from '../../../utils/config.js';
+import Asset3DUploadModal from './Asset3DUploadModal.vue';
 
 const props = defineProps({
   isOpen:     { type: Boolean, required: true },
-  filename:   { type: String,  default: '' },   // legacy: shapes/<filename>
-  layerId:    { type: String,  default: '' },   // new: layers/<layerId>
+  layerId:    { type: String,  required: true },
   authHeader: { type: String,  required: true },
 });
 
-const emit = defineEmits(['close']);
+const emit = defineEmits(['close', 'saved']);
 
 // ── State ──────────────────────────────────────────────────────────────────────
 
@@ -223,6 +229,13 @@ const assignments = ref({});
 const filterQuery = ref('');
 const dragging    = ref(null);  // { type, url }
 const dragOverId  = ref(null);
+
+const layerDisplayName = ref('');
+const uploading        = ref(false);
+const uploadError      = ref('');
+const assetFileInputRef = ref(null);
+const showAssetModal   = ref(false);
+const pendingAssets    = ref([]);
 
 // ── Computed ───────────────────────────────────────────────────────────────────
 
@@ -259,6 +272,13 @@ function shortName(filename) {
     .replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i, '')
     .replace(/^[0-9a-f]{8}_/i, '');
   return noUuid.length > 30 ? noUuid.slice(0, 27) + '…' : noUuid;
+}
+
+/** Resolve a stored dataPath URL to the original human-readable filename */
+function urlToName(url) {
+  const all = [...models.value, ...pointclouds.value];
+  const found = all.find(a => a.dataPath === url);
+  return found ? shortName(found.filename) : shortName(url.split('/').pop());
 }
 
 const SYSTEM_KEYS = new Set(['_featureId', '_model3dUrls', '_pointcloudUrls', '_layerId']);
@@ -338,55 +358,30 @@ async function loadData() {
   saveError.value = '';
   saveSuccess.value = '';
   try {
-    const useLayerId = !!props.layerId;
-
-    // Fetch GeoJSON features
-    const geojsonUrl = useLayerId
-      ? getApiUrl(`data/layers/${props.layerId}/${props.layerId}.geojson`)
-      : getApiUrl(`data/shapes/${props.filename}`);
-
-    // Fetch available model/pointcloud assets
-    let assetPromise;
-    if (useLayerId) {
-      // New system: load sub-files from layer meta
-      assetPromise = fetch(getApiUrl(`/admin/layers/${props.layerId}`), { headers: { Authorization: props.authHeader } });
-    } else {
-      // Legacy system: load from global uploads list
-      assetPromise = fetch(getApiUrl('/admin/uploads'), { headers: { Authorization: props.authHeader } });
-    }
-
     const [assetsRes, geojsonRes] = await Promise.all([
-      assetPromise,
-      fetch(geojsonUrl),
+      fetch(getApiUrl(`/admin/layers/${props.layerId}`), { headers: { Authorization: props.authHeader } }),
+      fetch(getApiUrl(`data/layers/${props.layerId}/${props.layerId}.geojson`)),
     ]);
     if (!assetsRes.ok) throw new Error(`Failed to load assets (${assetsRes.status})`);
     if (!geojsonRes.ok) throw new Error(`Failed to load GeoJSON (${geojsonRes.status})`);
 
-    const geojson = await geojsonRes.json();
+    const layerMeta = await assetsRes.json();
+    const geojson   = await geojsonRes.json();
 
-    if (useLayerId) {
-      // New system: extract model/pointcloud sub-files from layer meta
-      const layerMeta = await assetsRes.json();
-      layerDisplayName.value = layerMeta.layerConfig?.displayName || layerMeta.originalName || '';
-      const subFiles = layerMeta.subFiles ?? [];
-      models.value = subFiles
-        .filter(sf => sf.role === 'model')
-        .map(sf => ({
-          filename: sf.originalName,
-          dataPath: `data/layers/${props.layerId}/${sf.id}${sf.extension}`,
-        }));
-      pointclouds.value = subFiles
-        .filter(sf => sf.role === 'pointcloud')
-        .map(sf => ({
-          filename: sf.originalName,
-          dataPath: `data/layers/${props.layerId}/${sf.id}${sf.extension}`,
-        }));
-    } else {
-      // Legacy system
-      const uploads = await assetsRes.json();
-      models.value      = uploads.models      ?? [];
-      pointclouds.value = uploads.pointclouds ?? [];
-    }
+    layerDisplayName.value = layerMeta.layerConfig?.displayName || layerMeta.originalName || '';
+    const subFiles = layerMeta.subFiles ?? [];
+    models.value = subFiles
+      .filter(sf => sf.role === 'model')
+      .map(sf => ({
+        filename: sf.originalName,
+        dataPath: `data/layers/${props.layerId}/${sf.id}${sf.extension}`,
+      }));
+    pointclouds.value = subFiles
+      .filter(sf => sf.role === 'pointcloud')
+      .map(sf => ({
+        filename: sf.originalName,
+        dataPath: `data/layers/${props.layerId}/${sf.id}${sf.extension}`,
+      }));
 
     const initial = {};
     features.value = (geojson.features ?? [])
@@ -413,25 +408,32 @@ async function loadData() {
 
 // ── Sub-file upload ─────────────────────────────────────────────────────────────
 
-async function onAssetFilesSelected(e) {
+function onAssetFilesSelected(e) {
   const files = Array.from(e.target.files);
   e.target.value = '';
-  if (!files.length || !props.layerId) return;
+  if (!files.length) return;
+  pendingAssets.value = files;
+  showAssetModal.value = true;
+}
 
+async function doAssetUpload(settingsMap) {
+  showAssetModal.value = false;
   uploading.value   = true;
   uploadError.value = '';
 
   try {
-    for (const file of files) {
+    for (const file of pendingAssets.value) {
       const ext  = '.' + file.name.split('.').pop().toLowerCase();
       const role = ['.obj', '.ply', '.stl'].includes(ext) ? 'model'
                  : ['.las', '.laz'].includes(ext)         ? 'pointcloud'
                  : null;
-      if (!role) continue;  // silently skip unsupported types
+      if (!role) continue;
 
+      const fileSettings = settingsMap[file.name] ?? {};
       const fd = new FormData();
       fd.append('file', file);
       fd.append('role', role);
+      fd.append('settings', JSON.stringify(fileSettings));
 
       const res = await fetch(getApiUrl(`/admin/layers/${props.layerId}/subfiles`), {
         method: 'POST',
@@ -443,12 +445,12 @@ async function onAssetFilesSelected(e) {
         throw new Error(body.error || `Upload failed (${res.status})`);
       }
     }
-    // Reload assets palette to show newly uploaded files
     await reloadAssets();
   } catch (err) {
     uploadError.value = err.message ?? 'Upload failed.';
   } finally {
     uploading.value = false;
+    pendingAssets.value = [];
   }
 }
 
@@ -473,22 +475,15 @@ async function save() {
   saveError.value   = '';
   saveSuccess.value = '';
   try {
-    const useLayerId = !!props.layerId;
-    const url = useLayerId
-      ? getApiUrl(`/admin/layers/${props.layerId}/link`)
-      : getApiUrl('/admin/manual-link');
-    const body = useLayerId
-      ? JSON.stringify({ assignments: assignments.value })
-      : JSON.stringify({ filename: props.filename, assignments: assignments.value });
-
-    const res = await fetch(url, {
+    const res = await fetch(getApiUrl(`/admin/layers/${props.layerId}/link`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: props.authHeader },
-      body,
+      body: JSON.stringify({ assignments: assignments.value }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? `Server error ${res.status}`);
     saveSuccess.value = `Saved — ${data.linkedCount} feature${data.linkedCount !== 1 ? 's' : ''} have 3D assets.`;
+    emit('saved');
   } catch (err) {
     saveError.value = err.message ?? 'Save failed.';
   } finally {

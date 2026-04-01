@@ -431,7 +431,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { getApiUrl } from '../utils/config';
 import { validateConfig } from '../constants/configValidation';
 import LayersSection from '../components/admin/LayersSection.vue';
-import FieldHint from '../components/admin/FieldHint.vue';
+import FieldHint from '../components/ui/FieldHint.vue';
 import DataLayersSection from '../components/admin/DataLayersSection.vue';
 
 // ── State ──────────────────────────────────────────────────────

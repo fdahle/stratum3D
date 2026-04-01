@@ -76,7 +76,7 @@
 
 <script setup>
 import { ref, computed } from 'vue';
-import LayerEditorModal from './LayerEditorModal.vue';
+import LayerEditorModal from '../modals/admin/LayerEditorModal.vue';
 
 const props = defineProps({
   title:       String,

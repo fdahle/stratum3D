@@ -97,7 +97,7 @@
                 <span class="btn-text">Download</span>
               </a>
               <button
-                v-if="layerSupports3D"
+                v-if="layerSupports3D || has3DData"
                 @click="has3DData ? handle3DView() : null"
                 class="action-btn model-btn"
                 :class="{ 'disabled': !has3DData }"

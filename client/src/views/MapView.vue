@@ -81,7 +81,7 @@
       </div>
     </div>
 
-    <Settings :is-open="isSettingsOpen" @close="isSettingsOpen = false" />
+    <SettingsModal :is-open="isSettingsOpen" @close="isSettingsOpen = false" />
 
     <ShareSceneModal :is-open="isShareSceneOpen" @close="isShareSceneOpen = false" />
 
@@ -151,7 +151,7 @@ import MeasurementModal from "../components/modals/MeasurementModal.vue";
 import ElevationModal from "../components/modals/ElevationModal.vue";
 import ShareSceneModal from "../components/modals/ShareSceneModal.vue";
 import ExtendedSearchModal from "../components/modals/ExtendedSearchModal.vue";
-import Settings from "../components/modals/Settings.vue";
+import SettingsModal from "../components/modals/SettingsModal.vue";
 import CsvColumnPickerModal from "../components/modals/CsvColumnPickerModal.vue";
 import { useSettingsStore } from "../stores/settingsStore";
 import { tryRegisterProjection } from "../utils/crs";

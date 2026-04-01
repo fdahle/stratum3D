@@ -29,8 +29,8 @@ export const config = {
   rateLimitWindow: parseInt(process.env.RATE_LIMIT_WINDOW || '900000', 10), // 15 minutes
   rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
 
-  // Admin
-  adminPassword: process.env.ADMIN_PASSWORD || null,
+  // Admin — password is stored in data/.credentials (set via first-run wizard)
+  // No hardcoded password: on first visit the user chooses one.
 };
 
 export const isDevelopment = config.nodeEnv === 'development';

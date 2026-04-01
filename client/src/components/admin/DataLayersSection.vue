@@ -67,29 +67,18 @@
 
           <!-- Card action buttons -->
           <div class="lc-actions">
-            <!-- Link 3D button — only on GeoJSON layers that have model/pointcloud sub-files -->
+            <!-- Manage 3D: upload & link 3D models/point clouds (GeoJSON layers only) -->
             <button
-              v-if="layer.fileType === 'geojson' && layer.subFiles?.some(sf => sf.role === 'model' || sf.role === 'pointcloud')"
+              v-if="layer.fileType === 'geojson'"
               class="action-btn action-btn-link3d"
-              title="Link 3D models / point clouds to specific features"
+              title="Upload & link 3D models / point clouds to features"
               :disabled="layer.status === 'optimizing'"
               @click="openLinkModal(layer)"
             >
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/>
-                <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>
-              </svg>
-            </button>
-            <button
-              class="action-btn"
-              title="Add sub-file (3D model, point cloud, …)"
-              :disabled="layer.status === 'optimizing' || subFileTargetId === layer.id"
-              @click="openSubFileDialog(layer.id)"
-            >
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                <polyline points="17 8 12 3 7 8"/>
-                <line x1="12" y1="3" x2="12" y2="15"/>
+                <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/>
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+                <line x1="12" y1="22.08" x2="12" y2="12"/>
               </svg>
             </button>
             <button
@@ -137,15 +126,6 @@
               {{ sf.role }}
             </span>
           </template>
-        </div>
-
-        <!-- Sub-file uploading indicator -->
-        <div v-if="subFileTargetId === layer.id && subFileUploading" class="lc-subfile-uploading">
-          Uploading sub-file…
-        </div>
-        <div v-if="subFileTargetId === layer.id && subFileError" class="lc-subfile-error">
-          {{ subFileError }}
-          <button class="banner-close" @click="subFileError = ''">✕</button>
         </div>
 
         <!-- ─── Delete confirmation bar ────────────────────── -->
@@ -256,25 +236,17 @@
       :layer-id="linkModal.layerId"
       :auth-header="props.authHeader"
       @close="linkModal.open = false"
+      @saved="fetchLayers"
     />
 
-    <!-- Sub-file upload (hidden input, triggered per layer) -->
-    <input
-      ref="subFileInputRef"
-      type="file"
-      multiple
-      accept=".obj,.ply,.stl,.las,.laz,.mtl,.jpg,.jpeg,.png,.bmp,.tga,.webp,.csv"
-      style="display:none"
-      @change="onSubFileSelected"
-    />
   </section>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { getApiUrl } from '../../utils/config';
-import UploadSettingsModal from './UploadSettingsModal.vue';
-import LinkingModal from './LinkingModal.vue';
+import UploadSettingsModal from '../modals/admin/UploadSettingsModal.vue';
+import LinkingModal from '../modals/admin/LinkingModal.vue';
 
 const props = defineProps({
   authHeader: { type: String, default: '' },
@@ -297,12 +269,6 @@ const editError     = ref('');
 const pendingFiles  = ref([]);
 const showUploadModal = ref(false);
 let pollTimer = null;
-
-// Sub-file upload state
-const subFileInputRef  = ref(null);
-const subFileTargetId  = ref(null);
-const subFileUploading = ref(false);
-const subFileError     = ref('');
 
 // Linking modal state
 const linkModal = ref({ open: false, layerId: '' });
@@ -480,68 +446,8 @@ async function doDelete(id) {
   }
 }
 
-// ── Sub-file upload flow ────────────────────────────────────────
-function openSubFileDialog(layerId) {
-  subFileTargetId.value = layerId;
-  subFileError.value    = '';
-  subFileInputRef.value?.click();
-}
-
 function openLinkModal(layer) {
   linkModal.value = { open: true, layerId: layer.id };
-}
-
-async function onSubFileSelected(e) {
-  const files = Array.from(e.target.files);
-  e.target.value = '';
-  if (!files.length || !subFileTargetId.value) return;
-
-  const parentId = subFileTargetId.value;
-  subFileUploading.value = true;
-  subFileError.value     = '';
-  let uploadedModelOrPc  = false;
-
-  try {
-    for (const file of files) {
-      const ext = '.' + file.name.split('.').pop().toLowerCase();
-      // Determine role from extension
-      const role = ['.obj', '.ply', '.stl'].includes(ext) ? 'model'
-                 : ['.las', '.laz'].includes(ext)         ? 'pointcloud'
-                 : ext === '.mtl'                         ? 'mtl'
-                 : ext === '.csv'                         ? 'csv'
-                 : 'texture';
-
-      if (role === 'model' || role === 'pointcloud') uploadedModelOrPc = true;
-
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('role', role);
-
-      const res = await fetch(getApiUrl(`/admin/layers/${parentId}/subfiles`), {
-        method: 'POST',
-        headers: { Authorization: props.authHeader },
-        body: fd,
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Upload failed (${res.status})`);
-      }
-    }
-    await fetchLayers();
-
-    // For model/pointcloud uploads on a GeoJSON parent layer, auto-open the linking modal
-    if (uploadedModelOrPc) {
-      const parentLayer = layers.value.find(l => l.id === parentId);
-      if (parentLayer?.fileType === 'geojson') {
-        linkModal.value = { open: true, layerId: parentId };
-      }
-    }
-  } catch (err) {
-    subFileError.value = err.message;
-  } finally {
-    subFileUploading.value = false;
-    subFileTargetId.value  = null;
-  }
 }
 
 // ── Edit flow ───────────────────────────────────────────────────

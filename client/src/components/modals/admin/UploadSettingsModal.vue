@@ -201,7 +201,7 @@
 
 <script setup>
 import { watch, ref } from 'vue';
-import FieldHint from './FieldHint.vue';
+import FieldHint from '../../ui/FieldHint.vue';
 import { fromBlob } from 'geotiff';
 
 const props = defineProps({

@@ -342,9 +342,11 @@ const subfileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSi
 app.post('/admin/layers/:id/subfiles', requireAdminAuth, subfileUpload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file provided.' });
   const role = req.body?.role ?? 'unknown';
+  let settings = {};
+  try { settings = JSON.parse(req.body?.settings ?? '{}'); } catch { /* malformed JSON — ignore */ }
   try {
     validateLayerId(req.params.id);
-    const result = await addSubFile(req.params.id, req.file, role, layersDir);
+    const result = await addSubFile(req.params.id, req.file, role, layersDir, settings);
     res.json(result);
   } catch (err) {
     if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
@@ -442,6 +444,8 @@ app.post('/admin/layers/:id/link', requireAdminAuth, express.json(), async (req,
     const geojson = JSON.parse(raw);
 
     let linkedCount = 0;
+    let hasModels = false;
+    let hasPcs = false;
     geojson.features = geojson.features.map((feature) => {
       if (!feature.properties) feature.properties = {};
       const fid = feature.properties._featureId;
@@ -449,12 +453,19 @@ app.post('/admin/layers/:id/link', requireAdminAuth, express.json(), async (req,
         const assign = assignments[fid];
         feature.properties._model3dUrls    = Array.isArray(assign.models)      ? assign.models      : [];
         feature.properties._pointcloudUrls = Array.isArray(assign.pointclouds) ? assign.pointclouds : [];
+        if (feature.properties._model3dUrls.length > 0)    hasModels = true;
+        if (feature.properties._pointcloudUrls.length > 0) hasPcs    = true;
         if (feature.properties._model3dUrls.length + feature.properties._pointcloudUrls.length > 0) {
           linkedCount++;
         }
       }
       return feature;
     });
+
+    // Keep _metadata in sync so the client can detect 3D capability on reload
+    if (!geojson._metadata) geojson._metadata = {};
+    geojson._metadata.has3DModels   = hasModels;
+    geojson._metadata.hasPointClouds = hasPcs;
 
     await fs.writeFile(filePath, JSON.stringify(geojson), 'utf8');
     logger.info(`Layer link: ${id} — ${linkedCount} feature(s) with assets`);

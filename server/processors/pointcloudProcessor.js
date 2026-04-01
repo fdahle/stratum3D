@@ -1,14 +1,103 @@
 import fs from "fs";
+import fsPromises from "fs/promises";
 import path from "path";
 import { exec } from "child_process";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
 
+// ── Standalone COPC conversion (used by the live upload pipeline) ──────────────
+
+let _pdalAvailable = null;
+
+export async function isPdalAvailable() {
+  if (_pdalAvailable !== null) return _pdalAvailable;
+  try {
+    await execAsync('pdal --version');
+    _pdalAvailable = true;
+  } catch {
+    _pdalAvailable = false;
+  }
+  return _pdalAvailable;
+}
+
 /**
- * Process point clouds with COPC (Cloud Optimized Point Cloud) conversion
+ * Convert a LAS/LAZ file to COPC (Cloud Optimised Point Cloud) in-place using PDAL.
+ * Models `convertToCog` from geotiffProcessor.js — gracefully falls back if PDAL
+ * is not installed.
+ *
+ * @param {string} inputPath    Absolute path to source .las/.laz
+ * @param {object} [options]
+ * @param {boolean} [options.keepOriginal=false]  Rename original before replacing.
+ * @param {string}  [options.sourceCrs]           Source CRS (stored as metadata only).
+ * @returns {{ success: boolean, step: string, originalBackup: string|null }}
  */
-export class PointCloudProcessor {
+export async function convertToCopc(inputPath, options = {}) {
+  const { keepOriginal = false } = options;
+
+  if (!(await isPdalAvailable())) {
+    return {
+      success: false,
+      step: 'PDAL not available on this server — point cloud stored as-is (COPC conversion skipped)',
+      originalBackup: null,
+    };
+  }
+
+  const dir      = path.dirname(inputPath);
+  const origExt  = inputPath.toLowerCase().endsWith('.copc.laz') ? '.copc.laz'
+                 : path.extname(inputPath).toLowerCase();
+  const baseName = path.basename(inputPath, origExt);
+
+  // Already COPC — nothing to do
+  if (origExt === '.copc.laz') {
+    return { success: true, step: 'Already in COPC format — no conversion needed.', originalBackup: null };
+  }
+
+  const outputPath   = path.join(dir, `${baseName}.copc.laz`);
+  const tempOutput   = outputPath + '.tmp';
+  const pipelineFile = path.join(dir, `${baseName}_copc_pipeline.json`);
+
+  const readerType = ['.las', '.laz'].includes(origExt) ? 'readers.las' : 'readers.ply';
+  const pipeline = {
+    pipeline: [
+      { type: readerType, filename: inputPath },
+      { type: 'writers.copc', filename: tempOutput, forward: 'all' },
+    ],
+  };
+
+  try {
+    await fsPromises.writeFile(pipelineFile, JSON.stringify(pipeline));
+    await execAsync(`pdal pipeline "${pipelineFile}"`, { maxBuffer: 256 * 1024 * 1024 });
+    await fsPromises.unlink(pipelineFile);
+
+    let originalBackup = null;
+    if (keepOriginal) {
+      const backupName = `original_${path.basename(inputPath)}`;
+      await fsPromises.rename(inputPath, path.join(dir, backupName));
+      originalBackup = backupName;
+    } else {
+      await fsPromises.unlink(inputPath);
+    }
+
+    await fsPromises.rename(tempOutput, outputPath);
+
+    return {
+      success: true,
+      step: `Converted to COPC: ${path.basename(outputPath)}`,
+      originalBackup,
+    };
+  } catch (err) {
+    await fsPromises.unlink(pipelineFile).catch(() => {});
+    await fsPromises.unlink(tempOutput).catch(() => {});
+    return {
+      success: false,
+      step:    `COPC conversion failed: ${String(err.message).slice(0, 200)}`,
+      originalBackup: null,
+    };
+  }
+}
+
+class PointCloudProcessor {
   constructor(config) {
     this.config = config;
   }

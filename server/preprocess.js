@@ -11,7 +11,7 @@ import {
   applyTemplate,
   loadCsvLookup,
   detectCrs,
-} from "./utils.js";
+} from "./src/utils.js";
 import { processAllModels } from "./processors/modelProcessor.js";
 import { processAllPointClouds } from "./processors/pointcloudProcessor.js";
 

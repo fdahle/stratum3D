@@ -272,8 +272,8 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue';
-import FieldHint from './FieldHint.vue';
-import { getApiUrl } from '../../utils/config';
+import FieldHint from '../../ui/FieldHint.vue';
+import { getApiUrl } from '../../../utils/config';
 
 const props = defineProps({
   isOpen: Boolean,

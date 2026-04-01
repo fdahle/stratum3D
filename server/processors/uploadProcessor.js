@@ -23,6 +23,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 import { normalizeFilename }     from '../src/utils.js';
 import { processGeoJsonObject, linkAssetsToFeatures } from './shapeProcessor.js';
+import { convertToCopc } from './pointcloudProcessor.js';
 import {
   createLayerMeta,
   createSubFileMeta,
@@ -445,24 +446,47 @@ async function _processCsvLayer(csvFile, layersDir, allSettings) {
 
 // ── Sub-file addition (for POST /admin/layers/:id/subfiles) ───────────────────
 
-export async function addSubFile(layerId, file, role, layersDir) {
+export async function addSubFile(layerId, file, role, layersDir, settings = {}) {
   const meta     = await readLayerMeta(layersDir, layerId);
   const layerDir = path.join(layersDir, layerId);
   const subId    = uuidv4();
-  const ext      = path.extname(file.originalname).toLowerCase() || '';
-  const outFile  = `${subId}${ext}`;
-  await fs.writeFile(path.join(layerDir, outFile), file.buffer);
+  const origExt  = path.extname(file.originalname).toLowerCase() || '';
+  const rawFile  = `${subId}${origExt}`;
+  const rawPath  = path.join(layerDir, rawFile);
+  await fs.writeFile(rawPath, file.buffer);
+
+  let finalExt = origExt;
+  let conversionNote = null;
+
+  // Optional COPC conversion for point clouds
+  if (role === 'pointcloud' && settings.optimize === 'copc') {
+    const res = await convertToCopc(rawPath, {
+      keepOriginal: settings.keepOriginal ?? false,
+      sourceCrs:    settings.sourceCrs   || null,
+    });
+    conversionNote = res.step;
+    if (res.success) {
+      finalExt = '.copc.laz';
+    }
+  }
 
   const subMeta = createSubFileMeta({
     id:           subId,
     originalName: file.originalname,
-    fileType:     classifyExt(file.originalname) !== 'unknown' ? classifyExt(file.originalname) : ext.slice(1) || 'binary',
+    fileType:     classifyExt(file.originalname) !== 'unknown' ? classifyExt(file.originalname) : origExt.slice(1) || 'binary',
     role,
   });
+  // Persist any extra settings into the sub-file meta
+  if (finalExt !== origExt)   subMeta.extension     = finalExt;
+  if (conversionNote)         subMeta.processingNote = conversionNote;
+  if (settings.sourceCrs)     subMeta.sourceCrs      = settings.sourceCrs;
+  if (settings.keepOriginal)  subMeta.keepOriginal   = true;
+
   meta.subFiles.push(subMeta);
   await writeLayerMeta(layersDir, layerId, meta);
 
-  return { subId, filename: outFile, dataPath: `data/layers/${layerId}/${outFile}`, role, meta: subMeta };
+  const finalFile = `${subId}${finalExt}`;
+  return { subId, filename: finalFile, dataPath: `data/layers/${layerId}/${finalFile}`, role, meta: subMeta };
 }
 
 // ── Legacy re-link helper (kept for backward compatibility) ───────────────────
