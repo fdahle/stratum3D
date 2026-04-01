@@ -53,11 +53,18 @@ const corsOptions = {
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true,
+  // Range-request headers must be explicitly exposed for cross-origin clients
+  // (dev: client on :5173, server on :3000). Without this, geotiff.js cannot
+  // read Content-Range responses and every tile fetch fails with AggregateError.
+  exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length'],
 };
 
 // Middleware
 app.use(cors(corsOptions));
-app.use(compression());        // gzip/deflate — shrinks large GeoJSON responses ~85-90%
+// Compress text-based API responses. The /data route is excluded entirely
+// so that HTTP range requests (geotiff.js tile reads, point-cloud streaming)
+// work correctly — gzip wrapping destroys byte offsets and strips Content-Range.
+app.use(compression());
 app.use(express.json());
 
 // Security headers
@@ -356,7 +363,10 @@ function _startOptimizationJob(layerId, type, dataPath) {
     try {
       let meta = await readLayerMeta(layersDir, layerId);
       if (type === 'cog') {
-        const { success, step, originalBackup } = await convertToCog(absPath, { keepOriginal: meta.keepOriginal });
+        const { success, step, originalBackup } = await convertToCog(absPath, {
+          keepOriginal: meta.keepOriginal,
+          ...(meta.cogOptions ?? {}),
+        });
         meta = await readLayerMeta(layersDir, layerId);
         meta.processingLog.push(step);
         if (success) {
@@ -392,6 +402,68 @@ app.get('/admin/jobs', requireAdminAuth, (req, res) => {
 app.get('/admin/jobs/layer/:id', requireAdminAuth, (req, res) => {
   try { validateLayerId(req.params.id); } catch { return res.status(400).json({ error: 'Invalid layer ID.' }); }
   res.json(jobQueue.getActiveForLayer(req.params.id));
+});
+
+// ── Feature-level linking for new-style layers ────────────────────────────────
+
+// Manually assign 3D sub-file assets to specific features by feature ID
+app.post('/admin/layers/:id/link', requireAdminAuth, express.json(), async (req, res) => {
+  const { id } = req.params;
+  const { assignments } = req.body ?? {};
+
+  if (!assignments || typeof assignments !== 'object' || Array.isArray(assignments)) {
+    return res.status(400).json({ error: 'assignments must be a plain object.' });
+  }
+
+  try {
+    validateLayerId(id);
+    const meta = await readLayerMeta(layersDir, id);
+    if (meta.fileType !== 'geojson') {
+      return res.status(400).json({ error: 'Only GeoJSON layers support feature linking.' });
+    }
+
+    // Validate that every asset URL lives under data/layers/<id>/
+    const allowedPrefix = `data/layers/${id}/`;
+    for (const assign of Object.values(assignments)) {
+      for (const url of [...(assign.models ?? []), ...(assign.pointclouds ?? [])]) {
+        if (typeof url !== 'string' || !url.startsWith(allowedPrefix)) {
+          return res.status(400).json({ error: `Invalid asset URL: ${url}` });
+        }
+        const rel = url.slice('data/'.length);
+        if (rel.includes('..') || rel.includes('//') || path.isAbsolute(rel)) {
+          return res.status(400).json({ error: `Invalid asset URL: ${url}` });
+        }
+      }
+    }
+
+    const ext = meta.extension || '.geojson';
+    const filePath = path.join(layersDir, id, `${id}${ext}`);
+    const raw = await fs.readFile(filePath, 'utf8');
+    const geojson = JSON.parse(raw);
+
+    let linkedCount = 0;
+    geojson.features = geojson.features.map((feature) => {
+      if (!feature.properties) feature.properties = {};
+      const fid = feature.properties._featureId;
+      if (fid && Object.prototype.hasOwnProperty.call(assignments, fid)) {
+        const assign = assignments[fid];
+        feature.properties._model3dUrls    = Array.isArray(assign.models)      ? assign.models      : [];
+        feature.properties._pointcloudUrls = Array.isArray(assign.pointclouds) ? assign.pointclouds : [];
+        if (feature.properties._model3dUrls.length + feature.properties._pointcloudUrls.length > 0) {
+          linkedCount++;
+        }
+      }
+      return feature;
+    });
+
+    await fs.writeFile(filePath, JSON.stringify(geojson), 'utf8');
+    logger.info(`Layer link: ${id} — ${linkedCount} feature(s) with assets`);
+    res.json({ success: true, layerId: id, linkedCount });
+  } catch (err) {
+    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
+    logger.error('Layer link error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Legacy manual-link (kept for back-compat) ─────────────────────────────────
@@ -493,10 +565,21 @@ app.get('/admin/layers/:id/original', requireAdminAuth, async (req, res) => {
 });
 
 // Serve static data files
-app.use('/data', express.static(path.join(__dirname, config.dataPath), {
-  maxAge: isDevelopment ? 0 : '1d', // Cache in production
+// Compression is intentionally disabled for /data: gzip encoding destroys the
+// byte offsets that HTTP range requests rely on, breaking geotiff.js tile reads
+// (it issues Range: bytes= requests to stream individual tiles from COG files).
+app.use('/data', (req, res, next) => {
+  res.set('Cache-Control', isDevelopment ? 'no-store' : 'public, max-age=86400');
+  // Tell clients (and geotiff.js) that we support byte-range requests.
+  res.set('Accept-Ranges', 'bytes');
+  // Disable the compression middleware for this sub-tree.
+  res.set('Content-Encoding', 'identity');
+  next();
+}, express.static(path.join(__dirname, config.dataPath), {
+  maxAge: 0,      // controlled by the Cache-Control header above
   etag: true,
   lastModified: true,
+  acceptRanges: true,
 }));
 
 // 404 handler

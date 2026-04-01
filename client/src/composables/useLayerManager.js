@@ -284,6 +284,7 @@ export function useLayerManager(map) {
       url: layer.url,
       layerId: layer._layerId,
       layerName: layer.name,
+      debug: !!(window.__APP_DEBUG__ || import.meta.env.DEV),
     });
 
     // State shared across all CHUNK messages for this layer.
@@ -316,6 +317,13 @@ export function useLayerManager(map) {
         };
         if (dataProjection) {
           readOptions.dataProjection = dataProjection;
+        }
+        if (isFirst && (window.__APP_DEBUG__ || import.meta.env.DEV)) {
+          console.debug(`=== LAYER DEBUG — ${layer.name} (main thread) ===`);
+          console.debug("  dataProjection (from file):",  readOptions.dataProjection ?? "undefined → OL defaults to EPSG:4326");
+          console.debug("  featureProjection (map view):", map.getView().getProjection().getCode());
+          const sample = geojsonChunk.features[0]?.geometry?.coordinates;
+          if (sample) console.debug("  First feature raw coords:", JSON.stringify(sample)?.slice(0, 120));
         }
         const features = format.readFeatures(geojsonChunk, readOptions);
 

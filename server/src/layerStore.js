@@ -34,6 +34,10 @@ export function createLayerMeta({ id, originalName, fileType, options = {} }) {
     optimizationType: null,                            // cog | copc | simplify | decimate
     keepOriginal:   options.keepOriginal   ?? false,
     originalBackup: null,                              // backup filename when keepOriginal=true
+    sourceCrs:    null,                                // CRS of the original source file
+    targetCrs:    null,                                // CRS stored on disk after reprojection
+    featureCount: null,                                // number of features (geojson/csv only)
+    featureIndex: null,                                // [{ id, index }] per-feature uuid map (geojson/csv only)
     subFiles: [],
     layerConfig: {
       displayName: options.displayName ?? path.parse(originalName).name,

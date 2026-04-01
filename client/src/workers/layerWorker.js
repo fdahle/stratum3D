@@ -55,13 +55,26 @@ self.onmessage = async (e) => {
     let dataProjection = null;
     if (geojson.crs?.properties?.name) {
       const urn = geojson.crs.properties.name;
-      // Handles both "urn:ogc:def:crs:EPSG::3031" and "EPSG:3031" formats.
-      const match = urn.match(/EPSG:{1,2}(\d+)/);
+      // Handles "urn:ogc:def:crs:EPSG::3031", "EPSG:3031", and
+      // "http://www.opengis.net/def/crs/EPSG/0/3031" formats.
+      const match = urn.match(/EPSG:{1,2}(\d+)/) ?? urn.match(/\/EPSG\/\d+\/(\d+)/i);
       if (match) dataProjection = `EPSG:${match[1]}`;
     }
     log(`Detected data CRS: ${dataProjection ?? "EPSG:4326 (default)"}`);
 
     const featuresList = geojson.features ?? [];
+
+    if (debug) {
+      console.debug(`=== LAYER DEBUG — ${layerName} ===`);
+      console.debug("  Raw crs property:", JSON.stringify(geojson.crs ?? null));
+      console.debug("  Resolved dataProjection:", dataProjection ?? "null → OL will default to EPSG:4326");
+      console.debug("  Feature count:", featuresList.length);
+      if (featuresList.length > 0) {
+        const sample = featuresList[0]?.geometry?.coordinates;
+        console.debug("  First feature coords (raw):", JSON.stringify(sample)?.slice(0, 120));
+      }
+    }
+
     const totalChunks = Math.max(1, Math.ceil(featuresList.length / CHUNK_SIZE));
 
     // Stream features to the main thread one chunk at a time.

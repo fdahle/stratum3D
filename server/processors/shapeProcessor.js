@@ -15,9 +15,15 @@ import { v4 as uuidv4 } from 'uuid';
 
 export function detectCrsFromGeojson(geojson) {
   const name = geojson?.crs?.properties?.name ?? '';
+  if (!name) return 'EPSG:4326';
   if (name.includes('CRS84')) return 'EPSG:4326';
-  const match = name.match(/EPSG::?(\d+)/i);
-  return match ? `EPSG:${match[1]}` : 'EPSG:4326';
+  // "EPSG:4326" or "urn:ogc:def:crs:EPSG::4326"
+  const colonMatch = name.match(/EPSG::?(\d+)/i);
+  if (colonMatch) return `EPSG:${colonMatch[1]}`;
+  // "http://www.opengis.net/def/crs/EPSG/0/4326"
+  const slashMatch = name.match(/\/EPSG\/\d+\/(\d+)/i);
+  if (slashMatch) return `EPSG:${slashMatch[1]}`;
+  return 'EPSG:4326';
 }
 
 // ── Normalise any GeoJSON to FeatureCollection ─────────────────────────────────
@@ -31,31 +37,44 @@ export function normaliseFeatureCollection(geojson) {
 
 // ── Reproject ──────────────────────────────────────────────────────────────────
 
+/** Normalise user-supplied CRS strings: "25832" → "EPSG:25832", "epsg:25832" → "EPSG:25832" */
+function normaliseEpsg(code) {
+  if (!code) return null;
+  const s = String(code).trim();
+  if (/^\d+$/.test(s)) return `EPSG:${s}`;                  // bare number
+  if (/^EPSG:\d+$/i.test(s)) return `EPSG:${s.split(':')[1]}`; // case-normalise
+  return s;
+}
+
 /**
  * Reproject a FeatureCollection to targetCrs.
- * Returns { geojson, step } — step is a human-readable description of what happened.
+ * Returns { geojson, step, sourceCrs, targetCrs } — step is a human-readable description.
+ * @param {string|null} overrideSourceCrs — override auto-detected source CRS
  */
-export function reprojectGeojson(geojson, targetCrs) {
-  const sourceCrs = detectCrsFromGeojson(geojson);
-  if (sourceCrs === targetCrs) {
-    return { geojson, step: `CRS already ${targetCrs} — no reprojection needed` };
+export function reprojectGeojson(geojson, targetCrs, overrideSourceCrs = null) {
+  const sourceCrs = normaliseEpsg(overrideSourceCrs) ?? detectCrsFromGeojson(geojson);
+  const normTarget = normaliseEpsg(targetCrs) ?? targetCrs;
+  if (sourceCrs === normTarget) {
+    return { geojson, step: `CRS already ${normTarget} — no reprojection needed`, sourceCrs, targetCrs: normTarget };
   }
 
   const fromDef = epsg[sourceCrs.split(':')[1]]?.proj4;
-  const toDef   = epsg[targetCrs.split(':')[1]]?.proj4;
+  const toDef   = epsg[normTarget.split(':')[1]]?.proj4;
 
   if (!fromDef || !toDef) {
     return {
       geojson,
-      step: `Reprojection skipped — unknown CRS definition for ${sourceCrs} or ${targetCrs}`,
+      step: `Reprojection skipped — unknown CRS definition for ${sourceCrs} or ${normTarget}`,
+      sourceCrs,
+      targetCrs: sourceCrs,
     };
   }
 
   try {
-    const reprojected = reproject(geojson, fromDef, toDef, epsg);
-    return { geojson: reprojected, step: `Reprojected ${sourceCrs} → ${targetCrs}` };
+    const reprojected = reproject(geojson, fromDef, toDef);
+    return { geojson: reprojected, step: `Reprojected ${sourceCrs} → ${normTarget}`, sourceCrs, targetCrs: normTarget };
   } catch (err) {
-    return { geojson, step: `Reprojection failed: ${err.message} — data kept in ${sourceCrs}` };
+    return { geojson, step: `Reprojection failed: ${err.message} — data kept in ${sourceCrs}`, sourceCrs, targetCrs: sourceCrs };
   }
 }
 
@@ -160,15 +179,16 @@ export function linkAssetsToFeatures(geojson, modelMap, pointcloudMap) {
 
 /**
  * Run the full shape processing pipeline on a parsed GeoJSON object.
- * Returns { geojson, steps }.
+ * Returns { geojson, steps, sourceCrs, targetCrs }.
+ * @param {string|null} sourceCrs — override auto-detected source CRS
  */
-export function processGeoJsonObject(geojson, { targetCrs, simplifyTolerance, coordinatePrecision, modelMap, pointcloudMap }) {
+export function processGeoJsonObject(geojson, { targetCrs, simplifyTolerance, coordinatePrecision, modelMap, pointcloudMap, sourceCrs: overrideSourceCrs = null }) {
   const steps = [];
 
   geojson = normaliseFeatureCollection(geojson);
   geojson = stampFeatureIds(geojson);
 
-  const { geojson: reprojected, step: reprojectStep } = reprojectGeojson(geojson, targetCrs ?? 'EPSG:3031');
+  const { geojson: reprojected, step: reprojectStep, sourceCrs, targetCrs: actualTargetCrs } = reprojectGeojson(geojson, targetCrs ?? 'EPSG:3031', overrideSourceCrs);
   geojson = reprojected;
   steps.push(reprojectStep);
 
@@ -184,8 +204,14 @@ export function processGeoJsonObject(geojson, { targetCrs, simplifyTolerance, co
     else steps.push('No automatic asset–feature matches found (you can link manually via URL fields)');
   }
 
-  // Remove source CRS annotation — server CRS is known from app config
-  delete geojson.crs;
+  // Stamp the output CRS so the client (layerWorker) can set dataProjection correctly.
+  // Without this, OpenLayers defaults to EPSG:4326 and double-reprojects the coordinates.
+  const epsgNum = actualTargetCrs?.split(':')[1];
+  if (epsgNum) {
+    geojson.crs = { type: 'name', properties: { name: `urn:ogc:def:crs:EPSG::${epsgNum}` } };
+  } else {
+    delete geojson.crs;
+  }
 
-  return { geojson, steps };
+  return { geojson, steps, sourceCrs, targetCrs: actualTargetCrs };
 }

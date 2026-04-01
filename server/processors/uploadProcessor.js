@@ -153,16 +153,27 @@ async function _processGeoJsonLayer(geoFile, modelFiles, pointcloudFiles, fileMa
   }
 
   const shapeCfg = settings.shapeSettings ?? {};
-  const { geojson: processed, steps } = processGeoJsonObject(geojson, {
+  const { geojson: processed, steps, sourceCrs, targetCrs } = processGeoJsonObject(geojson, {
     targetCrs:           shapeCfg.targetCrs           ?? 'EPSG:3031',
     simplifyTolerance:   shapeCfg.simplifyTolerance   ?? 50,
     coordinatePrecision: shapeCfg.coordinatePrecision ?? 0,
+    sourceCrs:           shapeCfg.sourceCrs           ?? null,
     modelMap,
     pointcloudMap,
   });
 
+  if (settings.keepOriginal) {
+    const backupName = `original_${id}.geojson`;
+    await fs.writeFile(path.join(layerDir, backupName), geoFile.buffer);
+    meta.originalBackup = backupName;
+  }
+
   await fs.writeFile(path.join(layerDir, `${id}.geojson`), JSON.stringify(processed), 'utf8');
   meta.processingLog = steps;
+  meta.sourceCrs     = sourceCrs ?? null;
+  meta.targetCrs     = targetCrs ?? null;
+  meta.featureCount  = processed.features?.length ?? null;
+  meta.featureIndex  = processed.features?.map((f, i) => ({ id: f.properties?._featureId ?? null, index: i })) ?? null;
   await writeLayerMeta(layersDir, id, meta);
 
   return {
@@ -172,6 +183,8 @@ async function _processGeoJsonLayer(geoFile, modelFiles, pointcloudFiles, fileMa
     displayName:  meta.layerConfig.displayName,
     dataPath:     `data/layers/${id}/${id}.geojson`,
     featureCount: processed.features?.length ?? 0,
+    sourceCrs,
+    targetCrs,
     steps,
     status:       'ready',
   };
@@ -275,6 +288,12 @@ async function _processStandalonePointcloud(pcFile, layersDir, allSettings) {
   const mainFile = `${id}${ext}`;
   await fs.writeFile(path.join(layerDir, mainFile), pcFile.buffer);
 
+  if (settings.keepOriginal) {
+    const backupName = `original_${id}${ext}`;
+    await fs.writeFile(path.join(layerDir, backupName), pcFile.buffer);
+    meta.originalBackup = backupName;
+  }
+
   const isCOPC = ext.endsWith('.copc.laz');
   const wantsCOPC = settings.optimize === 'copc';
   const step   = isCOPC
@@ -314,6 +333,12 @@ async function _processGeoTiffLayer(tifFile, layersDir, allSettings) {
   const mainFile = `${id}${ext}`;
   await fs.writeFile(path.join(layerDir, mainFile), tifFile.buffer);
 
+  if (settings.keepOriginal) {
+    const backupName = `original_${id}${ext}`;
+    await fs.writeFile(path.join(layerDir, backupName), tifFile.buffer);
+    meta.originalBackup = backupName;
+  }
+
   const wantsCOG = settings.optimize === 'cog';
   const step     = wantsCOG
     ? 'GeoTIFF saved — COG conversion queued (will be optimised in the background)'
@@ -321,7 +346,10 @@ async function _processGeoTiffLayer(tifFile, layersDir, allSettings) {
 
   meta.processingLog = [step];
   meta.status        = wantsCOG ? 'optimizing' : 'ready';
-  if (wantsCOG) meta.optimizationType = 'cog';
+  if (wantsCOG) {
+    meta.optimizationType = 'cog';
+    if (settings.cogOptions) meta.cogOptions = settings.cogOptions;
+  }
   if (settings.keepOriginal) meta.keepOriginal = true;
   await writeLayerMeta(layersDir, id, meta);
 
@@ -383,7 +411,15 @@ async function _processCsvLayer(csvFile, layersDir, allSettings) {
   await fs.mkdir(layerDir, { recursive: true });
 
   // Apply optional processing (reproject / simplify) via shapeProcessor
-  const processed = processGeoJsonObject(geojson, settings.shapeSettings ?? {});
+  const { geojson: processed, steps: procSteps, sourceCrs, targetCrs } = processGeoJsonObject(geojson, {
+    ...(settings.shapeSettings ?? {}),
+    sourceCrs: csvSettings.crs || null,
+  });
+
+  if (settings.keepOriginal) {
+    const backupName = `original_${id}.csv`;
+    await fs.writeFile(path.join(layerDir, backupName), csvFile.buffer);
+  }
 
   await fs.writeFile(path.join(layerDir, `${id}.geojson`), JSON.stringify(processed));
 
@@ -395,11 +431,16 @@ async function _processCsvLayer(csvFile, layersDir, allSettings) {
   });
   // Override: stored file is .geojson even though it came from a .csv
   meta.extension    = '.geojson';
-  meta.featureCount = features.length;
-  meta.steps        = [`Converted ${features.length} rows from CSV to GeoJSON Points`];
+  meta.featureCount = processed.features?.length ?? features.length;
+  meta.sourceCrs    = sourceCrs ?? null;
+  meta.targetCrs    = targetCrs ?? null;
+  meta.featureIndex = processed.features?.map((f, i) => ({ id: f.properties?._featureId ?? null, index: i })) ?? null;
+  if (settings.keepOriginal) meta.originalBackup = `original_${id}.csv`;
+  const csvStep = `Converted ${features.length} rows from CSV to GeoJSON Points`;
+  meta.processingLog = [csvStep, ...procSteps];
   await writeLayerMeta(layersDir, id, meta);
 
-  return { id, filename: csvFile.originalname, type: 'geojson', dataPath: `data/layers/${id}/${id}.geojson`, featureCount: features.length, steps: meta.steps };
+  return { id, filename: csvFile.originalname, type: 'geojson', dataPath: `data/layers/${id}/${id}.geojson`, featureCount: meta.featureCount, sourceCrs, targetCrs, steps: meta.processingLog };
 }
 
 // ── Sub-file addition (for POST /admin/layers/:id/subfiles) ───────────────────

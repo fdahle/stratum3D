@@ -5,7 +5,7 @@
         <h2 class="section-title">{{ title }}</h2>
         <p class="section-desc">{{ description }}</p>
       </div>
-      <button class="btn-add" @click="openAdd">+ Add Layer</button>
+      <button class="btn-add" @click="openAdd">+ {{ layerGroup === 'base' ? 'Add Basemap' : 'Add Layer' }}</button>
     </div>
 
     <div v-if="sectionWarnings.length" class="section-warn-box">
@@ -13,7 +13,7 @@
     </div>
 
     <div v-if="layers.length === 0" class="empty-state">
-      No layers yet. Click "Add Layer" to get started.
+      No {{ layerGroup === 'base' ? 'basemaps' : 'layers' }} yet. Click "{{ layerGroup === 'base' ? 'Add Basemap' : 'Add Layer' }}" to get started.
     </div>
 
     <div v-else class="layer-list">

@@ -11,14 +11,9 @@
               <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/>
               <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>
             </svg>
-            Link 3D Assets &mdash; {{ filename }}
+            Link 3D Assets &mdash; {{ layerDisplayName || (layerId ? layerId.slice(0,8) + '…' : filename) }}
           </h3>
-          <div class="header-right">
-            <button class="btn-save" :disabled="saving || loading" @click="save">
-              {{ saving ? 'Saving…' : 'Save' }}
-            </button>
-            <button class="close-btn" @click="$emit('close')" title="Close">✕</button>
-          </div>
+          <button class="close-btn" @click="$emit('close')" title="Close">✕</button>
         </header>
 
         <!-- ── Loading / Error ─── -->
@@ -72,6 +67,36 @@
               >
                 <span class="asset-name" :title="pc.filename">{{ shortName(pc.filename) }}</span>
               </div>
+            </div>
+
+            <!-- ── Upload new sub-files ─── -->
+            <div v-if="layerId" class="panel-section panel-upload">
+              <div class="panel-section-title">
+                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2"
+                     stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                Add Files
+              </div>
+              <button class="btn-upload-asset" :disabled="uploading" @click="assetFileInputRef.click()">
+                <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.2"
+                     stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;flex-shrink:0">
+                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                {{ uploading ? 'Uploading…' : 'Upload model / point cloud' }}
+              </button>
+              <p class="panel-upload-hint">.obj .ply .stl .las .laz</p>
+              <div v-if="uploadError" class="panel-upload-error">{{ uploadError }}</div>
+              <input
+                ref="assetFileInputRef"
+                type="file"
+                multiple
+                accept=".obj,.ply,.stl,.las,.laz"
+                style="display:none"
+                @change="onAssetFilesSelected"
+              />
             </div>
 
             <p class="drag-hint">Drag assets onto features →</p>
@@ -147,9 +172,19 @@
           </div>
         </div>
 
-        <!-- ── Footer status bar ─── -->
-        <div v-if="saveError" class="modal-footer-bar modal-footer-error">{{ saveError }}</div>
-        <div v-if="saveSuccess" class="modal-footer-bar modal-footer-success">{{ saveSuccess }}</div>
+        <!-- ── Footer ─── -->
+        <footer class="modal-footer">
+          <div class="footer-status">
+            <span v-if="saveError" class="footer-msg footer-msg-error">{{ saveError }}</span>
+            <span v-else-if="saveSuccess" class="footer-msg footer-msg-success">{{ saveSuccess }}</span>
+          </div>
+          <div class="footer-actions">
+            <button class="btn-cancel" @click="$emit('close')">Cancel</button>
+            <button class="btn-save" :disabled="saving || loading" @click="save">
+              {{ saving ? 'Saving…' : 'Save links' }}
+            </button>
+          </div>
+        </footer>
       </div>
     </div>
   </Transition>
@@ -161,7 +196,8 @@ import { getApiUrl } from '../../utils/config.js';
 
 const props = defineProps({
   isOpen:     { type: Boolean, required: true },
-  filename:   { type: String,  required: true },
+  filename:   { type: String,  default: '' },   // legacy: shapes/<filename>
+  layerId:    { type: String,  default: '' },   // new: layers/<layerId>
   authHeader: { type: String,  required: true },
 });
 
@@ -201,6 +237,11 @@ const filteredFeatures = computed(() => {
 
 const hasAnyAssignment = computed(() =>
   Object.values(assignments.value).some(a => a.models.length || a.pointclouds.length)
+);
+
+// Total linked features (features that have at least one 3D asset assigned)
+const linkedFeatureCount = computed(() =>
+  Object.values(assignments.value).filter(a => a.models.length || a.pointclouds.length).length
 );
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -285,6 +326,7 @@ watch(() => props.isOpen, async (open) => {
   if (!open) {
     saveError.value   = '';
     saveSuccess.value = '';
+    uploadError.value = '';
     return;
   }
   await loadData();
@@ -296,18 +338,55 @@ async function loadData() {
   saveError.value = '';
   saveSuccess.value = '';
   try {
-    const [uploadsRes, geojsonRes] = await Promise.all([
-      fetch(getApiUrl('/admin/uploads'), { headers: { Authorization: props.authHeader } }),
-      fetch(getApiUrl(`data/shapes/${props.filename}`)),
+    const useLayerId = !!props.layerId;
+
+    // Fetch GeoJSON features
+    const geojsonUrl = useLayerId
+      ? getApiUrl(`data/layers/${props.layerId}/${props.layerId}.geojson`)
+      : getApiUrl(`data/shapes/${props.filename}`);
+
+    // Fetch available model/pointcloud assets
+    let assetPromise;
+    if (useLayerId) {
+      // New system: load sub-files from layer meta
+      assetPromise = fetch(getApiUrl(`/admin/layers/${props.layerId}`), { headers: { Authorization: props.authHeader } });
+    } else {
+      // Legacy system: load from global uploads list
+      assetPromise = fetch(getApiUrl('/admin/uploads'), { headers: { Authorization: props.authHeader } });
+    }
+
+    const [assetsRes, geojsonRes] = await Promise.all([
+      assetPromise,
+      fetch(geojsonUrl),
     ]);
-    if (!uploadsRes.ok) throw new Error(`Failed to load assets (${uploadsRes.status})`);
+    if (!assetsRes.ok) throw new Error(`Failed to load assets (${assetsRes.status})`);
     if (!geojsonRes.ok) throw new Error(`Failed to load GeoJSON (${geojsonRes.status})`);
 
-    const uploads = await uploadsRes.json();
     const geojson = await geojsonRes.json();
 
-    models.value      = uploads.models      ?? [];
-    pointclouds.value = uploads.pointclouds ?? [];
+    if (useLayerId) {
+      // New system: extract model/pointcloud sub-files from layer meta
+      const layerMeta = await assetsRes.json();
+      layerDisplayName.value = layerMeta.layerConfig?.displayName || layerMeta.originalName || '';
+      const subFiles = layerMeta.subFiles ?? [];
+      models.value = subFiles
+        .filter(sf => sf.role === 'model')
+        .map(sf => ({
+          filename: sf.originalName,
+          dataPath: `data/layers/${props.layerId}/${sf.id}${sf.extension}`,
+        }));
+      pointclouds.value = subFiles
+        .filter(sf => sf.role === 'pointcloud')
+        .map(sf => ({
+          filename: sf.originalName,
+          dataPath: `data/layers/${props.layerId}/${sf.id}${sf.extension}`,
+        }));
+    } else {
+      // Legacy system
+      const uploads = await assetsRes.json();
+      models.value      = uploads.models      ?? [];
+      pointclouds.value = uploads.pointclouds ?? [];
+    }
 
     const initial = {};
     features.value = (geojson.features ?? [])
@@ -332,6 +411,61 @@ async function loadData() {
   }
 }
 
+// ── Sub-file upload ─────────────────────────────────────────────────────────────
+
+async function onAssetFilesSelected(e) {
+  const files = Array.from(e.target.files);
+  e.target.value = '';
+  if (!files.length || !props.layerId) return;
+
+  uploading.value   = true;
+  uploadError.value = '';
+
+  try {
+    for (const file of files) {
+      const ext  = '.' + file.name.split('.').pop().toLowerCase();
+      const role = ['.obj', '.ply', '.stl'].includes(ext) ? 'model'
+                 : ['.las', '.laz'].includes(ext)         ? 'pointcloud'
+                 : null;
+      if (!role) continue;  // silently skip unsupported types
+
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('role', role);
+
+      const res = await fetch(getApiUrl(`/admin/layers/${props.layerId}/subfiles`), {
+        method: 'POST',
+        headers: { Authorization: props.authHeader },
+        body: fd,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Upload failed (${res.status})`);
+      }
+    }
+    // Reload assets palette to show newly uploaded files
+    await reloadAssets();
+  } catch (err) {
+    uploadError.value = err.message ?? 'Upload failed.';
+  } finally {
+    uploading.value = false;
+  }
+}
+
+async function reloadAssets() {
+  if (!props.layerId) return;
+  const res = await fetch(getApiUrl(`/admin/layers/${props.layerId}`), { headers: { Authorization: props.authHeader } });
+  if (!res.ok) return;
+  const layerMeta = await res.json();
+  const subFiles = layerMeta.subFiles ?? [];
+  models.value = subFiles
+    .filter(sf => sf.role === 'model')
+    .map(sf => ({ filename: sf.originalName, dataPath: `data/layers/${props.layerId}/${sf.id}${sf.extension}` }));
+  pointclouds.value = subFiles
+    .filter(sf => sf.role === 'pointcloud')
+    .map(sf => ({ filename: sf.originalName, dataPath: `data/layers/${props.layerId}/${sf.id}${sf.extension}` }));
+}
+
 // ── Save ───────────────────────────────────────────────────────────────────────
 
 async function save() {
@@ -339,10 +473,18 @@ async function save() {
   saveError.value   = '';
   saveSuccess.value = '';
   try {
-    const res = await fetch(getApiUrl('/admin/manual-link'), {
+    const useLayerId = !!props.layerId;
+    const url = useLayerId
+      ? getApiUrl(`/admin/layers/${props.layerId}/link`)
+      : getApiUrl('/admin/manual-link');
+    const body = useLayerId
+      ? JSON.stringify({ assignments: assignments.value })
+      : JSON.stringify({ filename: props.filename, assignments: assignments.value });
+
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: props.authHeader },
-      body: JSON.stringify({ filename: props.filename, assignments: assignments.value }),
+      body,
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? `Server error ${res.status}`);
@@ -403,30 +545,10 @@ async function save() {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  flex: 1;
 }
 
 .header-icon { flex-shrink: 0; }
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex-shrink: 0;
-}
-
-.btn-save {
-  background: var(--admin-accent, #3b82f6);
-  color: #fff;
-  border: none;
-  border-radius: 5px;
-  padding: 0.35rem 0.9rem;
-  font-size: 0.8rem;
-  font-weight: 500;
-  cursor: pointer;
-  height: 30px;
-}
-.btn-save:hover:not(:disabled) { filter: brightness(1.1); }
-.btn-save:disabled { opacity: 0.5; cursor: default; }
 
 .close-btn {
   background: transparent;
@@ -437,6 +559,7 @@ async function save() {
   padding: 0.2rem 0.5rem;
   border-radius: 4px;
   line-height: 1;
+  flex-shrink: 0;
 }
 .close-btn:hover { background: var(--admin-bg, #f3f4f6); }
 
@@ -529,11 +652,52 @@ async function save() {
 }
 
 .drag-hint {
-  margin-top: auto;
   padding-top: 0.5rem;
   font-size: 0.7rem;
   color: var(--admin-muted, #aaa);
   text-align: center;
+}
+
+/* ── Upload new assets section ──────────────────────────────────────────── */
+.panel-upload {
+  margin-top: auto;
+  border-top: 1px solid var(--admin-border, #e0e0e0);
+  padding-top: 0.65rem;
+}
+
+.btn-upload-asset {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem 0.5rem;
+  border-radius: 5px;
+  border: 1px dashed var(--admin-border, #ccc);
+  background: transparent;
+  color: var(--admin-muted, #666);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+.btn-upload-asset:hover:not(:disabled) {
+  border-color: #3b82f6;
+  background: rgba(59,130,246,0.06);
+  color: #3b82f6;
+}
+.btn-upload-asset:disabled { opacity: 0.5; cursor: default; }
+
+.panel-upload-hint {
+  font-size: 0.68rem;
+  color: var(--admin-muted, #aaa);
+  text-align: center;
+  margin: 0.2rem 0 0;
+}
+
+.panel-upload-error {
+  font-size: 0.72rem;
+  color: #dc2626;
+  margin-top: 0.25rem;
+  word-break: break-word;
 }
 
 /* ── Right: feature list ─────────────────────────────────────────────────────── */
@@ -690,15 +854,60 @@ async function save() {
   color: var(--admin-muted, #aaa);
 }
 
-/* ── Footer status bar ───────────────────────────────────────────────────────── */
-.modal-footer-bar {
-  padding: 0.5rem 1.25rem;
+/* ── Footer ─────────────────────────────────────────────────────────────────────────────── */
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 1.25rem;
+  border-top: 1px solid var(--admin-border, #e0e0e0);
+  flex-shrink: 0;
+  background: var(--admin-surface, #fff);
+}
+
+.footer-status {
+  flex: 1;
+  min-width: 0;
+}
+
+.footer-msg {
   font-size: 0.8rem;
-  border-top: 1px solid var(--admin-border, #e5e7eb);
+}
+.footer-msg-error   { color: #dc2626; }
+.footer-msg-success { color: #16a34a; }
+
+.footer-actions {
+  display: flex;
+  gap: 0.5rem;
   flex-shrink: 0;
 }
-.modal-footer-error   { color: #ef4444; background: #fef2f2; }
-.modal-footer-success { color: #15803d; background: #f0fdf4; }
+
+.btn-save {
+  background: #3b82f6;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 0.4rem 1.1rem;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  height: 32px;
+}
+.btn-save:hover:not(:disabled) { background: #2563eb; }
+.btn-save:disabled { opacity: 0.5; cursor: default; }
+
+.btn-cancel {
+  background: transparent;
+  border: 1px solid var(--admin-border, #e0e0e0);
+  border-radius: 5px;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  color: var(--admin-muted, #666);
+  height: 32px;
+}
+.btn-cancel:hover { background: var(--admin-bg, #f3f4f6); color: var(--admin-text, #1a1a1a); }
 
 /* ── Transition ──────────────────────────────────────────────────────────────── */
 .fade-enter-active, .fade-leave-active { transition: opacity 0.15s; }

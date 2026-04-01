@@ -36,8 +36,11 @@ export async function isGdalAvailable() {
  *
  * @param {string} inputPath    Absolute path to source .tif
  * @param {object} [options]
- * @param {boolean} [options.keepOriginal=false]  If true, rename original to
- *   `original_<filename>` before replacing with the COG.
+ * @param {boolean} [options.keepOriginal=false]  Rename original to `original_<filename>` before replacing.
+ * @param {string}  [options.compression='lzw']   GDAL compression: lzw | deflate | zstd | none
+ * @param {string}  [options.resampling='nearest'] Overview resampling: nearest | bilinear | cubic
+ * @param {number}  [options.tileSize=256]         Internal tile size in pixels.
+ * @param {string}  [options.nodata]               No-data pixel value (e.g. '0' or '-9999').
  * @returns {{ success: boolean, step: string, originalBackup: string|null }}
  */
 export async function convertToCog(inputPath, options = {}) {
@@ -49,25 +52,37 @@ export async function convertToCog(inputPath, options = {}) {
     };
   }
 
+  const {
+    keepOriginal = false,
+    compression  = 'lzw',
+    resampling   = 'nearest',
+    tileSize     = 256,
+    nodata,
+  } = options;
+
   const dir      = path.dirname(inputPath);
   const basename = path.basename(inputPath);
   const tmpPath  = path.join(dir, `__cog_tmp_${Date.now()}_${basename}`);
 
-  const gdalArgs = [
+  const compressionUpper = (compression || 'lzw').toUpperCase();
+  const args = [
     'gdal_translate',
     '-of COG',
-    '-co COMPRESS=DEFLATE',
-    '-co PREDICTOR=2',
+    `-co COMPRESS=${compressionUpper}`,
+    `-co RESAMPLING=${(resampling || 'nearest').toUpperCase()}`,
+    `-co TILESIZE=${tileSize || 256}`,
     '-co OVERVIEWS=AUTO',
+    ...(nodata !== undefined && nodata !== null && nodata !== '' ? [`-a_nodata ${nodata}`] : []),
     `"${inputPath}"`,
     `"${tmpPath}"`,
-  ].join(' ');
+  ];
+  const gdalArgs = args.join(' ');
 
   let originalBackup = null;
   try {
     await execAsync(gdalArgs);
     // Optionally back up the original
-    if (options.keepOriginal) {
+    if (keepOriginal) {
       originalBackup = `original_${basename}`;
       await fs.rename(inputPath, path.join(dir, originalBackup));
     }

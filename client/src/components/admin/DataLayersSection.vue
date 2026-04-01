@@ -67,6 +67,19 @@
 
           <!-- Card action buttons -->
           <div class="lc-actions">
+            <!-- Link 3D button — only on GeoJSON layers that have model/pointcloud sub-files -->
+            <button
+              v-if="layer.fileType === 'geojson' && layer.subFiles?.some(sf => sf.role === 'model' || sf.role === 'pointcloud')"
+              class="action-btn action-btn-link3d"
+              title="Link 3D models / point clouds to specific features"
+              :disabled="layer.status === 'optimizing'"
+              @click="openLinkModal(layer)"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/>
+                <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/>
+              </svg>
+            </button>
             <button
               class="action-btn"
               title="Add sub-file (3D model, point cloud, …)"
@@ -108,9 +121,22 @@
 
         <!-- Sub-files strip -->
         <div v-if="layer.subFiles?.length" class="lc-subfiles">
-          <span v-for="sf in layer.subFiles" :key="sf.id" class="subfile-chip" :title="sf.originalName">
-            {{ sf.role }}
-          </span>
+          <!-- For GeoJSON: show model/pointcloud counts + linked summary -->
+          <template v-if="layer.fileType === 'geojson'">
+            <span
+              v-for="group in subfileGroups(layer)"
+              :key="group.role"
+              class="subfile-chip"
+              :class="'subfile-chip-' + group.role"
+              :title="group.names.join(', ')"
+            >{{ group.count }} {{ group.label }}</span>
+          </template>
+          <!-- For other types: show role chips as before -->
+          <template v-else>
+            <span v-for="sf in layer.subFiles" :key="sf.id" class="subfile-chip" :title="sf.originalName">
+              {{ sf.role }}
+            </span>
+          </template>
         </div>
 
         <!-- Sub-file uploading indicator -->
@@ -224,6 +250,14 @@
       @remove="removePendingFile"
     />
 
+    <!-- Feature-level 3D linking modal -->
+    <LinkingModal
+      :is-open="linkModal.open"
+      :layer-id="linkModal.layerId"
+      :auth-header="props.authHeader"
+      @close="linkModal.open = false"
+    />
+
     <!-- Sub-file upload (hidden input, triggered per layer) -->
     <input
       ref="subFileInputRef"
@@ -240,6 +274,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { getApiUrl } from '../../utils/config';
 import UploadSettingsModal from './UploadSettingsModal.vue';
+import LinkingModal from './LinkingModal.vue';
 
 const props = defineProps({
   authHeader: { type: String, default: '' },
@@ -268,6 +303,9 @@ const subFileInputRef  = ref(null);
 const subFileTargetId  = ref(null);
 const subFileUploading = ref(false);
 const subFileError     = ref('');
+
+// Linking modal state
+const linkModal = ref({ open: false, layerId: '' });
 
 // ── Computed ────────────────────────────────────────────────────
 const sortedLayers = computed(() =>
@@ -402,6 +440,17 @@ async function doUpload(settings) {
   }
 }
 
+// ── Sub-file display ────────────────────────────────────────────
+function subfileGroups(layer) {
+  const subs = layer.subFiles ?? [];
+  const models      = subs.filter(sf => sf.role === 'model');
+  const pointclouds = subs.filter(sf => sf.role === 'pointcloud');
+  const groups = [];
+  if (models.length)      groups.push({ role: 'model',      count: models.length,      label: models.length === 1 ? 'model' : 'models',             names: models.map(sf => sf.originalName) });
+  if (pointclouds.length) groups.push({ role: 'pointcloud', count: pointclouds.length, label: pointclouds.length === 1 ? 'point cloud' : 'point clouds', names: pointclouds.map(sf => sf.originalName) });
+  return groups;
+}
+
 // ── Delete flow ─────────────────────────────────────────────────
 function confirmDelete(layer) {
   deleteConfirmId.value = layer.id;
@@ -438,13 +487,19 @@ function openSubFileDialog(layerId) {
   subFileInputRef.value?.click();
 }
 
+function openLinkModal(layer) {
+  linkModal.value = { open: true, layerId: layer.id };
+}
+
 async function onSubFileSelected(e) {
   const files = Array.from(e.target.files);
   e.target.value = '';
   if (!files.length || !subFileTargetId.value) return;
 
+  const parentId = subFileTargetId.value;
   subFileUploading.value = true;
   subFileError.value     = '';
+  let uploadedModelOrPc  = false;
 
   try {
     for (const file of files) {
@@ -456,11 +511,13 @@ async function onSubFileSelected(e) {
                  : ext === '.csv'                         ? 'csv'
                  : 'texture';
 
+      if (role === 'model' || role === 'pointcloud') uploadedModelOrPc = true;
+
       const fd = new FormData();
       fd.append('file', file);
       fd.append('role', role);
 
-      const res = await fetch(getApiUrl(`/admin/layers/${subFileTargetId.value}/subfiles`), {
+      const res = await fetch(getApiUrl(`/admin/layers/${parentId}/subfiles`), {
         method: 'POST',
         headers: { Authorization: props.authHeader },
         body: fd,
@@ -471,6 +528,14 @@ async function onSubFileSelected(e) {
       }
     }
     await fetchLayers();
+
+    // For model/pointcloud uploads on a GeoJSON parent layer, auto-open the linking modal
+    if (uploadedModelOrPc) {
+      const parentLayer = layers.value.find(l => l.id === parentId);
+      if (parentLayer?.fileType === 'geojson') {
+        linkModal.value = { open: true, layerId: parentId };
+      }
+    }
   } catch (err) {
     subFileError.value = err.message;
   } finally {
@@ -567,17 +632,17 @@ async function saveEdit(id) {
   display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
   background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.35);
   border-radius: 6px; padding: 0.55rem 0.8rem; margin-bottom: 0.75rem;
-  font-size: 0.82rem; color: #f87171;
+  font-size: 0.82rem; color: #ef4444;
 }
 .banner-close {
-  background: none; border: none; cursor: pointer; color: #f87171; font-size: 1rem; line-height: 1; padding: 0;
+  background: none; border: none; cursor: pointer; color: #ef4444; font-size: 1rem; line-height: 1; padding: 0;
 }
 
 /* ── Empty / loading ────────────────────────────────────────── */
 .empty-state {
   padding: 2rem 1rem; text-align: center;
-  font-size: 0.85rem; color: var(--text-muted, #888);
-  border: 1px dashed var(--border, rgba(255,255,255,0.12));
+  font-size: 0.85rem; color: var(--admin-muted, #777);
+  border: 1px dashed var(--admin-border, #e0e0e0);
   border-radius: 8px;
 }
 
@@ -585,14 +650,14 @@ async function saveEdit(id) {
 .layer-list { display: flex; flex-direction: column; gap: 0.5rem; }
 
 .layer-card {
-  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  border: 1px solid var(--admin-border, #e0e0e0);
   border-radius: 8px;
-  background: var(--card-bg, rgba(255,255,255,0.04));
+  background: var(--admin-surface, #fff);
   overflow: hidden;
   transition: border-color 0.15s;
 }
-.layer-card:hover { border-color: var(--border-hover, rgba(255,255,255,0.2)); }
-.layer-card-editing { border-color: var(--accent, #3b82f6) !important; }
+.layer-card:hover { border-color: var(--admin-border, #c0c0c0); filter: brightness(0.98); }
+.layer-card-editing { border-color: #3b82f6 !important; }
 .layer-card-optimizing { opacity: 0.65; pointer-events: none; }
 .layer-card-error { border-color: rgba(239,68,68,0.45) !important; }
 
@@ -606,22 +671,29 @@ async function saveEdit(id) {
   flex-shrink: 0;
   font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
   padding: 0.15rem 0.5rem; border-radius: 4px;
-  background: rgba(255,255,255,0.1); color: #aaa;
+  background: var(--admin-bg, #f3f4f6); color: var(--admin-muted, #777);
 }
-.type-geojson    { background: rgba(34,197,94,0.15);  color: #4ade80; }
-.type-geotiff    { background: rgba(168,85,247,0.15); color: #c084fc; }
-.type-model      { background: rgba(251,191,36,0.15); color: #fbbf24; }
-.type-pointcloud { background: rgba(56,189,248,0.15); color: #38bdf8; }
+.type-geojson    { background: rgba(34,197,94,0.15);  color: #15803d; }
+.type-geotiff    { background: rgba(168,85,247,0.15); color: #6d28d9; }
+.type-model      { background: rgba(251,191,36,0.15); color: #b45309; }
+.type-pointcloud { background: rgba(56,189,248,0.15); color: #0369a1; }
+:global(body.theme-dark) .type-geojson    { color: #4ade80; }
+:global(body.theme-dark) .type-geotiff    { color: #c084fc; }
+:global(body.theme-dark) .type-model      { color: #fbbf24; }
+:global(body.theme-dark) .type-pointcloud { color: #38bdf8; }
 
 .lc-names { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.1rem; }
-.lc-display-name { font-size: 0.88rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lc-original-name { font-size: 0.72rem; color: var(--text-muted, #777); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lc-display-name { font-size: 0.88rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--admin-text, #1a1a1a); }
+.lc-original-name { font-size: 0.72rem; color: var(--admin-muted, #777); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .lc-status { display: flex; align-items: center; gap: 0.35rem; flex-shrink: 0; }
 .status-text { font-size: 0.75rem; font-weight: 500; }
-.status-optimizing { color: #fbbf24; }
-.status-error      { color: #f87171; }
-.status-ok         { color: #4ade80; }
+.status-optimizing { color: #d97706; }
+.status-error      { color: #dc2626; }
+.status-ok         { color: #16a34a; }
+:global(body.theme-dark) .status-optimizing { color: #fbbf24; }
+:global(body.theme-dark) .status-error      { color: #f87171; }
+:global(body.theme-dark) .status-ok         { color: #4ade80; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 .spin { animation: spin 0.9s linear infinite; }
@@ -630,39 +702,43 @@ async function saveEdit(id) {
 .lc-actions { display: flex; gap: 0.3rem; flex-shrink: 0; }
 .action-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border-radius: 5px; border: 1px solid var(--border, rgba(255,255,255,0.1));
-  background: transparent; color: var(--text, #ccc); cursor: pointer;
+  width: 28px; height: 28px; border-radius: 5px; border: 1px solid var(--admin-border, #e0e0e0);
+  background: transparent; color: var(--admin-muted, #777); cursor: pointer;
   transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
-.action-btn:hover:not(:disabled) { background: rgba(255,255,255,0.07); border-color: rgba(255,255,255,0.25); color: #fff; }
+.action-btn:hover:not(:disabled) { background: var(--admin-bg, #f3f4f6); border-color: var(--admin-muted, #aaa); color: var(--admin-text, #1a1a1a); }
 .action-btn:disabled { opacity: 0.35; cursor: default; }
-.action-btn-active { background: rgba(59,130,246,0.15) !important; border-color: rgba(59,130,246,0.5) !important; color: #93c5fd !important; }
-.action-btn-danger:hover:not(:disabled) { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.4); color: #f87171; }
+.action-btn-active { background: rgba(59,130,246,0.15) !important; border-color: rgba(59,130,246,0.5) !important; color: #3b82f6 !important; }
+.action-btn-danger:hover:not(:disabled) { background: rgba(239,68,68,0.08); border-color: rgba(239,68,68,0.4); color: #dc2626; }
+.action-btn-link3d { color: #7c3aed; border-color: rgba(124,58,237,0.3); }
+.action-btn-link3d:hover:not(:disabled) { background: rgba(124,58,237,0.08); border-color: rgba(124,58,237,0.5); color: #7c3aed; }
 
 /* ── Sub-files strip ────────────────────────────────────────── */
 .lc-subfile-uploading {
   padding: 0.35rem 0.8rem;
   font-size: 0.78rem;
-  color: var(--text-muted, #888);
-  border-top: 1px solid var(--border, rgba(255,255,255,0.07));
+  color: var(--admin-muted, #777);
+  border-top: 1px solid var(--admin-border, #e0e0e0);
 }
 .lc-subfile-error {
   display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
   padding: 0.35rem 0.8rem;
   font-size: 0.78rem;
-  color: #f87171;
+  color: #dc2626;
   border-top: 1px solid rgba(239,68,68,0.2);
   background: rgba(239,68,68,0.06);
 }
 .lc-subfiles {
   display: flex; flex-wrap: wrap; gap: 0.3rem;
-  padding: 0 0.85rem 0.6rem; border-top: 1px solid var(--border, rgba(255,255,255,0.06));
+  padding: 0 0.85rem 0.6rem; border-top: 1px solid var(--admin-border, #e0e0e0);
   margin-top: -0.05rem; padding-top: 0.4rem;
 }
 .subfile-chip {
   font-size: 0.7rem; padding: 0.1rem 0.45rem; border-radius: 3px;
-  background: rgba(255,255,255,0.07); color: #aaa; text-transform: capitalize;
+  background: var(--admin-bg, #f3f4f6); color: var(--admin-muted, #777); border: 1px solid var(--admin-border, #e0e0e0); text-transform: capitalize;
 }
+.subfile-chip-model      { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.subfile-chip-pointcloud { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
 
 /* ── Delete confirm bar ─────────────────────────────────────── */
 .lc-confirm-bar {
@@ -671,7 +747,7 @@ async function saveEdit(id) {
   background: rgba(239,68,68,0.08); border-top: 1px solid rgba(239,68,68,0.2);
   font-size: 0.82rem;
 }
-.confirm-text { flex: 1; color: var(--text, #ccc); }
+.confirm-text { flex: 1; color: var(--admin-text, #1a1a1a); }
 .btn-danger-sm {
   padding: 0.28rem 0.7rem; border-radius: 5px; border: none; cursor: pointer;
   background: #dc2626; color: #fff; font-size: 0.8rem; font-weight: 500;
@@ -683,22 +759,22 @@ async function saveEdit(id) {
 /* ── Inline edit panel ──────────────────────────────────────── */
 .lc-edit-panel {
   padding: 0.85rem;
-  border-top: 1px solid var(--border, rgba(255,255,255,0.08));
-  background: var(--edit-bg, rgba(0,0,0,0.15));
+  border-top: 1px solid var(--admin-border, #e0e0e0);
+  background: var(--admin-bg, #f3f4f6);
   display: flex; flex-direction: column; gap: 0.7rem;
 }
 
 .edit-row { display: flex; flex-wrap: wrap; gap: 0.75rem; }
 .edit-field { display: flex; flex-direction: column; gap: 0.25rem; }
-.edit-field label { font-size: 0.75rem; color: var(--text-muted, #888); font-weight: 500; }
+.edit-field label { font-size: 0.75rem; color: var(--admin-muted, #777); font-weight: 500; }
 .edit-field input[type="text"],
 .edit-field input[type="number"] {
   padding: 0.35rem 0.6rem; border-radius: 5px;
-  border: 1px solid var(--border, rgba(255,255,255,0.12));
-  background: var(--input-bg, rgba(255,255,255,0.06)); color: var(--text, #ddd);
+  border: 1px solid var(--admin-border, #e0e0e0);
+  background: var(--admin-input-bg, #fff); color: var(--admin-text, #1a1a1a);
   font-size: 0.83rem;
 }
-.edit-field input:focus { outline: none; border-color: var(--accent, #3b82f6); }
+.edit-field input:focus { outline: none; border-color: #3b82f6; }
 
 .edit-field-grow { flex: 1; min-width: 14rem; }
 .edit-field-sm   { width: 6rem; }
@@ -709,24 +785,24 @@ async function saveEdit(id) {
 .toggle-switch input { opacity: 0; width:0; height:0; }
 .slider {
   position: absolute; cursor: pointer; inset: 0; border-radius: 20px;
-  background: rgba(255,255,255,0.12); transition: background 0.2s;
+  background: var(--admin-border, #ccc); transition: background 0.2s;
 }
 .slider::before {
   content:''; position:absolute; height:14px; width:14px; left:3px; bottom:3px;
   border-radius:50%; background:#fff; transition: transform 0.2s;
 }
-input:checked + .slider { background: var(--accent, #3b82f6); }
+input:checked + .slider { background: #3b82f6; }
 input:checked + .slider::before { transform: translateX(16px); }
 
 /* Color row */
 .color-row { display: flex; gap: 0.4rem; align-items: center; }
-.color-swatch { width: 28px; height: 28px; padding: 1px; border-radius: 4px; border: 1px solid var(--border, rgba(255,255,255,0.15)); background:none; cursor:pointer; }
+.color-swatch { width: 28px; height: 28px; padding: 1px; border-radius: 4px; border: 1px solid var(--admin-border, #e0e0e0); background:none; cursor:pointer; }
 .color-row input[type="text"] { flex: 1; }
 
 /* Edit footer */
 .edit-footer { display: flex; align-items: center; gap: 0.5rem; }
 .edit-footer-spacer { flex: 1; }
-.edit-error { font-size: 0.78rem; color: #f87171; }
+.edit-error { font-size: 0.78rem; color: #dc2626; }
 
 .btn-primary-sm {
   padding: 0.3rem 0.75rem; border-radius: 5px; border: none; cursor: pointer;
@@ -738,10 +814,10 @@ input:checked + .slider::before { transform: translateX(16px); }
 
 .btn-secondary-sm {
   padding: 0.3rem 0.75rem; border-radius: 5px; cursor: pointer; font-size: 0.8rem;
-  background: transparent; color: var(--text-muted, #aaa);
-  border: 1px solid var(--border, rgba(255,255,255,0.15));
+  background: transparent; color: var(--admin-muted, #777);
+  border: 1px solid var(--admin-border, #e0e0e0);
   transition: background 0.12s, color 0.12s;
   text-decoration: none; display: inline-flex; align-items: center;
 }
-.btn-secondary-sm:hover { background: rgba(255,255,255,0.07); color: #fff; }
+.btn-secondary-sm:hover { background: var(--admin-bg, #f3f4f6); color: var(--admin-text, #1a1a1a); }
 </style>

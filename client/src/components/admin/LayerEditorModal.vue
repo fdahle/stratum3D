@@ -3,7 +3,7 @@
     <div v-if="isOpen" class="modal-overlay" @click.self="$emit('cancel')">
       <div class="modal-content">
         <header class="modal-header">
-          <h3>{{ isNew ? 'Add Layer' : 'Edit Layer' }}</h3>
+          <h3>{{ isNew ? (layerGroup === 'base' ? 'Add Basemap' : 'Add Layer') : (layerGroup === 'base' ? 'Edit Basemap' : 'Edit Layer') }}</h3>
           <button class="close-btn" @click="$emit('cancel')" title="Close">✕</button>
         </header>
 
@@ -263,7 +263,7 @@
 
         <footer class="modal-footer">
           <button class="btn-secondary" @click="$emit('cancel')">Cancel</button>
-          <button class="btn-primary" @click="save">{{ isNew ? 'Add Layer' : 'Save Changes' }}</button>
+          <button class="btn-primary" @click="save">{{ isNew ? (layerGroup === 'base' ? 'Add Basemap' : 'Add Layer') : 'Save Changes' }}</button>
         </footer>
       </div>
     </div>
