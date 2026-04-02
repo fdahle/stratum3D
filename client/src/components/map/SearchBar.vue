@@ -102,18 +102,20 @@ const performSearch = () => {
     const index = layerManager.value.searchIndex.get(layer._layerId);
     if (!index) return;
 
-    for (const [key, { feature, displayValue }] of index) {
-      if (matches.length >= 10) break;
-
+    for (const [key, entries] of index) {
       if (key.includes(searchTerm)) {
-        matches.push({
-          uid: feature.ol_uid,
-          name: displayValue,
-          layerName: layer.name,
-          feature: feature,
-          geometry: feature.getGeometry(),
-        });
+        for (const { feature, displayValue } of entries) {
+          if (matches.length >= 10) break;
+          matches.push({
+            uid: feature.ol_uid,
+            name: displayValue,
+            layerName: layer.name,
+            feature: feature,
+            geometry: feature.getGeometry(),
+          });
+        }
       }
+      if (matches.length >= 10) break;
     }
   });
 

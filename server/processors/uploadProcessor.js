@@ -20,6 +20,7 @@
 import path   from 'path';
 import fs     from 'fs/promises';
 import { v4 as uuidv4 } from 'uuid';
+import { parse as csvParse } from 'csv-parse/sync';
 
 import { normalizeFilename }     from '../src/utils.js';
 import { processGeoJsonObject, linkAssetsToFeatures } from './shapeProcessor.js';
@@ -378,29 +379,29 @@ async function _processCsvLayer(csvFile, layersDir, allSettings) {
     throw new Error(`${csvFile.originalname}: X and Y column names must be specified.`);
   }
 
-  // Parse CSV
-  const text  = csvFile.buffer.toString('utf8');
-  const lines = text.split(/\r?\n/).filter(l => l.trim());
-  if (lines.length < 2) throw new Error(`${csvFile.originalname}: CSV has no data rows.`);
+  // Parse CSV using the csv-parse library which correctly handles quoted fields,
+  // escaped delimiters, and multi-line values.
+  const text = csvFile.buffer.toString('utf8');
+  let records;
+  try {
+    records = csvParse(text, { columns: true, skip_empty_lines: true, trim: true, relax_quotes: true });
+  } catch (err) {
+    throw new Error(`${csvFile.originalname}: CSV parse error — ${err.message}`);
+  }
+  if (records.length === 0) throw new Error(`${csvFile.originalname}: CSV has no data rows.`);
 
-  const rawHeader = lines[0];
-  const delim     = rawHeader.includes(';') ? ';' : ',';
-  const headers   = rawHeader.split(delim).map(h => h.trim().replace(/^"|"$/g, ''));
-
-  const xIdx = headers.indexOf(xCol);
-  const yIdx = headers.indexOf(yCol);
-  if (xIdx === -1) throw new Error(`${csvFile.originalname}: column "${xCol}" not found.`);
-  if (yIdx === -1) throw new Error(`${csvFile.originalname}: column "${yCol}" not found.`);
+  const headers = Object.keys(records[0]);
+  if (!headers.includes(xCol)) throw new Error(`${csvFile.originalname}: column "${xCol}" not found.`);
+  if (!headers.includes(yCol)) throw new Error(`${csvFile.originalname}: column "${yCol}" not found.`);
 
   const features = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cells = lines[i].split(delim).map(c => c.trim().replace(/^"|"$/g, ''));
-    const x = parseFloat(cells[xIdx]);
-    const y = parseFloat(cells[yIdx]);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;  // skip bad rows
+  for (const row of records) {
+    const x = parseFloat(row[xCol]);
+    const y = parseFloat(row[yCol]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue; // skip bad rows
 
     const props = {};
-    headers.forEach((h, idx) => { if (idx !== xIdx && idx !== yIdx) props[h] = cells[idx] ?? ''; });
+    headers.forEach((h) => { if (h !== xCol && h !== yCol) props[h] = row[h] ?? ''; });
 
     features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [x, y] }, properties: props });
   }
@@ -487,6 +488,92 @@ export async function addSubFile(layerId, file, role, layersDir, settings = {}) 
 
   const finalFile = `${subId}${finalExt}`;
   return { subId, filename: finalFile, dataPath: `data/layers/${layerId}/${finalFile}`, role, meta: subMeta };
+}
+
+// ── Sub-file batch addition ────────────────────────────────────────────────────
+
+/**
+ * Add multiple files as sub-files of an existing layer.
+ * Handles OBJ+MTL+texture grouping the same way as processUploadBatch:
+ *   • Each .obj is paired with a same-stem .mtl from the batch, mtllib reference patched.
+ *   • Textures referenced by the MTL are saved and patched too.
+ *   • Orphan MTL / texture files (no matching OBJ in this batch) are saved as-is.
+ *   • .las/.laz are added as pointcloud sub-files.
+ */
+export async function addSubFileBatch(layerId, files, layersDir, allSettings = {}) {
+  const meta     = await readLayerMeta(layersDir, layerId);
+  const layerDir = path.join(layersDir, layerId);
+
+  // Build fileMap so _saveModelSubFile can find companion MTL / textures
+  const fileMap = new Map();
+  for (const f of files) {
+    fileMap.set(f.originalname, f.buffer);
+    fileMap.set(normalizeFilename(f.originalname), f.buffer);
+  }
+
+  // Track which original filenames were consumed as companions so we don't double-add them
+  const consumedNames = new Set();
+  const newSubFiles   = [];
+
+  // 1. Process model files (OBJ/PLY/STL) — each may absorb its MTL + textures
+  for (const file of files) {
+    if (classifyExt(file.originalname) !== 'model') continue;
+    const subRes = await _saveModelSubFile(file, fileMap, layerId, layerDir);
+    consumedNames.add(file.originalname);
+    consumedNames.add(normalizeFilename(file.originalname));
+    meta.subFiles.push(subRes.subMeta);
+    // Flatten companions into meta.subFiles (consistent with standalone model behaviour)
+    if (subRes.subMeta.companions?.length) {
+      meta.subFiles.push(...subRes.subMeta.companions);
+      for (const c of subRes.subMeta.companions) {
+        consumedNames.add(c.originalName);
+        consumedNames.add(normalizeFilename(c.originalName));
+      }
+    }
+    newSubFiles.push(subRes.subMeta);
+  }
+
+  // 2. Process point cloud files
+  for (const file of files) {
+    if (classifyExt(file.originalname) !== 'pointcloud') continue;
+    const pcSettings = allSettings[file.originalname] ?? {};
+    const subId = uuidv4();
+    const ext   = pointcloudExt(file.originalname);
+    await fs.writeFile(path.join(layerDir, `${subId}${ext}`), file.buffer);
+    let finalExt = ext;
+    if (pcSettings.optimize === 'copc') {
+      try {
+        const res = await convertToCopc(path.join(layerDir, `${subId}${ext}`), {
+          keepOriginal: pcSettings.keepOriginal ?? false,
+          sourceCrs:    pcSettings.sourceCrs    || null,
+        });
+        if (res.success) finalExt = '.copc.laz';
+      } catch { /* copc failure is non-fatal; keep original */ }
+    }
+    const subMeta = createSubFileMeta({ id: subId, originalName: file.originalname, fileType: 'pointcloud', role: 'pointcloud' });
+    if (finalExt !== ext) subMeta.extension = finalExt;
+    meta.subFiles.push(subMeta);
+    consumedNames.add(file.originalname);
+    consumedNames.add(normalizeFilename(file.originalname));
+    newSubFiles.push(subMeta);
+  }
+
+  // 3. Orphan MTL / texture files not consumed by a model above
+  for (const file of files) {
+    if (consumedNames.has(file.originalname) || consumedNames.has(normalizeFilename(file.originalname))) continue;
+    const ext = path.extname(file.originalname).toLowerCase();
+    const subId = uuidv4();
+    const outFile = `${subId}${ext}`;
+    await fs.writeFile(path.join(layerDir, outFile), file.buffer);
+    const role     = ext === '.mtl' ? 'material' : TEXTURE_EXTS.has(ext) ? 'texture' : 'unknown';
+    const fileType = ext === '.mtl' ? 'material' : TEXTURE_EXTS.has(ext) ? 'texture' : 'unknown';
+    const subMeta  = createSubFileMeta({ id: subId, originalName: file.originalname, fileType, role });
+    meta.subFiles.push(subMeta);
+    newSubFiles.push(subMeta);
+  }
+
+  await writeLayerMeta(layersDir, layerId, meta);
+  return { subFiles: newSubFiles, meta };
 }
 
 // ── Legacy re-link helper (kept for backward compatibility) ───────────────────

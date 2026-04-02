@@ -6,12 +6,12 @@
  * original file is used as-is (still works, just not streaming-optimised).
  */
 
-import { exec }    from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs            from 'fs/promises';
 import path          from 'path';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // ── Tool availability ──────────────────────────────────────────────────────────
 
@@ -20,7 +20,7 @@ let _gdalAvailable = null;
 export async function isGdalAvailable() {
   if (_gdalAvailable !== null) return _gdalAvailable;
   try {
-    await execAsync('gdal_translate --version');
+    await execFileAsync('gdal_translate', ['--version']);
     _gdalAvailable = true;
   } catch {
     _gdalAvailable = false;
@@ -66,21 +66,19 @@ export async function convertToCog(inputPath, options = {}) {
 
   const compressionUpper = (compression || 'lzw').toUpperCase();
   const args = [
-    'gdal_translate',
-    '-of COG',
-    `-co COMPRESS=${compressionUpper}`,
-    `-co RESAMPLING=${(resampling || 'nearest').toUpperCase()}`,
-    `-co TILESIZE=${tileSize || 256}`,
-    '-co OVERVIEWS=AUTO',
-    ...(nodata !== undefined && nodata !== null && nodata !== '' ? [`-a_nodata ${nodata}`] : []),
-    `"${inputPath}"`,
-    `"${tmpPath}"`,
+    '-of', 'COG',
+    '-co', `COMPRESS=${compressionUpper}`,
+    '-co', `RESAMPLING=${(resampling || 'nearest').toUpperCase()}`,
+    '-co', `TILESIZE=${tileSize || 256}`,
+    '-co', 'OVERVIEWS=AUTO',
+    ...(nodata !== undefined && nodata !== null && nodata !== '' ? ['-a_nodata', String(nodata)] : []),
+    inputPath,
+    tmpPath,
   ];
-  const gdalArgs = args.join(' ');
 
   let originalBackup = null;
   try {
-    await execAsync(gdalArgs);
+    await execFileAsync('gdal_translate', args);
     // Optionally back up the original
     if (keepOriginal) {
       originalBackup = `original_${basename}`;

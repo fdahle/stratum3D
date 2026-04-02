@@ -30,9 +30,7 @@ const router = createRouter({
 
 router.afterEach((to) => {
   const base = document.title.split(' — ')[0] || document.title
-  const pageTitle = to.meta?.title
-    ? (to.query?.n || to.meta.title)
-    : null
+  const pageTitle = to.meta?.title ?? null
   document.title = pageTitle ? `${base} — ${pageTitle}` : base
 })
 

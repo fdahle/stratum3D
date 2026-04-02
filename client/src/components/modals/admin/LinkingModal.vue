@@ -43,6 +43,7 @@
                 @dragend="dragging = null"
               >
                 <span class="asset-name" :title="m.filename">{{ shortName(m.filename) }}</span>
+                <button class="asset-rm" title="Delete this asset" @click.stop="deleteAsset(m)">×</button>
               </div>
             </div>
 
@@ -66,6 +67,7 @@
                 @dragend="dragging = null"
               >
                 <span class="asset-name" :title="pc.filename">{{ shortName(pc.filename) }}</span>
+                <button class="asset-rm" title="Delete this asset" @click.stop="deleteAsset(pc)">×</button>
               </div>
             </div>
 
@@ -85,15 +87,15 @@
                      stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;flex-shrink:0">
                   <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
                 </svg>
-                {{ uploading ? 'Uploading…' : 'Upload model / point cloud' }}
+                {{ uploading ? 'Uploading…' : 'Upload model / companion files' }}
               </button>
-              <p class="panel-upload-hint">.obj .ply .stl .las .laz</p>
+              <p class="panel-upload-hint">.obj .ply .stl .las .laz — include .mtl &amp; textures in the same batch</p>
               <div v-if="uploadError" class="panel-upload-error">{{ uploadError }}</div>
               <input
                 ref="assetFileInputRef"
                 type="file"
                 multiple
-                accept=".obj,.ply,.stl,.las,.laz"
+                accept=".obj,.ply,.stl,.las,.laz,.mtl,.jpg,.jpeg,.png,.bmp,.tga,.webp"
                 style="display:none"
                 @change="onAssetFilesSelected"
               />
@@ -182,13 +184,16 @@
         <footer class="modal-footer">
           <div class="footer-status">
             <span v-if="saveError" class="footer-msg footer-msg-error">{{ saveError }}</span>
+            <span v-else-if="saving" class="footer-msg footer-msg-saving">
+              <svg class="spin" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right:4px;vertical-align:-1px">
+                <path d="M12 2a10 10 0 0110 10" opacity="0.3"/><path d="M12 2a10 10 0 000 20a10 10 0 0010-10"/>
+              </svg>
+              Saving…
+            </span>
             <span v-else-if="saveSuccess" class="footer-msg footer-msg-success">{{ saveSuccess }}</span>
           </div>
           <div class="footer-actions">
-            <button class="btn-cancel" @click="$emit('close')">Cancel</button>
-            <button class="btn-save" :disabled="saving || loading" @click="save">
-              {{ saving ? 'Saving…' : 'Save links' }}
-            </button>
+            <button class="btn-close" @click="$emit('close')">Close</button>
           </div>
         </footer>
       </div>
@@ -197,7 +202,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, watchEffect } from 'vue';
 import { getApiUrl } from '../../../utils/config.js';
 import Asset3DUploadModal from './Asset3DUploadModal.vue';
 
@@ -216,6 +221,8 @@ const loadError  = ref('');
 const saving     = ref(false);
 const saveError  = ref('');
 const saveSuccess = ref('');
+let _saveTimer = null;
+let _isInitialLoad = false;
 
 const models      = ref([]);  // { filename, dataPath }
 const pointclouds = ref([]);  // { filename, dataPath }
@@ -323,6 +330,7 @@ function onDrop(featureId) {
     if (!assign.pointclouds.includes(url)) assign.pointclouds = [...assign.pointclouds, url];
   }
   dragging.value = null;
+  scheduleSave();
 }
 
 function removeAsset(featureId, type, url) {
@@ -332,18 +340,21 @@ function removeAsset(featureId, type, url) {
   } else {
     assign.pointclouds = assign.pointclouds.filter(u => u !== url);
   }
+  scheduleSave();
 }
 
 function clearAll() {
   for (const fid of Object.keys(assignments.value)) {
     assignments.value[fid] = { models: [], pointclouds: [] };
   }
+  scheduleSave();
 }
 
 // ── Data loading ───────────────────────────────────────────────────────────────
 
 watch(() => props.isOpen, async (open) => {
   if (!open) {
+    clearTimeout(_saveTimer);
     saveError.value   = '';
     saveSuccess.value = '';
     uploadError.value = '';
@@ -357,6 +368,7 @@ async function loadData() {
   loadError.value = '';
   saveError.value = '';
   saveSuccess.value = '';
+  _isInitialLoad = true;
   try {
     const [assetsRes, geojsonRes] = await Promise.all([
       fetch(getApiUrl(`/admin/layers/${props.layerId}`), { headers: { Authorization: props.authHeader } }),
@@ -373,12 +385,14 @@ async function loadData() {
     models.value = subFiles
       .filter(sf => sf.role === 'model')
       .map(sf => ({
+        subId:    sf.id,
         filename: sf.originalName,
         dataPath: `data/layers/${props.layerId}/${sf.id}${sf.extension}`,
       }));
     pointclouds.value = subFiles
       .filter(sf => sf.role === 'pointcloud')
       .map(sf => ({
+        subId:    sf.id,
         filename: sf.originalName,
         dataPath: `data/layers/${props.layerId}/${sf.id}${sf.extension}`,
       }));
@@ -403,6 +417,8 @@ async function loadData() {
     loadError.value = err.message ?? 'Failed to load data.';
   } finally {
     loading.value = false;
+    // Allow the assignment watcher to fire after the current tick without triggering a save
+    setTimeout(() => { _isInitialLoad = false; }, 0);
   }
 }
 
@@ -422,28 +438,20 @@ async function doAssetUpload(settingsMap) {
   uploadError.value = '';
 
   try {
+    const fd = new FormData();
     for (const file of pendingAssets.value) {
-      const ext  = '.' + file.name.split('.').pop().toLowerCase();
-      const role = ['.obj', '.ply', '.stl'].includes(ext) ? 'model'
-                 : ['.las', '.laz'].includes(ext)         ? 'pointcloud'
-                 : null;
-      if (!role) continue;
+      fd.append('files', file);
+    }
+    fd.append('settings', JSON.stringify(settingsMap));
 
-      const fileSettings = settingsMap[file.name] ?? {};
-      const fd = new FormData();
-      fd.append('file', file);
-      fd.append('role', role);
-      fd.append('settings', JSON.stringify(fileSettings));
-
-      const res = await fetch(getApiUrl(`/admin/layers/${props.layerId}/subfiles`), {
-        method: 'POST',
-        headers: { Authorization: props.authHeader },
-        body: fd,
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `Upload failed (${res.status})`);
-      }
+    const res = await fetch(getApiUrl(`/admin/layers/${props.layerId}/subfiles/batch`), {
+      method: 'POST',
+      headers: { Authorization: props.authHeader },
+      body: fd,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Upload failed (${res.status})`);
     }
     await reloadAssets();
   } catch (err) {
@@ -462,18 +470,48 @@ async function reloadAssets() {
   const subFiles = layerMeta.subFiles ?? [];
   models.value = subFiles
     .filter(sf => sf.role === 'model')
-    .map(sf => ({ filename: sf.originalName, dataPath: `data/layers/${props.layerId}/${sf.id}${sf.extension}` }));
+    .map(sf => ({ subId: sf.id, filename: sf.originalName, dataPath: `data/layers/${props.layerId}/${sf.id}${sf.extension}` }));
   pointclouds.value = subFiles
     .filter(sf => sf.role === 'pointcloud')
-    .map(sf => ({ filename: sf.originalName, dataPath: `data/layers/${props.layerId}/${sf.id}${sf.extension}` }));
+    .map(sf => ({ subId: sf.id, filename: sf.originalName, dataPath: `data/layers/${props.layerId}/${sf.id}${sf.extension}` }));
 }
 
-// ── Save ───────────────────────────────────────────────────────────────────────
+async function deleteAsset(asset) {
+  try {
+    const res = await fetch(getApiUrl(`/admin/layers/${props.layerId}/subfiles/${asset.subId}`), {
+      method: 'DELETE',
+      headers: { Authorization: props.authHeader },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Delete failed (${res.status})`);
+    }
+    // Remove from local lists
+    models.value      = models.value.filter(m => m.dataPath !== asset.dataPath);
+    pointclouds.value = pointclouds.value.filter(p => p.dataPath !== asset.dataPath);
+    // Remove any feature assignments that reference the deleted asset
+    for (const a of Object.values(assignments.value)) {
+      a.models      = a.models.filter(u => u !== asset.dataPath);
+      a.pointclouds = a.pointclouds.filter(u => u !== asset.dataPath);
+    }
+  } catch (err) {
+    uploadError.value = err.message ?? 'Delete failed.';
+  }
+}
+
+// ── Auto-save ──────────────────────────────────────────────────────────────────
+
+function scheduleSave() {
+  if (_isInitialLoad) return;
+  clearTimeout(_saveTimer);
+  saveSuccess.value = '';
+  _saveTimer = setTimeout(save, 600);
+}
 
 async function save() {
-  saving.value      = true;
-  saveError.value   = '';
-  saveSuccess.value = '';
+  if (_isInitialLoad || loading.value) return;
+  saving.value    = true;
+  saveError.value = '';
   try {
     const res = await fetch(getApiUrl(`/admin/layers/${props.layerId}/link`), {
       method: 'POST',
@@ -482,7 +520,7 @@ async function save() {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error ?? `Server error ${res.status}`);
-    saveSuccess.value = `Saved — ${data.linkedCount} feature${data.linkedCount !== 1 ? 's' : ''} have 3D assets.`;
+    saveSuccess.value = `Saved — ${data.linkedCount} feature${data.linkedCount !== 1 ? 's' : ''} linked`;
     emit('saved');
   } catch (err) {
     saveError.value = err.message ?? 'Save failed.';
@@ -645,6 +683,21 @@ async function save() {
   white-space: nowrap;
   flex: 1;
 }
+
+.asset-rm {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0 0.15rem;
+  color: inherit;
+  opacity: 0.45;
+  border-radius: 3px;
+  transition: opacity 0.1s, background 0.1s;
+}
+.asset-rm:hover { opacity: 1; background: rgba(0,0,0,0.08); }
 
 .drag-hint {
   padding-top: 0.5rem;
@@ -868,9 +921,12 @@ async function save() {
 
 .footer-msg {
   font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
 }
 .footer-msg-error   { color: #dc2626; }
 .footer-msg-success { color: #16a34a; }
+.footer-msg-saving  { color: var(--admin-muted, #777); }
 
 .footer-actions {
   display: flex;
@@ -878,33 +934,23 @@ async function save() {
   flex-shrink: 0;
 }
 
-.btn-save {
-  background: #3b82f6;
-  color: #fff;
-  border: none;
-  border-radius: 5px;
-  padding: 0.4rem 1.1rem;
-  font-size: 0.82rem;
-  font-weight: 500;
-  cursor: pointer;
-  height: 32px;
-}
-.btn-save:hover:not(:disabled) { background: #2563eb; }
-.btn-save:disabled { opacity: 0.5; cursor: default; }
-
-.btn-cancel {
+.btn-close {
   background: transparent;
   border: 1px solid var(--admin-border, #e0e0e0);
   border-radius: 5px;
-  padding: 0.4rem 0.9rem;
+  padding: 0.4rem 1.1rem;
   font-size: 0.82rem;
   cursor: pointer;
-  color: var(--admin-muted, #666);
+  color: var(--admin-text, #1a1a1a);
   height: 32px;
+  font-weight: 500;
 }
-.btn-cancel:hover { background: var(--admin-bg, #f3f4f6); color: var(--admin-text, #1a1a1a); }
+.btn-close:hover { background: var(--admin-bg, #f3f4f6); }
 
 /* ── Transition ──────────────────────────────────────────────────────────────── */
 .fade-enter-active, .fade-leave-active { transition: opacity 0.15s; }
 .fade-enter-from, .fade-leave-to       { opacity: 0; }
+
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>

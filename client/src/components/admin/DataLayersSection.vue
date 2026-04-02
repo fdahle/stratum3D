@@ -10,8 +10,21 @@
           <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
         </svg>
         {{ uploadPending ? 'Uploading…' : 'Add Layer' }}
-        <input v-if="!uploadPending" type="file" multiple accept=".geojson,.json,.tif,.tiff,.csv" style="display:none" @change="onFilesSelected" />
+        <input v-if="!uploadPending" type="file" multiple
+          accept=".geojson,.json,.tif,.tiff,.csv,.obj,.ply,.stl,.las,.laz,.mtl,.jpg,.jpeg,.png,.bmp,.tga,.webp"
+          style="display:none" @change="onFilesSelected" />
       </label>
+    </div>
+
+    <!-- Upload progress bar -->
+    <div v-if="uploadPending" class="upload-progress-wrap">
+      <div class="upload-progress-label">
+        <span>Uploading…</span>
+        <span>{{ uploadProgress }}%</span>
+      </div>
+      <div class="upload-progress-track">
+        <div class="upload-progress-fill" :style="{ width: uploadProgress + '%' }"></div>
+      </div>
     </div>
 
     <!-- Upload error banner -->
@@ -20,12 +33,56 @@
       <button class="banner-close" @click="uploadError = ''">✕</button>
     </div>
 
+    <!-- Companion upload error banner -->
+    <div v-if="companionUploadError" class="upload-error-banner">
+      <span>{{ companionUploadError }}</span>
+      <button class="banner-close" @click="companionUploadError = ''">✕</button>
+    </div>
+
+    <!-- Hidden companion file input -->
+    <input
+      ref="companionFileInputRef"
+      type="file"
+      multiple
+      accept=".mtl,.obj,.stl,.ply,.jpg,.jpeg,.png,.bmp,.tga,.webp"
+      style="display:none"
+      @change="onCompanionFilesSelected"
+    />
+
     <!-- Loading state -->
     <div v-if="isLoading && !layers.length" class="empty-state">Loading layers…</div>
 
     <!-- Empty state -->
-    <div v-else-if="!isLoading && !layers.length" class="empty-state">
+    <div v-else-if="!isLoading && !layers.length && !uploadPlaceholders.length" class="empty-state">
       No data layers yet. Click <strong>Add Layer</strong> to upload files.
+    </div>
+
+    <!-- Upload placeholder cards (shown during transfer + server processing) -->
+    <div v-if="uploadPlaceholders.length" class="layer-list" style="margin-bottom: 0.5rem;">
+      <div v-for="ph in uploadPlaceholders" :key="ph.id" class="layer-card layer-card-uploading">
+        <div class="lc-header">
+          <span class="type-badge">{{ ph.ext }}</span>
+          <div class="lc-names">
+            <span class="lc-display-name">{{ ph.name }}</span>
+          </div>
+          <div class="lc-status">
+            <svg class="spin" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <path d="M12 2a10 10 0 0110 10" opacity="0.3"/><path d="M12 2a10 10 0 000 20a10 10 0 0010-10"/>
+            </svg>
+            <span class="status-text status-uploading">
+              {{ ph.phase === 'uploading' ? `Uploading ${ph.progress}%` : 'Processing…' }}
+            </span>
+          </div>
+        </div>
+        <!-- mini progress bar -->
+        <div class="lc-upload-bar-track">
+          <div
+            class="lc-upload-bar-fill"
+            :class="ph.phase === 'processing' ? 'lc-upload-bar-processing' : ''"
+            :style="ph.phase === 'uploading' ? { width: ph.progress + '%' } : { width: '100%' }"
+          />
+        </div>
+      </div>
     </div>
 
     <!-- Layer cards -->
@@ -96,6 +153,18 @@
                 <line x1="12" y1="22.08" x2="12" y2="12"/>
               </svg>
             </button>
+            <!-- Add companion files (MTL, textures) to model/pointcloud layers -->
+            <button
+              v-if="['model','pointcloud'].includes(layer.fileType)"
+              class="action-btn"
+              title="Add companion files (MTL, textures, extra models)"
+              :disabled="companionUploading"
+              @click="openCompanionPicker(layer)"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
+              </svg>
+            </button>
             <button
               class="action-btn"
               :class="{ 'action-btn-active': editingId === layer.id }"
@@ -135,10 +204,11 @@
               :title="group.names.join(', ')"
             >{{ group.count }} {{ group.label }}</span>
           </template>
-          <!-- For other types: show role chips as before -->
+          <!-- For model/pointcloud: show individual companion chips -->
           <template v-else>
-            <span v-for="sf in layer.subFiles" :key="sf.id" class="subfile-chip" :title="sf.originalName">
-              {{ sf.role }}
+            <span v-for="sf in layer.subFiles" :key="sf.id" class="subfile-chip subfile-chip-companion" :title="sf.originalName">
+              {{ sf.originalName }}
+              <button class="subfile-chip-rm" title="Remove this file" @click.stop="deleteSubFile(layer.id, sf.id)">×</button>
             </span>
           </template>
         </div>
@@ -336,6 +406,7 @@ const isLoading     = ref(false);
 const loadError     = ref('');
 const uploadError   = ref('');
 const uploadPending = ref(false);
+const uploadProgress = ref(0);
 const deletePending = ref({});
 const deleteConfirmId = ref(null);
 const editingId       = ref(null);
@@ -350,11 +421,19 @@ const dataPreviewLoading = ref(false);
 const dataPreviewError   = ref('');
 const pendingFiles  = ref([]);
 const showUploadModal = ref(false);
+const uploadPlaceholders = ref([]); // synthetic cards shown during upload + server processing
 let pollTimer = null;
 
 // Linking modal state
 const linkModal     = ref({ open: false, layerId: '' });
 const linkDataModal = ref({ open: false, layerId: '' });
+
+// Companion file upload (add MTL / textures to an existing model layer)
+const companionFileInputRef    = ref(null);
+const companionTargetLayerId   = ref(null);
+const companionUploading       = ref(false);
+const companionUploadError     = ref('');
+const COMPANION_UPLOAD_EXTS    = new Set(['.mtl', '.obj', '.stl', '.ply', '.jpg', '.jpeg', '.png', '.bmp', '.tga', '.webp']);
 
 // ── Computed ────────────────────────────────────────────────────
 const sortedLayers = computed(() =>
@@ -398,9 +477,9 @@ async function fetchLayers() {
 // ── Polling ─────────────────────────────────────────────────────
 function startPolling() {
   pollTimer = setInterval(async () => {
-    if (!hasOptimizing.value) return;
+    if (!hasOptimizing.value && !uploadPlaceholders.value.length) return;
     await fetchLayers();
-  }, 4000);
+  }, 2000);
 }
 
 function stopPolling() {
@@ -439,10 +518,14 @@ function onFilesSelected(e) {
   const files = Array.from(e.target.files);
   e.target.value = '';
   if (!files.length) return;
-  const allowed = new Set(['.geojson', '.json', '.tif', '.tiff', '.csv']);
+  const allowed = new Set([
+    '.geojson', '.json', '.tif', '.tiff', '.csv',
+    '.obj', '.ply', '.stl', '.las', '.laz',
+    '.mtl', '.jpg', '.jpeg', '.png', '.bmp', '.tga', '.webp',
+  ]);
   const bad = files.filter(f => !allowed.has('.' + f.name.split('.').pop().toLowerCase()));
   if (bad.length) {
-    uploadError.value = `Unsupported type(s): ${bad.map(f => f.name).join(', ')}. Only GeoJSON, GeoTIFF, and CSV files can be added as layers.`;
+    uploadError.value = `Unsupported type(s): ${bad.map(f => f.name).join(', ')}.`;
     return;
   }
   pendingFiles.value = files;
@@ -462,7 +545,25 @@ function removePendingFile(index) {
 async function doUpload(settings) {
   showUploadModal.value = false;
   uploadPending.value   = true;
+  uploadProgress.value  = 0;
   uploadError.value     = '';
+
+  // Create one placeholder card per primary file (skip obvious companions)
+  const companionExts = new Set(['.mtl', '.jpg', '.jpeg', '.png', '.bmp', '.tga', '.webp']);
+  const primaryFiles  = pendingFiles.value.filter(
+    f => !companionExts.has('.' + f.name.split('.').pop().toLowerCase())
+  );
+  const placeholderIds = primaryFiles.map((f, i) => {
+    const id = `ph-${Date.now()}-${i}`;
+    uploadPlaceholders.value.push({
+      id,
+      name:     f.name,
+      ext:      f.name.split('.').pop().toUpperCase(),
+      phase:    'uploading',
+      progress: 0,
+    });
+    return id;
+  });
 
   const formData = new FormData();
   for (const file of pendingFiles.value) {
@@ -471,21 +572,55 @@ async function doUpload(settings) {
   formData.append('settings', JSON.stringify(settings));
 
   try {
-    const res = await fetch(getApiUrl('/admin/upload'), {
-      method: 'POST',
-      headers: { Authorization: props.authHeader },
-      body: formData,
+    await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', getApiUrl('/admin/upload'));
+      xhr.setRequestHeader('Authorization', props.authHeader);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const pct = Math.round((e.loaded / e.total) * 100);
+          uploadProgress.value = pct;
+          // keep placeholder cards in sync
+          for (const ph of uploadPlaceholders.value) {
+            if (placeholderIds.includes(ph.id)) ph.progress = pct;
+          }
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          // Switch placeholders to "processing" phase
+          for (const ph of uploadPlaceholders.value) {
+            if (placeholderIds.includes(ph.id)) ph.phase = 'processing';
+          }
+          resolve();
+        } else {
+          let msg = `Upload failed (${xhr.status})`;
+          try { msg = JSON.parse(xhr.responseText).error || msg; } catch { /* ignore */ }
+          reject(new Error(msg));
+        }
+      };
+      xhr.onerror = () => reject(new Error('Network error during upload.'));
+      xhr.send(formData);
     });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Upload failed (${res.status})`);
-    }
     pendingFiles.value = [];
-    await fetchLayers();
+
+    // Poll until the new layers appear in the list, then clear placeholders
+    const clearWhenReady = async () => {
+      await fetchLayers();
+      // Remove placeholders whose file names now appear in the real layer list
+      const names = new Set(layers.value.map(l => l.originalName));
+      uploadPlaceholders.value = uploadPlaceholders.value.filter(ph => !names.has(ph.name));
+      if (uploadPlaceholders.value.length > 0) {
+        setTimeout(clearWhenReady, 1500);
+      }
+    };
+    await clearWhenReady();
   } catch (err) {
     uploadError.value = err.message;
+    uploadPlaceholders.value = uploadPlaceholders.value.filter(ph => !placeholderIds.includes(ph.id));
   } finally {
-    uploadPending.value = false;
+    uploadPending.value  = false;
+    uploadProgress.value = 0;
   }
 }
 
@@ -537,6 +672,76 @@ function openLinkModal(layer) {
 
 function openLinkDataModal(layer) {
   linkDataModal.value = { open: true, layerId: layer.id };
+}
+
+// ── Companion file upload (for existing model/pointcloud layers) ─
+function openCompanionPicker(layer) {
+  companionTargetLayerId.value = layer.id;
+  companionUploadError.value   = '';
+  companionFileInputRef.value?.click();
+}
+
+async function onCompanionFilesSelected(e) {
+  const files = Array.from(e.target.files);
+  e.target.value = '';
+  if (!files.length || !companionTargetLayerId.value) return;
+
+  const bad = files.filter(f => {
+    const ext = '.' + f.name.split('.').pop().toLowerCase();
+    return !COMPANION_UPLOAD_EXTS.has(ext);
+  });
+  if (bad.length) {
+    companionUploadError.value = `Unsupported type(s): ${bad.map(f => f.name).join(', ')}.`;
+    return;
+  }
+
+  const layerId = companionTargetLayerId.value;
+  companionUploading.value    = true;
+  companionUploadError.value  = '';
+  try {
+    for (const file of files) {
+      const ext = '.' + file.name.split('.').pop().toLowerCase();
+      const role = ext === '.mtl' ? 'companion'
+        : ['.obj', '.ply', '.stl'].includes(ext) ? 'model'
+        : ['.las', '.laz'].includes(ext) ? 'pointcloud'
+        : 'companion';
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('role', role);
+      const res = await fetch(getApiUrl(`/admin/layers/${layerId}/subfiles`), {
+        method: 'POST',
+        headers: authHeaders(),
+        body: fd,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Upload failed (${res.status})`);
+      }
+    }
+    // Refresh layer list to show new sub-files
+    await fetchLayers();
+  } catch (err) {
+    companionUploadError.value = err.message;
+  } finally {
+    companionUploading.value = false;
+  }
+}
+
+// ── Sub-file delete (for companion chips on model/pointcloud layers) ────────────
+async function deleteSubFile(layerId, subId) {
+  try {
+    const res = await fetch(getApiUrl(`/admin/layers/${layerId}/subfiles/${subId}`), {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Delete failed (${res.status})`);
+    }
+    await fetchLayers();
+  } catch (err) {
+    uploadError.value = err.message;
+  }
 }
 
 // ── Edit flow ───────────────────────────────────────────────────
@@ -656,6 +861,22 @@ async function saveEdit(id) {
 .btn-add:hover:not(.btn-add-disabled) { background: #2563eb; }
 .btn-add-disabled { opacity: 0.55; cursor: default; }
 
+/* ── Upload progress ─────────────────────────────────────────── */
+.upload-progress-wrap {
+  margin-bottom: 0.75rem;
+}
+.upload-progress-label {
+  display: flex; justify-content: space-between;
+  font-size: 0.78rem; color: var(--admin-muted, #666); margin-bottom: 0.3rem;
+}
+.upload-progress-track {
+  height: 6px; background: var(--admin-border, #e0e0e0); border-radius: 3px; overflow: hidden;
+}
+.upload-progress-fill {
+  height: 100%; background: #3b82f6; border-radius: 3px;
+  transition: width 0.15s ease;
+}
+
 /* ── Upload error ───────────────────────────────────────────── */
 .upload-error-banner {
   display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
@@ -687,8 +908,24 @@ async function saveEdit(id) {
 }
 .layer-card:hover { border-color: var(--admin-border, #c0c0c0); filter: brightness(0.98); }
 .layer-card-editing { border-color: #3b82f6 !important; }
-.layer-card-optimizing { opacity: 0.65; pointer-events: none; }
-.layer-card-error { border-color: rgba(239,68,68,0.45) !important; }
+.layer-card-uploading { border-color: #93c5fd; background: #eff6ff; opacity: 0.9; }
+:global(body.theme-dark) .layer-card-uploading { border-color: #1d4ed8; background: rgba(59,130,246,0.1); }
+.status-uploading { color: #2563eb; }
+:global(body.theme-dark) .status-uploading { color: #60a5fa; }
+.lc-upload-bar-track {
+  height: 3px; background: #dbeafe; overflow: hidden;
+}
+.lc-upload-bar-fill {
+  height: 100%; background: #3b82f6;
+  transition: width 0.2s ease;
+}
+.lc-upload-bar-processing {
+  width: 100% !important;
+  background: linear-gradient(90deg, #3b82f6 25%, #93c5fd 50%, #3b82f6 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+@keyframes shimmer { to { background-position: -200% 0; } }
 
 /* ── Card header ────────────────────────────────────────────── */
 .lc-header {
@@ -765,12 +1002,20 @@ async function saveEdit(id) {
   margin-top: -0.05rem; padding-top: 0.4rem;
 }
 .subfile-chip {
+  display: inline-flex; align-items: center; gap: 0.25rem;
   font-size: 0.7rem; padding: 0.1rem 0.45rem; border-radius: 3px;
   background: var(--admin-bg, #f3f4f6); color: var(--admin-muted, #777); border: 1px solid var(--admin-border, #e0e0e0); text-transform: capitalize;
 }
 .subfile-chip-model      { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
 .subfile-chip-pointcloud { background: #f0fdf4; color: #15803d; border-color: #bbf7d0; }
 .subfile-chip-attributes { background: #f0fdf4; color: #059669; border-color: #a7f3d0; }
+.subfile-chip-companion  { background: #faf5ff; color: #7c3aed; border-color: #ddd6fe; }
+.subfile-chip-rm {
+  background: transparent; border: none; cursor: pointer;
+  font-size: 0.8rem; line-height: 1; padding: 0; opacity: 0.45;
+  color: inherit; border-radius: 2px; transition: opacity 0.1s;
+}
+.subfile-chip-rm:hover { opacity: 1; }
 
 /* ── Delete confirm bar ─────────────────────────────────────── */
 .lc-confirm-bar {

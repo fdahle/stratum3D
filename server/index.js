@@ -6,17 +6,22 @@ import 'dotenv/config';   // loads server/.env before anything else
 import express from 'express';
 import path from 'path';
 import fs from 'fs/promises';
+import { statfs as statfsCallback } from 'fs';
+import { promisify } from 'util';
 import crypto from 'crypto';
 import cors from 'cors';
+const statfsAsync = promisify(statfsCallback);
 import compression from 'compression';
 import yaml from 'js-yaml';
 import multer from 'multer';
+import bcrypt from 'bcryptjs';
+import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
 import config, { isDevelopment } from './src/config.js';
 import logger from './src/logger.js';
 import { listLayers, readLayerMeta, writeLayerMeta, deleteLayer, metaToConfigLayer, validateLayerId } from './src/layerStore.js';
 import { jobQueue } from './src/jobQueue.js';
-import { processUploadBatch, addSubFile, classifyExt, relinkGeojson } from './processors/uploadProcessor.js';
+import { processUploadBatch, addSubFile, addSubFileBatch, classifyExt, relinkGeojson } from './processors/uploadProcessor.js';
 import { convertToCog }   from './processors/geotiffProcessor.js';
 
 const app = express();
@@ -29,12 +34,25 @@ const __dirname = path.dirname(__filename);
 // Stored in data/.credentials (plain text, 0o600). Set via the first-run wizard.
 // Reset by deleting the file (e.g. via the Danger Zone "Reset Config" action).
 const credentialsFilePath = path.join(__dirname, config.dataPath, '.credentials');
+const settingsFilePath    = path.join(__dirname, config.dataPath, 'settings.json');
 
+// runtimeAdminPassword stores the bcrypt hash of the admin password.
 let runtimeAdminPassword = null;
 try {
   const stored = (await fs.readFile(credentialsFilePath, 'utf8').catch(() => null))?.trim();
   if (stored) runtimeAdminPassword = stored;
 } catch { /* ignore */ }
+
+// Load persisted settings overrides (e.g. uploadLimitMb changed via admin UI)
+try {
+  const raw = (await fs.readFile(settingsFilePath, 'utf8').catch(() => null));
+  if (raw) {
+    const saved = JSON.parse(raw);
+    if (typeof saved.uploadLimitMb === 'number' && saved.uploadLimitMb > 0) {
+      config.uploadLimitMb = saved.uploadLimitMb;
+    }
+  }
+} catch { /* ignore malformed settings */ }
 
 function getAdminPassword() { return runtimeAdminPassword; }
 
@@ -51,7 +69,7 @@ const corsOptions = {
       callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   credentials: true,
   // Range-request headers must be explicitly exposed for cross-origin clients
   // (dev: client on :5173, server on :3000). Without this, geotiff.js cannot
@@ -86,10 +104,10 @@ if (isDevelopment) {
 // Path to the config file served to clients
 const configFilePath = path.join(__dirname, config.dataPath, 'config.yaml');
 
-// Admin authentication middleware (HTTP Basic Auth, timing-safe)
+// Admin authentication middleware — compares submitted password against the stored bcrypt hash.
 function requireAdminAuth(req, res, next) {
-  const pwd = getAdminPassword();
-  if (!pwd) {
+  const hash = getAdminPassword();
+  if (!hash) {
     return res.status(503).json({ error: 'Admin access not configured. Use the setup wizard to set a password.' });
   }
   const auth = req.headers['authorization'];
@@ -100,14 +118,23 @@ function requireAdminAuth(req, res, next) {
   const decoded = Buffer.from(auth.slice(6), 'base64').toString('utf8');
   const colonIndex = decoded.indexOf(':');
   const password = colonIndex >= 0 ? decoded.slice(colonIndex + 1) : '';
-  const expectedBuf = Buffer.from(pwd);
-  const actualBuf = Buffer.alloc(expectedBuf.length);
-  Buffer.from(password).copy(actualBuf);
-  if (!crypto.timingSafeEqual(expectedBuf, actualBuf)) {
-    return res.status(403).json({ error: 'Invalid credentials' });
-  }
-  next();
+  // bcrypt.compare is timing-safe and handles both hash format validation and comparison.
+  bcrypt.compare(password, hash)
+    .then(match => {
+      if (!match) return res.status(403).json({ error: 'Invalid credentials' });
+      next();
+    })
+    .catch(() => res.status(500).json({ error: 'Authentication error' }));
 }
+
+// Rate limiting for auth endpoints — prevents brute-force attacks.
+const authRateLimit = rateLimit({
+  windowMs: config.rateLimitWindow,
+  max: config.rateLimitMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+});
 
 // Setup status — public, tells the client what first-run steps remain
 app.get('/admin/setup-status', async (req, res) => {
@@ -118,7 +145,7 @@ app.get('/admin/setup-status', async (req, res) => {
 });
 
 // Set admin password — usable during initial setup OR after a config reset (no .credentials file)
-app.post('/admin/set-password', express.json(), async (req, res) => {
+app.post('/admin/set-password', authRateLimit, express.json(), async (req, res) => {
   // Allow only if no .credentials file exists (env-var-only installs still block this)
   const fileExists = await fs.access(credentialsFilePath).then(() => true).catch(() => false);
   if (fileExists) {
@@ -129,8 +156,9 @@ app.post('/admin/set-password', express.json(), async (req, res) => {
     return res.status(400).json({ error: 'Password must be at least 6 characters.' });
   }
   try {
-    await fs.writeFile(credentialsFilePath, password, { mode: 0o600 });
-    runtimeAdminPassword = password;
+    const hash = await bcrypt.hash(password, 12);
+    await fs.writeFile(credentialsFilePath, hash, { mode: 0o600 });
+    runtimeAdminPassword = hash;
     logger.info('Admin password set via setup wizard');
     res.json({ success: true });
   } catch (err) {
@@ -140,14 +168,15 @@ app.post('/admin/set-password', express.json(), async (req, res) => {
 });
 
 // Change admin password — requires current credentials, updates .credentials file
-app.post('/admin/change-password', requireAdminAuth, express.json(), async (req, res) => {
+app.post('/admin/change-password', authRateLimit, requireAdminAuth, express.json(), async (req, res) => {
   const { newPassword } = req.body ?? {};
   if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
     return res.status(400).json({ error: 'New password must be at least 6 characters.' });
   }
   try {
-    await fs.writeFile(credentialsFilePath, newPassword, { mode: 0o600 });
-    runtimeAdminPassword = newPassword;
+    const hash = await bcrypt.hash(newPassword, 12);
+    await fs.writeFile(credentialsFilePath, hash, { mode: 0o600 });
+    runtimeAdminPassword = hash;
     logger.info('Admin password changed');
     res.json({ success: true });
   } catch (err) {
@@ -157,7 +186,7 @@ app.post('/admin/change-password', requireAdminAuth, express.json(), async (req,
 });
 
 // Verify admin credentials — used by the client login form
-app.get('/admin/verify', requireAdminAuth, (req, res) => {
+app.get('/admin/verify', authRateLimit, requireAdminAuth, (req, res) => {
   res.json({ ok: true });
 });
 
@@ -229,26 +258,40 @@ const dataDir   = path.join(__dirname, config.dataPath);
 const layersDir = path.join(dataDir, 'layers');
 
 // ── Multer setup ──────────────────────────────────────────────────────────────
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500 MB
-  fileFilter: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const allowed = ['.geojson', '.json', '.tif', '.tiff', '.obj', '.ply', '.stl', '.las', '.laz', '.mtl',
-                     '.jpg', '.jpeg', '.png', '.bmp', '.tga', '.webp', '.csv'];
-    if (allowed.includes(ext)) cb(null, true);
-    else cb(new Error(`Unsupported file type: ${ext}`));
-  },
-});
+// Limit is read dynamically so it updates immediately after PATCH /admin/settings.
+const ALLOWED_UPLOAD_EXTS = new Set(['.geojson', '.json', '.tif', '.tiff', '.obj', '.ply', '.stl',
+  '.las', '.laz', '.mtl', '.jpg', '.jpeg', '.png', '.bmp', '.tga', '.webp', '.csv']);
+
+function makeUploadInstance() {
+  return multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: config.uploadLimitMb * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      if (ALLOWED_UPLOAD_EXTS.has(ext)) cb(null, true);
+      else cb(new Error(`Unsupported file type: ${ext}`));
+    },
+  });
+}
 
 function runUploadMiddleware(req, res, next) {
-  upload.array('files', 30)(req, res, (err) => {
+  makeUploadInstance().array('files', 30)(req, res, (err) => {
     if (err instanceof multer.MulterError) {
       return res.status(400).json({ error: `Upload error: ${err.message}` });
     }
     if (err) {
       return res.status(400).json({ error: err.message });
     }
+    next();
+  });
+}
+
+function runSubfileMiddleware(req, res, next) {
+  makeUploadInstance().single('file')(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      return res.status(400).json({ error: `Upload error: ${err.message}` });
+    }
+    if (err) return res.status(400).json({ error: err.message });
     next();
   });
 }
@@ -283,6 +326,47 @@ app.post('/admin/upload', requireAdminAuth, runUploadMiddleware, async (req, res
 
 // ── Layer CRUD ───────────────────────────────────────────────────────────────
 
+// Storage info — total size of the data directory + upload limit
+app.get('/admin/storage', requireAdminAuth, async (req, res) => {
+  async function dirSize(dir) {
+    let total = 0;
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      await Promise.all(entries.map(async (e) => {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) { total += await dirSize(full); }
+        else { try { const s = await fs.stat(full); total += s.size; } catch { /* skip */ } }
+      }));
+    } catch { /* dir may not exist yet */ }
+    return total;
+  }
+  const usedBytes = await dirSize(dataDir);
+  let diskFreeBytes  = null;
+  let diskTotalBytes = null;
+  try {
+    const st = await statfsAsync(dataDir);
+    diskFreeBytes  = st.bavail * st.bsize;
+    diskTotalBytes = st.blocks * st.bsize;
+  } catch { /* statfs not available on this platform/Node version */ }
+  res.json({ usedBytes, uploadLimitMb: config.uploadLimitMb, diskFreeBytes, diskTotalBytes });
+});
+
+// Update server settings (upload limit)
+app.patch('/admin/settings', requireAdminAuth, express.json(), async (req, res) => {
+  const { uploadLimitMb } = req.body ?? {};
+  const parsed = parseInt(uploadLimitMb, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 50000) {
+    return res.status(400).json({ error: 'uploadLimitMb must be an integer between 1 and 50000.' });
+  }
+  config.uploadLimitMb = parsed;
+  try {
+    await fs.writeFile(settingsFilePath, JSON.stringify({ uploadLimitMb: parsed }, null, 2), 'utf8');
+    res.json({ uploadLimitMb: parsed });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // List all layers (reads sidecar files)
 app.get('/admin/layers', requireAdminAuth, async (req, res) => {
   try {
@@ -310,12 +394,10 @@ app.patch('/admin/layers/:id', requireAdminAuth, async (req, res) => {
   try {
     validateLayerId(req.params.id);
     const meta = await readLayerMeta(layersDir, req.params.id);
-    const { displayName, visible, order, ...extras } = req.body ?? {};
+    const { displayName, visible, order } = req.body ?? {};
     if (displayName != null) meta.layerConfig.displayName = String(displayName);
     if (visible    != null) meta.layerConfig.visible      = Boolean(visible);
     if (order      != null) meta.layerConfig.order        = Number(order);
-    // Merge any extra type-specific config fields
-    Object.assign(meta.layerConfig, extras);
     await writeLayerMeta(layersDir, req.params.id, meta);
     res.json(meta);
   } catch (err) {
@@ -372,8 +454,7 @@ app.delete('/admin/layers/:id', requireAdminAuth, async (req, res) => {
 });
 
 // Add sub-file to an existing layer
-const subfileUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } });
-app.post('/admin/layers/:id/subfiles', requireAdminAuth, subfileUpload.single('file'), async (req, res) => {
+app.post('/admin/layers/:id/subfiles', requireAdminAuth, runSubfileMiddleware, async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file provided.' });
   const role = req.body?.role ?? 'unknown';
   let settings = {};
@@ -385,6 +466,91 @@ app.post('/admin/layers/:id/subfiles', requireAdminAuth, subfileUpload.single('f
   } catch (err) {
     if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Add multiple sub-files to an existing layer (batch; handles OBJ+MTL+texture grouping)
+app.post('/admin/layers/:id/subfiles/batch', requireAdminAuth, runUploadMiddleware, async (req, res) => {
+  if (!req.files?.length) return res.status(400).json({ error: 'No files provided.' });
+  let allSettings = {};
+  try { allSettings = JSON.parse(req.body?.settings ?? '{}'); } catch { /* ignore */ }
+  try {
+    validateLayerId(req.params.id);
+    const result = await addSubFileBatch(req.params.id, req.files, layersDir, allSettings);
+    res.json(result);
+  } catch (err) {
+    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a single sub-file (and its companions) from an existing layer
+app.delete('/admin/layers/:id/subfiles/:subId', requireAdminAuth, async (req, res) => {
+  const { id, subId } = req.params;
+  try {
+    validateLayerId(id);
+    validateLayerId(subId);
+    const meta     = await readLayerMeta(layersDir, id);
+    const layerDir = path.join(layersDir, id);
+
+    const subIdx = meta.subFiles.findIndex(sf => sf.id === subId);
+    if (subIdx === -1) return res.status(404).json({ error: 'Sub-file not found.' });
+
+    const subFile = meta.subFiles[subIdx];
+
+    // Collect all IDs to delete: the sub-file itself plus any companions it owns
+    const toDelete = [{ id: subFile.id, ext: subFile.extension }];
+    for (const c of subFile.companions ?? []) {
+      toDelete.push({ id: c.id, ext: c.extension });
+    }
+
+    // Delete physical files (silently ignore missing files)
+    for (const entry of toDelete) {
+      await fs.unlink(path.join(layerDir, `${entry.id}${entry.ext}`)).catch(() => {});
+    }
+
+    // Remove the sub-file and its companions from meta.subFiles
+    const toDeleteIds = new Set(toDelete.map(e => e.id));
+    meta.subFiles = meta.subFiles.filter(sf => !toDeleteIds.has(sf.id));
+
+    // If the parent layer is GeoJSON and the deleted sub-file was a model/pointcloud,
+    // remove dangling references from feature properties
+    if (meta.fileType === 'geojson' && (subFile.role === 'model' || subFile.role === 'pointcloud')) {
+      const urlToRemove = `data/layers/${id}/${subFile.id}${subFile.extension}`;
+      const geoPath = path.join(layerDir, `${id}.geojson`);
+      try {
+        const raw     = await fs.readFile(geoPath, 'utf8');
+        const geojson = JSON.parse(raw);
+        let modified  = false;
+        geojson.features = geojson.features.map(f => {
+          if (!f.properties) return f;
+          if (subFile.role === 'model' && Array.isArray(f.properties._model3dUrls)) {
+            const prev = f.properties._model3dUrls.length;
+            f.properties._model3dUrls = f.properties._model3dUrls.filter(u => u !== urlToRemove);
+            if (f.properties._model3dUrls.length !== prev) modified = true;
+          }
+          if (subFile.role === 'pointcloud' && Array.isArray(f.properties._pointcloudUrls)) {
+            const prev = f.properties._pointcloudUrls.length;
+            f.properties._pointcloudUrls = f.properties._pointcloudUrls.filter(u => u !== urlToRemove);
+            if (f.properties._pointcloudUrls.length !== prev) modified = true;
+          }
+          return f;
+        });
+        if (modified) {
+          if (!geojson._metadata) geojson._metadata = {};
+          geojson._metadata.has3DModels    = geojson.features.some(f => f.properties?._model3dUrls?.length > 0);
+          geojson._metadata.hasPointClouds = geojson.features.some(f => f.properties?._pointcloudUrls?.length > 0);
+          await fs.writeFile(geoPath, JSON.stringify(geojson), 'utf8');
+        }
+      } catch { /* GeoJSON read/write failure is non-fatal */ }
+    }
+
+    await writeLayerMeta(layersDir, id, meta);
+    logger.info(`Deleted sub-file ${subId} from layer ${id}`);
+    res.json({ success: true, deleted: subId });
+  } catch (err) {
+    if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
+    res.status(400).json({ error: err.message });
   }
 });
 

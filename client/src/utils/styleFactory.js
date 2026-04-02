@@ -137,19 +137,22 @@ export function applyFeatureStyle(feature, color = DEFAULT_COLOR, strokeColor = 
  * @returns {string} Complementary hex color
  */
 export function getComplementaryColor(hexColor) {
-  // Remove # if present
-  const hex = hexColor.replace("#", "");
-  
+  if (!hexColor || typeof hexColor !== 'string') return '#ffffff';
+  // Expand 3-digit shorthand (#abc → #aabbcc)
+  let hex = hexColor.replace('#', '');
+  if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+  if (hex.length !== 6 || !/^[0-9a-fA-F]{6}$/.test(hex)) return '#ffffff';
+
   // Convert to RGB
   const r = parseInt(hex.substr(0, 2), 16);
   const g = parseInt(hex.substr(2, 2), 16);
   const b = parseInt(hex.substr(4, 2), 16);
-  
+
   // Calculate complementary by inverting RGB values
   const compR = (255 - r).toString(16).padStart(2, "0");
   const compG = (255 - g).toString(16).padStart(2, "0");
   const compB = (255 - b).toString(16).padStart(2, "0");
-  
+
   return `#${compR}${compG}${compB}`;
 }
 

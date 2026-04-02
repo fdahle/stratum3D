@@ -14,11 +14,11 @@ services:
       - ./input:/app/input:ro
       # Mount data folder to persist processed files
       - ./server/data:/app/server/data
-      # Mount server code for development (optional - remove for production)
-      - ./server:/app/server
-      - /app/server/node_modules
+    env_file:
+      - path: .env
+        required: false
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
     command: node index.js
     networks:

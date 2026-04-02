@@ -344,20 +344,25 @@ export function useLayerManager(map) {
             const props = feature.getProperties();
             for (const field of layer.searchFields) {
               const value = props[field];
-              if (value != null && String(value) !== "") {
-                layerSearchIndex.set(String(value).toLowerCase(), {
-                  feature,
-                  displayValue: String(value),
-                });
+              if (value != null && String(value) !== '') {
+                const key = String(value).toLowerCase();
+                const entry = { feature, displayValue: String(value) };
+                const existing = layerSearchIndex.get(key);
+                if (existing) {
+                  existing.push(entry);
+                } else {
+                  layerSearchIndex.set(key, [entry]);
+                }
               }
             }
           }
         }
 
         if (isFirst) {
-          // Detect geometry type from the first loaded feature.
-          if (features.length > 0) {
-            const firstType = features[0].getGeometry().getType();
+          // Detect geometry type from the first loaded feature with a non-null geometry.
+          const firstWithGeom = features.find(f => f.getGeometry() != null);
+          if (firstWithGeom) {
+            const firstType = firstWithGeom.getGeometry().getType();
             if (firstType === GEOMETRY_TYPE.POINT || firstType === GEOMETRY_TYPE.MULTI_POINT) {
               detectedGeomType = GEOMETRY_TYPE.POINT;
             } else if (firstType === GEOMETRY_TYPE.LINE_STRING || firstType === GEOMETRY_TYPE.MULTI_LINE_STRING) {

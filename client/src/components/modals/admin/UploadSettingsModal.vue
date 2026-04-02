@@ -301,7 +301,7 @@ watch(() => props.files, async (files) => {
       const { xGuess, yGuess } = guessXYColumns(headers);
       csvSettings = { xColumn: xGuess, yColumn: yGuess, crs: 'EPSG:4326' };
     }
-    const entry = {
+    return {
       name: f.name, size: f.size,
       optimize: 'cog', keepOriginal: false,
       doSimplify: true,
@@ -313,23 +313,26 @@ watch(() => props.files, async (files) => {
       cogCrsDetecting: isGeoTiff(f.name),
       cogCrsDetected: false,
       csvSettings,
-      shapeSettings: { sourceCrs: '', targetCrs: 'EPSG:3031', simplifyTolerance: 50, coordinatePrecision: 0, sourceCrsDetecting: false, sourceCrsDetected: false },
+      shapeSettings: { sourceCrs: '', targetCrs: 'EPSG:3031', simplifyTolerance: 50, coordinatePrecision: 0, sourceCrsDetecting: isGeoJson(f.name), sourceCrsDetected: false },
     };
+  }));
+
+  // Run detections AFTER fileSettings.value is assigned so mutations hit the
+  // reactive proxies Vue is tracking, not the original plain objects.
+  files.forEach((f, i) => {
     if (isGeoTiff(f.name)) {
       detectGeoTiffCrs(f).then(crs => {
-        entry.cogCrsDetecting = false;
-        if (crs) { entry.cogCrs = crs; entry.cogCrsDetected = true; }
+        fileSettings.value[i].cogCrsDetecting = false;
+        if (crs) { fileSettings.value[i].cogCrs = crs; fileSettings.value[i].cogCrsDetected = true; }
       });
     }
     if (isGeoJson(f.name)) {
-      entry.shapeSettings.sourceCrsDetecting = true;
       detectGeoJsonCrs(f).then(crs => {
-        entry.shapeSettings.sourceCrsDetecting = false;
-        if (crs) { entry.shapeSettings.sourceCrs = crs; entry.shapeSettings.sourceCrsDetected = true; }
+        fileSettings.value[i].shapeSettings.sourceCrsDetecting = false;
+        if (crs) { fileSettings.value[i].shapeSettings.sourceCrs = crs; fileSettings.value[i].shapeSettings.sourceCrsDetected = true; }
       });
     }
-    return entry;
-  }));
+  });
 }, { immediate: true });
 
 function confirm() {

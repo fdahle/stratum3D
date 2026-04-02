@@ -29,6 +29,9 @@ export const config = {
   rateLimitWindow: parseInt(process.env.RATE_LIMIT_WINDOW || '900000', 10), // 15 minutes
   rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
 
+  // Upload
+  uploadLimitMb: parseInt(process.env.UPLOAD_LIMIT_MB || '500', 10), // per-file limit in MB
+
   // Admin — password is stored in data/.credentials (set via first-run wizard)
   // No hardcoded password: on first visit the user chooses one.
 };

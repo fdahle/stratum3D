@@ -307,12 +307,12 @@ const handle3DView = () => {
 
   const props = selectedFeature.value.properties;
   const name = props.name || featureTitle.value || 'Model';
-  const payload = { models: model3dUrls.value, pointclouds: pointcloudUrls.value };
+  const payload = { models: model3dUrls.value, pointclouds: pointcloudUrls.value, name };
   if (props._x) payload.x = props._x;
   if (props._y) payload.y = props._y;
   localStorage.setItem('histmap_viewer3d', JSON.stringify(payload));
 
-  const route = router.resolve({ name: '3d-viewer', query: { n: name } });
+  const route = router.resolve({ name: '3d-viewer' });
   window.open(route.href, '_blank');
 };
 

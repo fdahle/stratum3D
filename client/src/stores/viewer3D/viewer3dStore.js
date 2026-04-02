@@ -54,6 +54,21 @@ export const useViewer3DStore = defineStore('viewer3d', () => {
       if (scene.value) {
         scene.value.remove(model);
       }
+      // Dispose GPU resources to prevent VRAM leaks on repeated model loads.
+      model.traverse((child) => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          materials.forEach(mat => {
+            // Dispose any textures the material references.
+            for (const key of Object.keys(mat)) {
+              const val = mat[key];
+              if (val && typeof val.dispose === 'function' && val.isTexture) val.dispose();
+            }
+            mat.dispose();
+          });
+        }
+      });
     });
     loadedModels.value = [];
   };

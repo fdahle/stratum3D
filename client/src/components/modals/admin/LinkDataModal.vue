@@ -73,6 +73,17 @@
                 </svg>
                 <span class="csv-row-name" :title="f.originalName">{{ f.originalName }}</span>
                 <span v-if="selectedCsvId === f.id" class="csv-active-badge">selected</span>
+                <button
+                  class="csv-row-delete"
+                  title="Remove"
+                  :disabled="deleting === f.id"
+                  @click.stop="deleteCsv(f.id)"
+                >
+                  <svg viewBox="0 0 14 14" width="10" height="10" fill="none" stroke="currentColor"
+                       stroke-width="2.5" stroke-linecap="round">
+                    <line x1="1" y1="1" x2="13" y2="13"/><line x1="13" y1="1" x2="1" y2="13"/>
+                  </svg>
+                </button>
               </div>
             </div>
           </div>
@@ -84,6 +95,18 @@
               Each CSV row is matched to a feature where the chosen CSV column equals the chosen
               feature property.
             </p>
+            <div class="delimiter-row">
+              <span class="delimiter-label">Delimiter</span>
+              <select
+                :value="csvDelimiters[selectedCsvId] ?? ','"
+                class="delimiter-select"
+                @change="setDelimiter($event.target.value)"
+              >
+                <option value=",">Comma  ( , )</option>
+                <option value=";">Semicolon  ( ; )</option>
+                <option value="&#9;">Tab  ( ⇥ )</option>
+              </select>
+            </div>
             <div class="join-fields">
               <div class="join-field">
                 <label>CSV join column <span class="required">*</span></label>
@@ -93,19 +116,20 @@
                   </option>
                   <option v-for="col in csvColumns" :key="col" :value="col">{{ col }}</option>
                 </select>
-                <p class="field-hint">The CSV column used to identify each row.</p>
+                <p class="field-hint">The CSV column whose value identifies each row.</p>
               </div>
               <div class="join-field">
                 <label>Feature property to match <span class="required">*</span></label>
+                <select v-if="featureProps.length" v-model="joinConfig.featureJoinProperty">
+                  <option value="">— select property —</option>
+                  <option v-for="p in featureProps" :key="p" :value="p">{{ p }}</option>
+                </select>
                 <input
+                  v-else
                   v-model="joinConfig.featureJoinProperty"
                   type="text"
                   placeholder="e.g. id"
-                  list="feat-props-list"
                 />
-                <datalist id="feat-props-list">
-                  <option v-for="p in featureProps" :key="p" :value="p" />
-                </datalist>
                 <p class="field-hint">The GeoJSON feature property whose value is matched.</p>
               </div>
             </div>
@@ -159,6 +183,7 @@ const saveError   = ref('');
 const saveSuccess = ref('');
 const uploading   = ref(false);
 const uploadError = ref('');
+const deleting    = ref('');
 
 const layerDisplayName  = ref('');
 const csvFiles          = ref([]);        // subFiles with role === 'attributes'
@@ -166,6 +191,7 @@ const featureProps      = ref([]);        // known GeoJSON property keys (for su
 const selectedCsvId     = ref('');
 const csvColumns        = ref([]);
 const csvColumnsLoading = ref(false);
+const csvDelimiters     = ref({});        // subFileId → detected delimiter char
 const joinConfig        = ref({ csvJoinColumn: '', featureJoinProperty: '' });
 const hasSavedLink      = ref(false);
 
@@ -254,10 +280,19 @@ async function selectCsv(id) {
   await loadCsvColumns(id);
 }
 
-async function loadCsvColumns(subFileId) {
+function detectDelimiter(line) {
+  const t = (line.match(/\t/g) || []).length;
+  const c = (line.match(/,/g)  || []).length;
+  const s = (line.match(/;/g)  || []).length;
+  if (t > c && t > s) return '\t';
+  if (s > c)          return ';';
+  return ',';
+}
+
+async function loadCsvColumns(subFileId, overrideDelimiter = null) {
   const sf = csvFiles.value.find(f => f.id === subFileId);
   if (!sf) return;
-  csvColumns.value       = [];
+  csvColumns.value        = [];
   csvColumnsLoading.value = true;
   try {
     const url = getApiUrl(`data/layers/${props.layerId}/${subFileId}${sf.extension}`);
@@ -274,9 +309,10 @@ async function loadCsvColumns(subFileId) {
       if (nl !== -1 || done) {
         const headerLine = nl !== -1 ? buf.slice(0, nl) : buf;
         await reader.cancel();
-        // Naive CSV header parse (handles double-quoted fields)
+        const delim = overrideDelimiter ?? detectDelimiter(headerLine);
+        csvDelimiters.value[subFileId] = delim;
         csvColumns.value = headerLine
-          .split(',')
+          .split(delim)
           .map(c => c.trim().replace(/^"|"$/g, ''))
           .filter(c => c.length > 0);
         break;
@@ -285,6 +321,13 @@ async function loadCsvColumns(subFileId) {
   } catch { /* ignore — columns will fall back to free-text */ } finally {
     csvColumnsLoading.value = false;
   }
+}
+
+async function setDelimiter(delim) {
+  if (!selectedCsvId.value) return;
+  csvDelimiters.value[selectedCsvId.value] = delim;
+  joinConfig.value.csvJoinColumn = '';
+  await loadCsvColumns(selectedCsvId.value, delim);
 }
 
 // ── Upload CSV ─────────────────────────────────────────────────
@@ -309,10 +352,9 @@ async function onCsvSelected(e) {
       throw new Error(body.error || `Upload failed (${res.status})`);
     }
     const updated = await res.json();
-    csvFiles.value = (updated.subFiles ?? []).filter(sf => sf.role === 'attributes');
-    // Auto-select the newest file
-    const newest = csvFiles.value[csvFiles.value.length - 1];
-    if (newest) await selectCsv(newest.id);
+    // Server returns the new sub-file meta, not the full subFiles array
+    csvFiles.value.push(updated.meta);
+    await selectCsv(updated.meta.id);
   } catch (err) {
     uploadError.value = err.message ?? 'Upload failed.';
   } finally {
@@ -350,6 +392,34 @@ async function save() {
     saveError.value = err.message ?? 'Save failed.';
   } finally {
     saving.value = false;
+  }
+}
+
+// ── Delete CSV sub-file ───────────────────────────────────────
+
+async function deleteCsv(id) {
+  if (deleting.value) return;
+  deleting.value    = id;
+  uploadError.value = '';
+  try {
+    const res = await fetch(getApiUrl(`/admin/layers/${props.layerId}/subfiles/${id}`), {
+      method: 'DELETE',
+      headers: { Authorization: props.authHeader },
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Delete failed (${res.status})`);
+    }
+    csvFiles.value = csvFiles.value.filter(f => f.id !== id);
+    if (selectedCsvId.value === id) {
+      selectedCsvId.value = '';
+      joinConfig.value    = { csvJoinColumn: '', featureJoinProperty: joinConfig.value.featureJoinProperty };
+      csvColumns.value    = [];
+    }
+  } catch (err) {
+    uploadError.value = err.message ?? 'Delete failed.';
+  } finally {
+    deleting.value = '';
   }
 }
 
@@ -586,6 +656,61 @@ async function clearLink() {
   background: rgba(5,150,105,0.15);
   color: #059669;
   flex-shrink: 0;
+}
+
+.csv-row-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--admin-muted, #999);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.13s, background 0.13s, color 0.13s;
+}
+.csv-row:hover .csv-row-delete { opacity: 1; }
+.csv-row-delete:hover:not(:disabled) {
+  background: rgba(239,68,68,0.1);
+  border-color: rgba(239,68,68,0.35);
+  color: #ef4444;
+}
+.csv-row-delete:disabled { opacity: 0.4; cursor: default; }
+
+/* ── Delimiter row ─────────────────────────────────────────── */
+.delimiter-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.25rem;
+}
+
+.delimiter-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--admin-text, #1a1a1a);
+  white-space: nowrap;
+}
+
+.delimiter-select {
+  padding: 0.28rem 0.5rem;
+  border: 1px solid var(--admin-input-border, #ccc);
+  border-radius: 5px;
+  background: var(--admin-input-bg, #fff);
+  color: var(--admin-text, #1a1a1a);
+  font-size: 0.8rem;
+  font-family: "Segoe UI", sans-serif;
+  cursor: pointer;
+}
+.delimiter-select:focus {
+  outline: none;
+  border-color: #059669;
+  box-shadow: 0 0 0 3px rgba(5,150,105,0.12);
 }
 
 /* ── Join section ────────────────────────────────────────────── */

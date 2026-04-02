@@ -284,12 +284,13 @@ export const useLayerStore = defineStore("layers", () => {
    */
   const moveLayerUp = (layerId) => {
     const index = layers.value.findIndex(l => l._layerId === layerId);
-    if (index <= 0) return; // Already at top or not found
-    
-    // Swap with layer above
-    [layers.value[index - 1], layers.value[index]] = [layers.value[index], layers.value[index - 1]];
-    
-    // Update z-indexes
+    if (index <= 0) return;
+    const category = layers.value[index].category;
+    // Find the nearest layer above that shares the same category
+    let swapIndex = index - 1;
+    while (swapIndex >= 0 && layers.value[swapIndex].category !== category) swapIndex--;
+    if (swapIndex < 0) return;
+    [layers.value[swapIndex], layers.value[index]] = [layers.value[index], layers.value[swapIndex]];
     updateLayerZIndexes();
   };
 
@@ -299,12 +300,13 @@ export const useLayerStore = defineStore("layers", () => {
    */
   const moveLayerDown = (layerId) => {
     const index = layers.value.findIndex(l => l._layerId === layerId);
-    if (index === -1 || index >= layers.value.length - 1) return; // Already at bottom or not found
-    
-    // Swap with layer below
-    [layers.value[index], layers.value[index + 1]] = [layers.value[index + 1], layers.value[index]];
-    
-    // Update z-indexes
+    if (index === -1 || index >= layers.value.length - 1) return;
+    const category = layers.value[index].category;
+    // Find the nearest layer below that shares the same category
+    let swapIndex = index + 1;
+    while (swapIndex < layers.value.length && layers.value[swapIndex].category !== category) swapIndex++;
+    if (swapIndex >= layers.value.length) return;
+    [layers.value[index], layers.value[swapIndex]] = [layers.value[swapIndex], layers.value[index]];
     updateLayerZIndexes();
   };
 

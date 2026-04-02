@@ -98,7 +98,6 @@
         <nav class="admin-nav">
           <template v-if="hasExistingConfig">
             <a href="/" class="nav-back">← Back to map</a>
-            <button class="btn-signout" @click="logout">Sign out</button>
           </template>
         </nav>
       </div>
@@ -109,7 +108,6 @@
         🎉 Welcome! Configure your map below and click <strong>Save Configuration</strong> to get started.
       </div>
       <div v-if="loadError" class="banner banner-error">{{ loadError }}</div>
-      <div v-if="saveSuccess" class="banner banner-success">Configuration saved successfully.</div>
 
       <div class="editor-grid">
         <!-- ── 1. Website ─────────────────────────────────────── -->
@@ -423,11 +421,69 @@
               <pre class="yaml-pre yaml-pre-inline">{{ yamlPanelText }}</pre>
             </div>
           </details>
-          <div class="dev-toggle-row">
-            <label class="dev-toggle-label">
-              <input type="checkbox" v-model="layerDevMode" />
-              Show layer config preview in edit panel
-            </label>
+          <label class="perm-card" :class="{ 'perm-card-on': layerDevMode }" style="margin-top: 0.75rem;">
+            <div class="perm-card-icon">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+              </svg>
+            </div>
+            <div class="perm-card-body">
+              <span class="perm-card-title">Layer Config Preview</span>
+              <span class="perm-card-desc">Show layer config preview in edit panel</span>
+            </div>
+            <div class="perm-toggle-wrap">
+              <input id="dev-layer-preview" v-model="layerDevMode" type="checkbox" class="perm-toggle-input" />
+              <label for="dev-layer-preview" class="perm-slider"></label>
+            </div>
+          </label>
+
+          <!-- Storage info -->
+          <div v-if="storageInfo" class="dev-card" style="margin-top: 1rem;">
+            <div class="dev-card-header">
+              <span class="dev-card-title">Storage</span>
+              <button class="btn-secondary btn-sm" @click="fetchStorage">Refresh</button>
+            </div>
+
+            <!-- Disk space bar (only when server provides real values) -->
+            <template v-if="storageInfo.diskTotalBytes">
+              <div class="dev-stat-row">
+                <span class="dev-stat-label">Disk used</span>
+                <span class="dev-stat-value">
+                  {{ formatBytes(storageInfo.diskTotalBytes - storageInfo.diskFreeBytes) }}
+                  of {{ formatBytes(storageInfo.diskTotalBytes) }}
+                  <span class="dev-stat-muted">({{ formatBytes(storageInfo.diskFreeBytes) }} free)</span>
+                </span>
+              </div>
+              <div class="dev-bar-track" style="margin-bottom: 0.75rem;">
+                <div class="dev-bar-fill" :style="{ width: Math.min(100, ((storageInfo.diskTotalBytes - storageInfo.diskFreeBytes) / storageInfo.diskTotalBytes * 100)).toFixed(1) + '%' }" />
+              </div>
+            </template>
+
+            <!-- Layer data folder size -->
+            <div class="dev-stat-row">
+              <span class="dev-stat-label">Layer data folder</span>
+              <span class="dev-stat-value">{{ formatBytes(storageInfo.usedBytes) }}</span>
+            </div>
+
+            <!-- Upload limit editor -->
+            <div class="dev-field-group" style="margin-top: 0.65rem;">
+              <label class="dev-field-label">Max upload size per file (MB)</label>
+              <div class="dev-field-row">
+                <input
+                  v-model="editUploadLimitMb"
+                  type="number"
+                  min="1"
+                  max="50000"
+                  class="input-narrow"
+                  style="width: 110px;"
+                />
+                <button class="btn-secondary btn-sm" :disabled="limitSaving" @click="saveUploadLimit">
+                  {{ limitSaving ? 'Saving…' : 'Apply' }}
+                </button>
+                <span v-if="limitSaveOk" class="dev-field-ok">Saved</span>
+              </div>
+              <p v-if="limitSaveError" class="dev-field-error">{{ limitSaveError }}</p>
+            </div>
           </div>
         </section>
       </div>
@@ -436,7 +492,6 @@
 
     <!-- Save bar — outside the scroll region so it's always visible -->
     <div class="save-bar">
-      <span v-if="isDirty && !validationError" class="unsaved-badge">Unsaved changes</span>
       <p v-if="validationError" class="save-error">{{ validationError }}</p>
       <template v-if="crsChangeSaveConfirming">
         <p class="save-error">
@@ -451,6 +506,8 @@
         </div>
       </template>
       <template v-else>
+        <span v-if="saveSuccess" class="save-success-badge">Configuration saved successfully.</span>
+        <span v-else-if="isDirty" class="unsaved-badge">Unsaved changes</span>
         <button class="btn-save" :disabled="isSaving" @click="saveConfig">
           <span v-if="isSaving">Saving…</span>
           <span v-else>Save Configuration</span>
@@ -506,6 +563,62 @@ function clearStoredPassword() { _storedPassword.value = ''; }
 
 const osmBackground = ref(true);  // separate from basemaps — MapWidget injects the right tile per CRS
 const layerDevMode  = ref(false); // developer mode: shows config preview in layer edit panels
+
+// ── Storage info ───────────────────────────────────────────────
+const storageInfo        = ref(null);
+const editUploadLimitMb  = ref('');
+const limitSaving        = ref(false);
+const limitSaveError     = ref('');
+const limitSaveOk        = ref(false);
+
+watch(storageInfo, (info) => {
+  if (info) editUploadLimitMb.value = String(info.uploadLimitMb);
+});
+
+async function fetchStorage() {
+  try {
+    const res = await fetch(getApiUrl('/admin/storage'), {
+      headers: { Authorization: buildAuthHeader(getStoredPassword()) },
+    });
+    if (res.ok) storageInfo.value = await res.json();
+  } catch { /* non-critical, ignore */ }
+}
+
+async function saveUploadLimit() {
+  limitSaveError.value = '';
+  limitSaveOk.value    = false;
+  const parsed = parseInt(editUploadLimitMb.value, 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 50000) {
+    limitSaveError.value = 'Enter a value between 1 and 50 000 MB.';
+    return;
+  }
+  limitSaving.value = true;
+  try {
+    const res = await fetch(getApiUrl('/admin/settings'), {
+      method: 'PATCH',
+      headers: { Authorization: buildAuthHeader(getStoredPassword()), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uploadLimitMb: parsed }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `Server error ${res.status}`);
+    }
+    await fetchStorage();
+    limitSaveOk.value = true;
+    setTimeout(() => { limitSaveOk.value = false; }, 2500);
+  } catch (err) {
+    limitSaveError.value = err.message;
+  } finally {
+    limitSaving.value = false;
+  }
+}
+function formatBytes(b) {
+  if (b == null) return '—';
+  if (b < 1024) return b + ' B';
+  if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1024 * 1024 * 1024) return (b / (1024 * 1024)).toFixed(1) + ' MB';
+  return (b / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+}
 
 // ── Draft config ───────────────────────────────────────────────
 function blankDraft() {
@@ -756,6 +869,7 @@ async function createPassword() {
     hasExistingConfig.value = config !== null;
     isAuthenticated.value   = true;
     resetSessionTimer();
+    fetchStorage();
   } catch (err) {
     loginError.value = err.message;
   } finally {
@@ -778,6 +892,7 @@ async function attemptLogin() {
     storePassword(password.value);
     isAuthenticated.value   = true;
     resetSessionTimer();
+    fetchStorage();
   } catch (err) {
     loginError.value = err.message;
     password.value   = '';
@@ -1673,6 +1788,45 @@ details.collapsible:not([open]) > summary {
   border-radius: 0 0 6px 6px;
 }
 
+/* ── Developer info cards (storage, etc.) ─────────────────── */
+.dev-card {
+  background: var(--admin-surface, #fff);
+  border: 1px solid var(--admin-border, #e0e0e0);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+}
+.dev-card-header {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.6rem;
+}
+.dev-card-title {
+  font-size: 0.82rem; font-weight: 600; color: var(--admin-text, #1a1a1a);
+}
+.dev-stat-row {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 0.81rem; margin-bottom: 0.3rem;
+}
+.dev-stat-label { color: var(--admin-muted, #666); }
+.dev-stat-value { color: var(--admin-text, #1a1a1a); font-weight: 500; text-align: right; }
+.dev-stat-muted { color: var(--admin-muted, #888); font-weight: 400; }
+.dev-bar-track {
+  height: 6px; background: var(--admin-border, #e0e0e0); border-radius: 3px; overflow: hidden;
+}
+.dev-bar-fill {
+  height: 100%; background: #3b82f6; border-radius: 3px; transition: width 0.3s ease;
+}
+.dev-field-group {
+  border-top: 1px solid var(--admin-border, #e0e0e0); padding-top: 0.6rem;
+}
+.dev-field-label {
+  display: block; font-size: 0.78rem; font-weight: 500;
+  color: var(--admin-muted, #666); margin-bottom: 0.35rem;
+}
+.dev-field-row {
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.dev-field-ok    { font-size: 0.78rem; color: #16a34a; font-weight: 500; }
+.dev-field-error { font-size: 0.78rem; color: #ef4444; margin: 0.3rem 0 0; }
+
 /* ── Developer toggle row ───────────────────────────────── */
 .dev-toggle-row { margin-top: 0.75rem; }
 .dev-toggle-label {
@@ -1686,6 +1840,12 @@ details.collapsible:not([open]) > summary {
 .unsaved-badge {
   font-size: 0.8rem;
   color: #d97706;
+  font-weight: 500;
+  margin-right: auto;
+}
+.save-success-badge {
+  font-size: 0.8rem;
+  color: #16a34a;
   font-weight: 500;
   margin-right: auto;
 }

@@ -26,6 +26,7 @@
             'has-warning': !!layer.warning,
           }"
           draggable="true"
+          :data-layer-id="layer._layerId"
           @click="handleLayerSelect(layer._layerId)"
           @dragstart="handleDragStart($event, layer)"
           @dragend="handleDragEnd"
@@ -493,6 +494,7 @@ const isLastLayer = (layerId) => {
 
 // Drag and drop state
 const draggedLayerId = ref(null);
+const dragOverLayerId = ref(null);
 const dropIndicatorIndex = ref(null);
 const isDragging = ref(false);
 
@@ -616,10 +618,7 @@ const handleTouchMove = (event) => {
     
     // Update drag over state
     if (targetLayer) {
-      const targetId = overlayLayers.value.find(
-        l => targetLayer.textContent.includes(l.name)
-      )?._layerId;
-      
+      const targetId = targetLayer.dataset.layerId;
       if (targetId && targetId !== draggedLayerId.value) {
         dragOverLayerId.value = targetId;
       } else {

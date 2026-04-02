@@ -1,15 +1,10 @@
 # Production-specific overrides
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 version: '3.8'
 
 services:
   server:
     restart: always
-    environment:
-      - NODE_ENV=production
-    volumes:
-      # In production, don't mount source code
-      - ./input:/app/input:ro
-      - ./server/data:/app/server/data
 
   client:
     restart: always

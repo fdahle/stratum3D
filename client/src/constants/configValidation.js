@@ -1,5 +1,5 @@
 // Config validation utilities
-import { CONFIG_SCHEMA } from "./configSchema";
+import { CONFIG_SCHEMA } from './configSchema';
 
 /**
  * Validate the basic structure of the config
@@ -8,7 +8,7 @@ import { CONFIG_SCHEMA } from "./configSchema";
  */
 function validateBasicStructure(config) {
   if (!config) {
-    throw new Error("Configuration file is empty.");
+    throw new Error('Configuration file is empty.');
   }
 
   if (!config.view) {
@@ -29,20 +29,20 @@ function validateBasicStructure(config) {
  */
 function validateBaseLayers(baseLayers) {
   if (!Array.isArray(baseLayers) || baseLayers.length === 0) {
-    throw new Error("You must define at least one base layer.");
+    throw new Error('You must define at least one base layer.');
   }
 
   const baseOrders = [];
-  
+
   baseLayers.forEach((layer, index) => {
-    const prefix = `basemaps[${index}] (${layer.name || "unnamed"})`;
+    const prefix = `basemaps[${index}] (${layer.name || 'unnamed'})`;
 
     // Check type validity
     if (!CONFIG_SCHEMA.layerTypes[layer.type]) {
       throw new Error(
         `${prefix}: Invalid type '${layer.type}'. Allowed: ${Object.keys(
           CONFIG_SCHEMA.layerTypes
-        ).join(", ")}`
+        ).join(', ')}`
       );
     }
 
@@ -57,7 +57,7 @@ function validateBaseLayers(baseLayers) {
     });
 
     // Check Order Logic
-    if (typeof layer.order !== "number") {
+    if (typeof layer.order !== 'number') {
       throw new Error(`${prefix}: 'order' must be a number.`);
     }
     baseOrders.push(layer.order);
@@ -77,16 +77,21 @@ function validateBaseLayers(baseLayers) {
 function validateOverlayLayers(overlayLayers) {
   if (!overlayLayers) return; // Optional
 
-  const supportedOverlayTypes = ['geojson', 'geotiff'];
+  const mapRenderableTypes = ['geojson', 'geotiff'];
+  // model and pointcloud layers are valid config entries (used by the 3D viewer)
+  // but are not rendered on the map, so skip map-specific field validation for them.
+  const knownNonMapTypes = ['model', 'pointcloud'];
 
   overlayLayers.forEach((layer, index) => {
-    const prefix = `data_layers[${index}] (${layer.name || "unnamed"})`;
+    const prefix = `data_layers[${index}] (${layer.name || 'unnamed'})`;
 
-    if (!supportedOverlayTypes.includes(layer.type)) {
+    if (!mapRenderableTypes.includes(layer.type) && !knownNonMapTypes.includes(layer.type)) {
       throw new Error(
-        `${prefix}: Unsupported type '${layer.type}'. Allowed: ${supportedOverlayTypes.join(", ")}`
+        `${prefix}: Unsupported type '${layer.type}'. Allowed: ${[...mapRenderableTypes, ...knownNonMapTypes].join(', ')}`
       );
     }
+
+    if (!mapRenderableTypes.includes(layer.type)) return; // skip field checks for non-map types
 
     const requiredFields = CONFIG_SCHEMA.layerTypes[layer.type]?.required || [];
     requiredFields.forEach((field) => {
@@ -104,13 +109,13 @@ function validateOverlayLayers(overlayLayers) {
  */
 function validateLayerVisibility(baseLayers) {
   const visibleBaseLayers = baseLayers.filter((l) => l.visible);
-  
+
   if (visibleBaseLayers.length === 0) {
     throw new Error(
       "No base layer is set to 'visible: true'. The map will be empty."
     );
   }
-  
+
   if (visibleBaseLayers.length > 1) {
     throw new Error(
       "Multiple base layers are set to 'visible: true'. Please choose only one default."

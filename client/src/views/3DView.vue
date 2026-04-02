@@ -54,7 +54,7 @@
           :model-urls="modelUrls"
           :pointcloud-urls="pointcloudUrls"
           :coordinates="coordinates"
-          :model-name="modelName"
+          :model-name="storedName"
           @scene-ready="onSceneReady"
           @model-loaded="onModelLoaded"
           @loading-error="onLoadingError"
@@ -138,7 +138,6 @@
 
 <script setup>
 import { ref, computed } from 'vue';
-import { useRoute } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useViewer3DStore } from '@/stores/viewer3D/viewer3dStore';
 import { logger } from '@/utils/logger';
@@ -147,7 +146,6 @@ import RibbonMenu from '@/components/viewer3D/RibbonMenu.vue';
 import LayerManager from '@/components/viewer3D/LayerManager.vue';
 import MeasurementModal from '@/components/modals/MeasurementModal.vue';
 
-const route = useRoute();
 const canvasRef = ref(null);
 const layerManagerRef = ref(null);
 const selectedLayer3D = ref(null);
@@ -220,7 +218,7 @@ const _stored = (() => {
   return {};
 })();
 
-const modelName = route.query.n || 'Model';
+const storedName = _stored.name || 'Model';
 const modelUrls = ref(_stored.models || []);
 const pointcloudUrls = ref(_stored.pointclouds || []);
 const coordinates = ref({ x: _stored.x || 0, y: _stored.y || 0 });
@@ -313,7 +311,11 @@ const onModelLoaded = ({ url, index, object, isFileDrop }) => {
   
   // Add to layer manager
   if (layerManagerRef.value && object) {
-    let layerName = url.split('/').pop() || `Model ${index + 1}`;
+    const urlFileName = url.split('/').pop() || `Model ${index + 1}`;
+    // Use the stored feature name for the first model/pointcloud loaded from the map,
+    // fall back to the filename for subsequent files or drag-and-drop.
+    const isFirstOfType = index === 0;
+    let layerName = isFirstOfType && !isFileDrop ? storedName : urlFileName;
     const layerType = object.userData?.type || 
                       (object.isPoints ? 'pointcloud' : 'model');
     

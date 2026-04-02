@@ -66,11 +66,18 @@
             </template>
 
             <!-- ── 3D model note ── -->
-            <template v-else>
+            <template v-else-if="isModel(fs.name)">
               <p class="model-note">
                 3D models are stored and served as uploaded.
                 Geometry decimation (for large OBJ/PLY files) requires external tools
                 (MeshLab or Blender) installed on the server — not available yet in this panel.
+              </p>
+            </template>
+
+            <!-- ── Companion file note ── -->
+            <template v-else>
+              <p class="model-note companion-note">
+                Companion file — will be processed automatically alongside its parent model.
               </p>
             </template>
 
@@ -102,6 +109,7 @@ const emit = defineEmits(['confirm', 'cancel']);
 
 const POINTCLOUD_EXTS = new Set(['.las', '.laz']);
 const MODEL_EXTS      = new Set(['.obj', '.ply', '.stl']);
+const COMPANION_EXTS  = new Set(['.mtl', '.jpg', '.jpeg', '.png', '.bmp', '.tga', '.gif', '.webp']);
 
 function extOf(name) {
   return '.' + name.toLowerCase().split('.').pop();
@@ -112,14 +120,19 @@ function isPointcloud(name) {
   return lower.endsWith('.copc.laz') || POINTCLOUD_EXTS.has(extOf(lower));
 }
 
+function isModel(name) {
+  return MODEL_EXTS.has(extOf(name.toLowerCase()));
+}
+
 function extLabel(name) {
   const e = extOf(name).replace('.', '').toUpperCase();
   return e || '?';
 }
 
 function badgeClass(name) {
-  if (isPointcloud(name))             return 'badge-pointcloud';
-  if (MODEL_EXTS.has(extOf(name)))    return 'badge-model';
+  if (isPointcloud(name))                    return 'badge-pointcloud';
+  if (MODEL_EXTS.has(extOf(name)))           return 'badge-model';
+  if (COMPANION_EXTS.has(extOf(name)))       return 'badge-companion';
   return 'badge-other';
 }
 
@@ -252,9 +265,11 @@ function confirm() {
   text-transform: uppercase; white-space: nowrap; flex-shrink: 0;
 }
 .badge-model      { background: #ede9fe; color: #6d28d9; }
+.badge-companion  { background: #fef3c7; color: #92400e; }
 .badge-pointcloud { background: #e0f2fe; color: #0369a1; }
 .badge-other      { background: var(--admin-bg, #f3f4f6); color: var(--admin-muted, #777); }
 :global(body.theme-dark) .badge-model      { background: #3b2a6e; color: #c4b5fd; }
+:global(body.theme-dark) .badge-companion  { background: #3d2a0a; color: #fbbf24; }
 :global(body.theme-dark) .badge-pointcloud { background: #1a3a4d; color: #38bdf8; }
 
 /* ── Form fields ─────────────────────────────────────────────────────────────── */
@@ -341,6 +356,14 @@ function confirm() {
   background: var(--admin-bg, #f3f4f6);
   border-radius: 6px;
   padding: 0.55rem 0.75rem;
+}
+.companion-note {
+  color: #92400e;
+  background: #fef9ee;
+}
+:global(body.theme-dark) .companion-note {
+  color: #fbbf24;
+  background: #2a1f06;
 }
 
 /* ── Transition ─────────────────────────────────────────────────────────────── */

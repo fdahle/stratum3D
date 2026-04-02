@@ -139,7 +139,9 @@ export function linkAssetsToFeatures(geojson, modelMap, pointcloudMap) {
     const models = [];
     for (const [stem, url] of modelMap) {
       const stemLower = stem.toLowerCase();
-      if (propValues.some((v) => v === stemLower || stemLower.includes(v) || v.includes(stemLower))) {
+      // Require exact match OR: the stem contains the property value, but only
+      // if the value is at least 4 characters (avoids over-matching on 'a', 'id', etc.)
+      if (propValues.some((v) => v === stemLower || (v.length >= 4 && stemLower.includes(v)))) {
         models.push(url);
         modelCounts[stem] = (modelCounts[stem] ?? 0) + 1;
       }
@@ -156,7 +158,7 @@ export function linkAssetsToFeatures(geojson, modelMap, pointcloudMap) {
     const clouds = [];
     for (const [stem, url] of pointcloudMap) {
       const stemLower = stem.toLowerCase();
-      if (propValues.some((v) => v === stemLower || stemLower.includes(v) || v.includes(stemLower))) {
+      if (propValues.some((v) => v === stemLower || (v.length >= 4 && stemLower.includes(v)))) {
         clouds.push(url);
         pointcloudCounts[stem] = (pointcloudCounts[stem] ?? 0) + 1;
       }

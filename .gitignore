@@ -37,7 +37,13 @@ client/.env.local
 client/.env.production
 
 # --- Server Specific ---
-server/data/
+# Ignore all data files but keep the directory structure via .gitkeep files
+server/data/**
+!server/data/.gitkeep
+!server/data/**/.gitkeep
+
+# Runtime .env (users create this from .env.example)
+.env
 server/.env
 server/.env.local
 server/.env.production

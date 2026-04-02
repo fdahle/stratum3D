@@ -1,10 +1,13 @@
 # Development-specific overrides
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
 version: '3.8'
 
 services:
   server:
     volumes:
-      # Mount source code for development
+      - ./input:/app/input:ro
+      - ./server/data:/app/server/data
+      # Hot-reload: mount source code over the image
       - ./server:/app/server
       - /app/server/node_modules
     environment:
