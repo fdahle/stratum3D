@@ -1,9 +1,10 @@
 import fs from "fs";
 import path from "path";
-import { exec } from "child_process";
+import { execFile, exec } from "child_process";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 /**
  * Process 3D models with decimation and optimization
@@ -24,21 +25,21 @@ export class ModelProcessor {
     };
 
     try {
-      await execAsync("meshlabserver --version");
+      await execFileAsync('meshlabserver', ['--version']);
       tools.meshlab = true;
     } catch (e) {
       // MeshLab not installed
     }
 
     try {
-      await execAsync("blender --version");
+      await execFileAsync('blender', ['--version']);
       tools.blender = true;
     } catch (e) {
       // Blender not installed
     }
 
     try {
-      await execAsync("gltfpack --version");
+      await execFileAsync('gltfpack', ['--version']);
       tools.gltfpack = true;
     } catch (e) {
       // gltfpack not installed
@@ -93,9 +94,8 @@ export class ModelProcessor {
     fs.writeFileSync(scriptPath, mlxScript);
 
     try {
-      const command = `meshlabserver -i "${inputPath}" -o "${outputPath}" -s "${scriptPath}"`;
-      console.log(`  Running: ${command}`);
-      const { stdout, stderr } = await execAsync(command);
+      console.log(`  Running: meshlabserver -i ${inputPath} -o ${outputPath} -s ${scriptPath}`);
+      const { stdout, stderr } = await execFileAsync('meshlabserver', ['-i', inputPath, '-o', outputPath, '-s', scriptPath]);
       
       if (stderr && !stderr.includes("Warning")) {
         console.error(`  MeshLab stderr: ${stderr}`);
@@ -168,9 +168,8 @@ print(f"Export complete: ${outputPath.replace(/\\/g, '/')}")
     fs.writeFileSync(scriptPath, pyScript);
 
     try {
-      const command = `blender --background --python "${scriptPath}"`;
       console.log(`  Running Blender decimation...`);
-      const { stdout, stderr } = await execAsync(command, { maxBuffer: 10 * 1024 * 1024 });
+      const { stdout, stderr } = await execFileAsync('blender', ['--background', '--python', scriptPath], { maxBuffer: 10 * 1024 * 1024 });
       
       // Clean up script
       fs.unlinkSync(scriptPath);

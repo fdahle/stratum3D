@@ -12,12 +12,13 @@ import crypto from 'crypto';
 import cors from 'cors';
 const statfsAsync = promisify(statfsCallback);
 import compression from 'compression';
+import helmet from 'helmet';
 import yaml from 'js-yaml';
 import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import { fileURLToPath } from 'url';
-import config, { isDevelopment } from './src/config.js';
+import config, { isDevelopment, isProduction } from './src/config.js';
 import logger from './src/logger.js';
 import { listLayers, readLayerMeta, writeLayerMeta, deleteLayer, metaToConfigLayer, validateLayerId } from './src/layerStore.js';
 import { jobQueue } from './src/jobQueue.js';
@@ -59,10 +60,14 @@ function getAdminPassword() { return runtimeAdminPassword; }
 // CORS configuration
 const corsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl requests)
+    // In development, allow any origin for local tooling
+    if (isDevelopment) return callback(null, true);
+    // In production, require a valid Origin that matches the whitelist.
+    // Requests without an Origin header (e.g. server-to-server, curl) are
+    // allowed only when they come from the same host (handled by the
+    // browser — non-browser clients don't send Origin at all).
     if (!origin) return callback(null, true);
-    
-    if (config.corsOrigins.includes(origin) || isDevelopment) {
+    if (config.corsOrigins.includes(origin)) {
       callback(null, true);
     } else {
       logger.warn(`CORS blocked request from: ${origin}`);
@@ -71,6 +76,7 @@ const corsOptions = {
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'],
   // Range-request headers must be explicitly exposed for cross-origin clients
   // (dev: client on :5173, server on :3000). Without this, geotiff.js cannot
   // read Content-Range responses and every tile fetch fails with AggregateError.
@@ -79,19 +85,35 @@ const corsOptions = {
 
 // Middleware
 app.use(cors(corsOptions));
+
+// Security headers via helmet
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc:  ["'self'", "'wasm-unsafe-eval'"],
+      styleSrc:   ["'self'", "'unsafe-inline'"],   // Three.js / Cesium may inject inline styles
+      imgSrc:     ["'self'", 'data:', 'blob:', 'https:'],
+      connectSrc: ["'self'", 'https:', 'blob:'],
+      workerSrc:  ["'self'", 'blob:'],
+      objectSrc:  ["'none'"],
+      baseUri:    ["'self'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'none'"],
+    },
+  },
+  // Enable HSTS so browsers always use HTTPS after the first visit
+  hsts: isProduction ? { maxAge: 31536000, includeSubDomains: true } : false,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  crossOriginEmbedderPolicy: false,  // required for cross-origin tile/model loads
+  crossOriginResourcePolicy: false,  // allow sub-resources from other origins
+}));
+
 // Compress text-based API responses. The /data route is excluded entirely
 // so that HTTP range requests (geotiff.js tile reads, point-cloud streaming)
 // work correctly — gzip wrapping destroys byte offsets and strips Content-Range.
 app.use(compression());
 app.use(express.json());
-
-// Security headers
-app.use((req, res, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
-  next();
-});
 
 // Request logging in development
 if (isDevelopment) {
@@ -136,6 +158,15 @@ const authRateLimit = rateLimit({
   message: { error: 'Too many requests, please try again later.' },
 });
 
+// General rate limit for public data endpoints — prevents abuse / DoS.
+const dataRateLimit = rateLimit({
+  windowMs: 60_000,       // 1 minute window
+  max: 300,               // 300 requests per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later.' },
+});
+
 // Setup status — public, tells the client what first-run steps remain
 app.get('/admin/setup-status', async (req, res) => {
   const hasPassword = !!getAdminPassword();
@@ -152,8 +183,8 @@ app.post('/admin/set-password', authRateLimit, express.json(), async (req, res) 
     return res.status(409).json({ error: 'A password is already set. Use change-password to update it.' });
   }
   const { password } = req.body ?? {};
-  if (!password || typeof password !== 'string' || password.length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+  if (!password || typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
   }
   try {
     const hash = await bcrypt.hash(password, 12);
@@ -170,8 +201,8 @@ app.post('/admin/set-password', authRateLimit, express.json(), async (req, res) 
 // Change admin password — requires current credentials, updates .credentials file
 app.post('/admin/change-password', authRateLimit, requireAdminAuth, express.json(), async (req, res) => {
   const { newPassword } = req.body ?? {};
-  if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
-    return res.status(400).json({ error: 'New password must be at least 6 characters.' });
+  if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
+    return res.status(400).json({ error: 'New password must be at least 8 characters.' });
   }
   try {
     const hash = await bcrypt.hash(newPassword, 12);
@@ -190,13 +221,9 @@ app.get('/admin/verify', authRateLimit, requireAdminAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-// Health check endpoint
+// Health check endpoint — minimal response to avoid information disclosure
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    timestamp: new Date().toISOString(),
-    environment: config.nodeEnv,
-  });
+  res.json({ status: 'ok' });
 });
 
 // Serve the app config (read by the client on startup)
@@ -217,8 +244,11 @@ app.get('/config', async (req, res) => {
 // Update the app config (admin only)
 app.put('/config', requireAdminAuth, express.text({ type: 'text/yaml', limit: '256kb' }), async (req, res) => {
   try {
-    // Validate it is parseable YAML before writing
-    yaml.load(req.body);
+    // Use SAFE_SCHEMA to prevent instantiation of JS objects from YAML tags
+    const parsed = yaml.load(req.body, { schema: yaml.CORE_SCHEMA });
+    if (parsed == null || typeof parsed !== 'object') {
+      return res.status(400).json({ error: 'Config must be a YAML mapping.' });
+    }
     await fs.writeFile(configFilePath, req.body, 'utf8');
     logger.info('Config updated via admin API');
     res.json({ success: true });
@@ -320,7 +350,7 @@ app.post('/admin/upload', requireAdminAuth, runUploadMiddleware, async (req, res
     res.json(results);
   } catch (err) {
     logger.error('Upload processing error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: isProduction ? 'Upload processing failed. Check server logs for details.' : err.message });
   }
 });
 
@@ -355,8 +385,8 @@ app.get('/admin/storage', requireAdminAuth, async (req, res) => {
 app.patch('/admin/settings', requireAdminAuth, express.json(), async (req, res) => {
   const { uploadLimitMb } = req.body ?? {};
   const parsed = parseInt(uploadLimitMb, 10);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 50000) {
-    return res.status(400).json({ error: 'uploadLimitMb must be an integer between 1 and 50000.' });
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10000) {
+    return res.status(400).json({ error: 'uploadLimitMb must be an integer between 1 and 10000.' });
   }
   config.uploadLimitMb = parsed;
   try {
@@ -779,7 +809,7 @@ app.get('/admin/layers/:id/original', requireAdminAuth, async (req, res) => {
 // Compression is intentionally disabled for /data: gzip encoding destroys the
 // byte offsets that HTTP range requests rely on, breaking geotiff.js tile reads
 // (it issues Range: bytes= requests to stream individual tiles from COG files).
-app.use('/data', (req, res, next) => {
+app.use('/data', dataRateLimit, (req, res, next) => {
   res.set('Cache-Control', isDevelopment ? 'no-store' : 'public, max-age=86400');
   // Tell clients (and geotiff.js) that we support byte-range requests.
   res.set('Accept-Ranges', 'bytes');
@@ -796,10 +826,7 @@ app.use('/data', (req, res, next) => {
 // 404 handler
 app.use((req, res) => {
   logger.warn(`404 Not Found: ${req.method} ${req.path}`);
-  res.status(404).json({ 
-    error: 'Not Found',
-    path: req.path,
-  });
+  res.status(404).json({ error: 'Not Found' });
 });
 
 // Error handler
@@ -808,7 +835,6 @@ app.use((err, req, res, next) => {
   
   res.status(err.status || 500).json({
     error: isDevelopment ? err.message : 'Internal Server Error',
-    ...(isDevelopment && { stack: err.stack }),
   });
 });
 

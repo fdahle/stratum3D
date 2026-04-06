@@ -5,7 +5,7 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install GDAL, PDAL, and supporting utilities in one layer
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gdal-bin \
     libgdal-dev \
     pdal \
@@ -15,8 +15,11 @@ RUN apt-get update && apt-get install -y \
 
 # Install Node.js 20 via the official NodeSource distribution
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# Create a non-root user to run the application
+RUN groupadd -r appuser && useradd -r -g appuser -m -s /bin/false appuser
 
 # Set working directory
 WORKDIR /app/server
@@ -25,14 +28,17 @@ WORKDIR /app/server
 COPY package*.json ./
 
 # Install Node.js dependencies
-RUN npm install
+RUN npm install --omit=dev
 
 # Copy server code
 COPY . .
 
-# Create necessary data directories (these are also created at runtime via
-# the volume mount, but pre-creating them avoids permission edge cases)
-RUN mkdir -p data/layers data/shapes data/3D data/pointclouds data/geotiffs
+# Create necessary data directories and set ownership
+RUN mkdir -p data/layers data/shapes data/3D data/pointclouds data/geotiffs \
+    && chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
 
 # Expose server port
 EXPOSE 3000

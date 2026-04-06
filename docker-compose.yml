@@ -19,7 +19,9 @@ services:
         required: false
     environment:
       - NODE_ENV=production
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
+      # ADMIN_PASSWORD is optional — if not set, the first-run setup wizard prompts
+      # the user to choose a password. Never use a default in production.
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
     command: node index.js
     networks:
       - hist_map_network

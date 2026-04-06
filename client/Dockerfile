@@ -18,13 +18,32 @@ RUN npm run build
 # Production stage - use nginx to serve built files
 FROM nginx:alpine
 
+# Disable server version disclosure and add security headers
+RUN printf 'server {\n\
+    listen 80;\n\
+    server_tokens off;\n\
+    root /usr/share/nginx/html;\n\
+    index index.html;\n\
+\n\
+    add_header X-Content-Type-Options "nosniff" always;\n\
+    add_header X-Frame-Options "DENY" always;\n\
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;\n\
+\n\
+    location / {\n\
+        try_files $uri $uri/ /index.html;\n\
+    }\n\
+\n\
+    # Cache static assets\n\
+    location ~* \\.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?)$ {\n\
+        expires 1y;\n\
+        add_header Cache-Control "public, immutable";\n\
+    }\n\
+}\n' > /etc/nginx/conf.d/default.conf
+
 # Copy built files from build stage
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Copy custom nginx config (if needed)
-# COPY nginx.conf /etc/nginx/conf.d/default.conf
-
 # Expose port
-EXPOSE 8080
+EXPOSE 80
 
 CMD ["nginx", "-g", "daemon off;"]

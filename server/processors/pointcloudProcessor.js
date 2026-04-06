@@ -1,10 +1,11 @@
 import fs from "fs";
 import fsPromises from "fs/promises";
 import path from "path";
-import { exec } from "child_process";
+import { execFile, exec } from "child_process";
 import { promisify } from "util";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // ── Standalone COPC conversion (used by the live upload pipeline) ──────────────
 
@@ -13,7 +14,7 @@ let _pdalAvailable = null;
 export async function isPdalAvailable() {
   if (_pdalAvailable !== null) return _pdalAvailable;
   try {
-    await execAsync('pdal --version');
+    await execFileAsync('pdal', ['--version']);
     _pdalAvailable = true;
   } catch {
     _pdalAvailable = false;
@@ -67,7 +68,8 @@ export async function convertToCopc(inputPath, options = {}) {
 
   try {
     await fsPromises.writeFile(pipelineFile, JSON.stringify(pipeline));
-    await execAsync(`pdal pipeline "${pipelineFile}"`, { maxBuffer: 256 * 1024 * 1024 });
+    // Use execFile with explicit args array — avoids shell injection via filenames
+    await execFileAsync('pdal', ['pipeline', pipelineFile], { maxBuffer: 256 * 1024 * 1024 });
     await fsPromises.unlink(pipelineFile);
 
     let originalBackup = null;
@@ -113,21 +115,21 @@ class PointCloudProcessor {
     };
 
     try {
-      await execAsync("pdal --version");
+      await execFileAsync('pdal', ['--version']);
       tools.pdal = true;
     } catch (e) {
       // PDAL not installed
     }
 
     try {
-      await execAsync("entwine --version");
+      await execFileAsync('entwine', ['--version']);
       tools.entwine = true;
     } catch (e) {
       // Entwine not installed
     }
 
     try {
-      await execAsync("PotreeConverter --version");
+      await execFileAsync('PotreeConverter', ['--version']);
       tools.potree = true;
     } catch (e) {
       // PotreeConverter not installed
@@ -197,8 +199,7 @@ class PointCloudProcessor {
       fs.writeFileSync(pipelineFile, JSON.stringify(pipeline, null, 2));
 
       console.log(`  - Running PDAL pipeline...`);
-      const command = `pdal pipeline "${pipelineFile}"`;
-      const { stdout, stderr } = await execAsync(command, { maxBuffer: 50 * 1024 * 1024 });
+      const { stdout, stderr } = await execFileAsync('pdal', ['pipeline', pipelineFile], { maxBuffer: 50 * 1024 * 1024 });
       
       if (stderr && !stderr.includes("Warning")) {
         console.error(`  PDAL stderr: ${stderr}`);
@@ -248,8 +249,7 @@ class PointCloudProcessor {
       fs.writeFileSync(pipelineFile, JSON.stringify(pipeline, null, 2));
 
       console.log(`  - Thinning point cloud (radius: ${this.config.thinning?.radius || 0.5}m)...`);
-      const command = `pdal pipeline "${pipelineFile}"`;
-      const { stdout, stderr } = await execAsync(command, { maxBuffer: 50 * 1024 * 1024 });
+      const { stdout, stderr } = await execFileAsync('pdal', ['pipeline', pipelineFile], { maxBuffer: 50 * 1024 * 1024 });
 
       fs.unlinkSync(pipelineFile);
       
@@ -266,8 +266,7 @@ class PointCloudProcessor {
   async getPointCloudInfo(filePath) {
     try {
       // For PLY files, try pdal info first; if that fails, estimate from file size
-      const command = `pdal info --summary "${filePath}"`;
-      const { stdout } = await execAsync(command, { maxBuffer: 10 * 1024 * 1024 });
+      const { stdout } = await execFileAsync('pdal', ['info', '--summary', filePath], { maxBuffer: 10 * 1024 * 1024 });
       const info = JSON.parse(stdout);
       
       const summary = info.summary || {};
