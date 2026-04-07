@@ -108,6 +108,7 @@
 import { ref, watch } from 'vue';
 import { useMapStore } from '@/stores/map/mapStore';
 import { useLayerStore } from '@/stores/map/layerStore';
+import { usePinStore } from '@/stores/map/pinStore';
 import { ICON_CLOSE } from '@/constants/icons.js';
 
 const ICON_SHARE = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>`;
@@ -121,6 +122,7 @@ const emit = defineEmits(['close']);
 
 const mapStore = useMapStore();
 const layerStore = useLayerStore();
+const pinStore = usePinStore();
 
 const tab = ref('export');
 const exportCode = ref('');
@@ -171,7 +173,13 @@ const generateSceneCode = () => {
       color: l.color,
     }));
 
-  const payload = { v: 1, center, zoom, projection, layers };
+  const pins = pinStore.pins.map(p => ({
+    id: p.id,
+    label: p.label,
+    coordinate: p.coordinate,
+  }));
+
+  const payload = { v: 1, center, zoom, projection, layers, pins };
   return btoa(JSON.stringify(payload));
 };
 
@@ -231,6 +239,9 @@ const loadScene = async () => {
   }
   view.animate({ center, zoom: payload.zoom, duration: 600 });
 
+  // Restore pins (if any)
+  await restorePins(payload, currentProj);
+
   // Classify each layer: unique match → queue, no match → warn, multiple → disambiguate
   const toDisambiguate = [];
   for (const savedLayer of (payload.layers ?? [])) {
@@ -278,6 +289,23 @@ const applyRestoredLayers = () => {
   importSuccess.value = true;
   pendingApplyQueue.value = [];
   pendingWarnings.value = [];
+};
+
+const restorePins = async (payload, currentProj) => {
+  if (!Array.isArray(payload.pins) || payload.pins.length === 0) return;
+  let pins = payload.pins;
+  if (payload.projection && payload.projection !== currentProj) {
+    try {
+      const { transform } = await import('ol/proj');
+      pins = pins.map(p => ({
+        ...p,
+        coordinate: transform(p.coordinate, payload.projection, currentProj),
+      }));
+    } catch {
+      // If transform fails, use coordinates as-is
+    }
+  }
+  pinStore.setPins(pins);
 };
 
 const shortenUrl = (url) => {

@@ -25,6 +25,8 @@ import { parse as csvParse } from 'csv-parse/sync';
 import { normalizeFilename }     from '../src/utils.js';
 import { processGeoJsonObject, linkAssetsToFeatures } from './shapeProcessor.js';
 import { convertToCopc } from './pointcloudProcessor.js';
+import { extractGeoTiffInfo } from './geotiffProcessor.js';
+import epsg from 'epsg-index/all.json' with { type: 'json' };
 import {
   createLayerMeta,
   createSubFileMeta,
@@ -353,6 +355,34 @@ async function _processGeoTiffLayer(tifFile, layersDir, allSettings) {
     if (settings.cogOptions) meta.cogOptions = settings.cogOptions;
   }
   if (settings.keepOriginal) meta.keepOriginal = true;
+
+  // Extract CRS and raster info from the file using GDAL (if available).
+  // This populates sourceCrs in the meta and tiffProjection in layerConfig
+  // so the client can pre-register the projection before rendering.
+  const mainFilePath = path.join(layerDir, mainFile);
+  const gdalInfo = await extractGeoTiffInfo(mainFilePath);
+  if (gdalInfo?.crs) {
+    meta.sourceCrs = gdalInfo.crs;
+    meta.layerConfig.tiffProjection = gdalInfo.crs;
+    // Look up the proj4 string so the client can register the CRS without
+    // a network round-trip to epsg.io.
+    const epsgNum = gdalInfo.crs.split(':')[1];
+    const proj4Str = epsg[epsgNum]?.proj4 ?? null;
+    if (proj4Str) meta.layerConfig.tiffProj4 = proj4Str;
+    meta.processingLog.push(`Detected CRS: ${gdalInfo.crs}`);
+  }
+  if (gdalInfo?.bands != null) meta.layerConfig.bandCount = gdalInfo.bands;
+
+  // User-supplied CRS override (from upload modal settings) takes precedence.
+  const sourceCrs = settings.cogOptions?.sourceCrs ?? null;
+  if (sourceCrs) {
+    meta.sourceCrs = sourceCrs;
+    meta.layerConfig.tiffProjection = sourceCrs;
+    const epsgNum = sourceCrs.split(':')[1];
+    const proj4Str = epsg[epsgNum]?.proj4 ?? null;
+    if (proj4Str) meta.layerConfig.tiffProj4 = proj4Str;
+  }
+
   await writeLayerMeta(layersDir, id, meta);
 
   return {
@@ -609,5 +639,122 @@ export async function relinkGeojson(filePath, layersDir) {
     availableModels:      modelMap.size,
     availablePointclouds: pointcloudMap.size,
   };
+}
+
+// ── CSV attribute join ─────────────────────────────────────────────────────────
+
+/**
+ * Detect the delimiter used in a CSV header line.
+ * Mirrors the same heuristic used on the client side.
+ */
+function detectCsvDelimiter(line) {
+  const t = (line.match(/\t/g) || []).length;
+  const c = (line.match(/,/g)  || []).length;
+  const s = (line.match(/;/g)  || []).length;
+  if (t > c && t > s) return '\t';
+  if (s > c)          return ';';
+  return ',';
+}
+
+/**
+ * Apply a CSV attribute join to an existing GeoJSON layer.
+ *
+ * Reads the CSV sub-file identified by `csvLink.subFileId`, auto-detects its
+ * delimiter, builds a lookup keyed by `csvLink.csvJoinColumn`, then enriches
+ * each GeoJSON feature whose `csvLink.featureJoinProperty` matches a row key.
+ *
+ * If `oldJoinedCols` is provided those columns are stripped from every feature
+ * first so that a re-apply doesn't accumulate stale data.
+ *
+ * @param {string}   layerId         Layer UUID
+ * @param {string}   layersDir       Absolute path to the layers root directory
+ * @param {object}   csvLink         { subFileId, csvJoinColumn, featureJoinProperty }
+ * @param {string[]} [oldJoinedCols] Column names previously joined (to remove before re-joining)
+ * @returns {Promise<string[]>} Names of the columns that were added to features
+ */
+export async function applyCsvLink(layerId, layersDir, csvLink, oldJoinedCols = []) {
+  const { subFileId, csvJoinColumn, featureJoinProperty } = csvLink;
+
+  const meta = await readLayerMeta(layersDir, layerId);
+
+  // Locate the sub-file entry in the layer metadata
+  const subFile = meta.subFiles.find((sf) => sf.id === subFileId);
+  if (!subFile) throw new Error(`Sub-file ${subFileId} not found on layer ${layerId}.`);
+
+  // Read the CSV from disk
+  const csvExt  = subFile.extension || '.csv';
+  const csvPath = path.join(layersDir, layerId, `${subFileId}${csvExt}`);
+  const csvText = await fs.readFile(csvPath, 'utf8');
+
+  // Detect delimiter from the first line
+  const firstNewline = csvText.indexOf('\n');
+  const headerLine   = firstNewline !== -1 ? csvText.slice(0, firstNewline) : csvText;
+  const delimiter    = detectCsvDelimiter(headerLine);
+
+  // Parse CSV
+  let records;
+  try {
+    records = csvParse(csvText, {
+      columns:          true,
+      skip_empty_lines: true,
+      trim:             true,
+      relax_quotes:     true,
+      delimiter,
+    });
+  } catch (err) {
+    throw new Error(`CSV parse error: ${err.message}`);
+  }
+  if (records.length === 0) throw new Error('CSV has no data rows.');
+
+  // Validate that the configured join column exists
+  const csvColumns = Object.keys(records[0]);
+  if (!csvColumns.includes(csvJoinColumn)) {
+    throw new Error(`CSV join column "${csvJoinColumn}" not found. Available: ${csvColumns.join(', ')}`);
+  }
+
+  // Build lookup: value of csvJoinColumn → full row
+  const lookup = new Map();
+  for (const row of records) {
+    const key = String(row[csvJoinColumn] ?? '');
+    if (key !== '') lookup.set(key, row);
+  }
+
+  // The new columns we will write to each feature (all CSV columns except the join key itself,
+  // to avoid overwriting the feature's original join property with an identical-but-stringified copy)
+  const newCols = csvColumns.filter((c) => c !== csvJoinColumn);
+
+  // Read the GeoJSON file
+  const ext         = meta.extension || '.geojson';
+  const geojsonPath = path.join(layersDir, layerId, `${layerId}${ext}`);
+  const raw         = await fs.readFile(geojsonPath, 'utf8');
+  const geojson     = JSON.parse(raw);
+
+  // Apply the join
+  const colsToRemove = new Set(oldJoinedCols);
+  let matchCount = 0;
+  geojson.features = geojson.features.map((feature) => {
+    if (!feature.properties) feature.properties = {};
+
+    // Remove stale columns from a previous join before adding fresh ones
+    for (const col of colsToRemove) {
+      delete feature.properties[col];
+    }
+
+    const featureVal = String(feature.properties[featureJoinProperty] ?? '');
+    const match      = lookup.get(featureVal);
+    if (match) {
+      for (const col of newCols) {
+        feature.properties[col] = match[col];
+      }
+      matchCount++;
+    }
+
+    return feature;
+  });
+
+  // Write the enriched GeoJSON back to disk
+  await fs.writeFile(geojsonPath, JSON.stringify(geojson), 'utf8');
+
+  return newCols;
 }
 

@@ -8,10 +8,10 @@
  * efficient random access, to validate the file and extract metadata before
  * the heavy OL source initialisation kicks in.
  */
-import { fromBlob } from "geotiff";
+import { fromBlob, fromUrl } from "geotiff";
 
 self.onmessage = async (e) => {
-  const { file, layerId } = e.data;
+  const { file, url, layerId } = e.data;
 
   try {
     self.postMessage({
@@ -21,7 +21,7 @@ self.onmessage = async (e) => {
       message: "Parsing GeoTIFF…",
     });
 
-    const tiff = await fromBlob(file);
+    const tiff = file ? await fromBlob(file) : await fromUrl(url);
     const image = await tiff.getImage();
 
     self.postMessage({
@@ -134,8 +134,9 @@ self.onmessage = async (e) => {
         height,
         bands: samplesPerPixel,
         hasOverviews: imageCount > 1,
+        isTiled: image.isTiled,
         imageCount,
-        fileSize: file.size,
+        fileSize: file?.size ?? null,
         dataMin,
         dataMax,
         noDataValue,

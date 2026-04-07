@@ -1,15 +1,19 @@
 /**
- * geotiffProcessor.js — Cloud Optimised GeoTIFF (COG) conversion.
+ * geotiffProcessor.js — Cloud Optimised GeoTIFF (COG) conversion & metadata extraction.
  *
- * Requires GDAL's `gdal_translate` to be available on PATH.
+ * COG conversion requires GDAL's `gdal_translate` to be available on PATH.
  * If GDAL is not installed the conversion is skipped gracefully and the
  * original file is used as-is (still works, just not streaming-optimised).
+ *
+ * Metadata extraction (CRS, band count, size) uses GDAL if available,
+ * otherwise falls back to geotiff.js for reading GeoKeys directly.
  */
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import fs            from 'fs/promises';
 import path          from 'path';
+import { fromArrayBuffer } from 'geotiff';
 
 const execFileAsync = promisify(execFile);
 
@@ -98,5 +102,68 @@ export async function convertToCog(inputPath, options = {}) {
       step: `COG conversion failed: ${err.message} — original file kept`,
       originalBackup: null,
     };
+  }
+}
+
+// ── GeoTIFF metadata extraction ────────────────────────────────────────────────
+
+/**
+ * Extract CRS and basic raster info from a GeoTIFF.
+ * Uses GDAL (gdalinfo) if available, otherwise falls back to geotiff.js.
+ *
+ * @param {string} filePath  Absolute path to the .tif file
+ * @returns {{ crs: string|null, size: [number,number]|null, bands: number|null } | null}
+ */
+export async function extractGeoTiffInfo(filePath) {
+  // Try GDAL first (more reliable CRS detection).
+  if (await isGdalAvailable()) {
+    try {
+      const { stdout } = await execFileAsync('gdalinfo', ['-json', filePath]);
+      const info = JSON.parse(stdout);
+
+      let crs = null;
+      const wkt = info.coordinateSystem?.wkt ?? '';
+      // Match the last AUTHORITY["EPSG","<code>"] — that's the top-level CRS code.
+      const authorityMatches = [...wkt.matchAll(/AUTHORITY\["EPSG","(\d+)"\]/gi)];
+      if (authorityMatches.length > 0) {
+        crs = `EPSG:${authorityMatches[authorityMatches.length - 1][1]}`;
+      }
+      // Fallback: look for ID["EPSG",<code>] (WKT2 format)
+      if (!crs) {
+        const idMatches = [...wkt.matchAll(/ID\["EPSG",(\d+)\]/gi)];
+        if (idMatches.length > 0) {
+          crs = `EPSG:${idMatches[idMatches.length - 1][1]}`;
+        }
+      }
+
+      const size = info.size ?? null;
+      const bands = info.bands?.length ?? null;
+
+      return { crs, size, bands };
+    } catch {
+      // Fall through to geotiff.js fallback.
+    }
+  }
+
+  // Fallback: use geotiff.js to read GeoKeys from the file header.
+  try {
+    const buffer = await fs.readFile(filePath);
+    const tiff = await fromArrayBuffer(buffer.buffer);
+    const image = await tiff.getImage();
+
+    let crs = null;
+    const geoKeys = image.getGeoKeys();
+    if (geoKeys.ProjectedCSTypeGeoKey) {
+      crs = `EPSG:${geoKeys.ProjectedCSTypeGeoKey}`;
+    } else if (geoKeys.GeographicTypeGeoKey) {
+      crs = `EPSG:${geoKeys.GeographicTypeGeoKey}`;
+    }
+
+    const size = [image.getWidth(), image.getHeight()];
+    const bands = image.getSamplesPerPixel();
+
+    return { crs, size, bands };
+  } catch {
+    return null;
   }
 }

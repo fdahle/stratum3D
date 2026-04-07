@@ -23,11 +23,11 @@ const { showInfoBar } = storeToRefs(settingsStore);
 
 const bottomOffset = computed(() => showInfoBar.value ? '32px' : '4px');
 
-// Collect attributions from all currently active base layers
+// Collect attributions from all currently active base/background layers
 const attributions = computed(() => {
   const seen = new Set();
   return layers.value
-    .filter(l => l.category === LAYER_CATEGORY.BASE && l.active && l.attribution)
+    .filter(l => (l.category === LAYER_CATEGORY.BASE || l.category === LAYER_CATEGORY.BACKGROUND) && l.active && l.attribution)
     .map(l => l.attribution)
     .filter(text => {
       if (seen.has(text)) return false;

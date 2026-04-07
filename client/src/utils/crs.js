@@ -52,18 +52,29 @@ export const registerCustomProjections = (config) => {
  * Ensure `code` is registered with both proj4 and OpenLayers so that OL can
  * reproject data from that CRS to the map's CRS.  Tries (in order):
  *  1. Already known to OL — no-op.
- *  2. Built-in proj4 definition table.
- *  3. Live GET from https://epsg.io/{code}.proj4 (requires internet).
+ *  2. Caller-supplied proj4 string (from server metadata).
+ *  3. Built-in proj4 definition table.
+ *  4. Live GET from https://epsg.io/{code}.proj4 (requires internet).
  *
  * Returns true when the projection is now available, false if it could not be
  * resolved.  Always resolves — never throws.
+ *
+ * @param {string} code       EPSG code, e.g. "EPSG:31255"
+ * @param {string} [proj4Def] Optional proj4 definition string from the server
  */
-export async function tryRegisterProjection(code) {
+export async function tryRegisterProjection(code, proj4Def) {
   if (!code) return false;
   const upper = String(code).trim().toUpperCase();
 
   // Already known to OpenLayers.
   if (getProjection(upper)) return true;
+
+  // Caller supplied a proj4 string (e.g. from server-side epsg-index lookup).
+  if (proj4Def) {
+    proj4.defs(upper, proj4Def);
+    register(proj4);
+    if (getProjection(upper)) return true;
+  }
 
   // Built-in table (no network required).
   if (BUILTIN_PROJ_DEFS[upper]) {

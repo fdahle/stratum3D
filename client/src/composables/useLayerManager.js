@@ -5,6 +5,7 @@ import { useSelectionStore } from "../stores/map/selectionStore";
 import { useSettingsStore } from "../stores/settingsStore";
 import { generateUUID } from "../utils/helpers";
 import { logger } from "../utils/logger";
+import { tryRegisterProjection } from "../utils/crs";
 import {
   buildLayerSharedStyle,
   buildGroupByStyleFunction,
@@ -191,6 +192,127 @@ export function useLayerManager(map) {
     }
   };
 
+  // ── GeoTIFF URL metadata scan ─────────────────────────────────────────────────
+  // Spawns the geotiff worker to extract band count, data range and projection
+  // from a server-hosted GeoTIFF via HTTP range requests — the same scan that
+  // drag-dropped files go through before their OL layer is created.
+  // Resolves with the metadata object on success or null on timeout / error.
+  const scanGeoTIFFUrl = (url, layerId) => new Promise((resolve) => {
+    const worker = new Worker(
+      new URL('../workers/geotiffWorker.js', import.meta.url),
+      { type: 'module' },
+    );
+    const timeout = setTimeout(() => { worker.terminate(); resolve(null); }, 30_000);
+    worker.onmessage = (e) => {
+      const { type, metadata, progress } = e.data;
+      if (type === 'PROGRESS') {
+        // Layer may not be in the store yet; setLayerProgress handles missing IDs.
+        layerStore.setLayerProgress(layerId, progress ?? 0);
+      } else if (type === 'COMPLETE') {
+        clearTimeout(timeout);
+        worker.terminate();
+        resolve(metadata);
+      } else if (type === 'ERROR') {
+        clearTimeout(timeout);
+        worker.terminate();
+        resolve(null);
+      }
+    };
+    worker.onerror = () => { clearTimeout(timeout); worker.terminate(); resolve(null); };
+    worker.postMessage({ url, layerId });
+  });
+
+  // Fire-and-forget finalization for URL GeoTIFFs scanned after processLayer returns.
+  // Runs concurrently with map setup so it doesn't block map initialization.
+  const _scanAndApplyGeoTIFF = async (layerId, layerConf, category, zIndex) => {
+    const resolvedConf = { ...layerConf };
+
+    try {
+      const scanned = await scanGeoTIFFUrl(resolvedConf.url, layerId);
+      if (scanned) {
+        if (scanned.bands      != null) resolvedConf.bandCount    = scanned.bands;
+        if (scanned.dataMin    != null) resolvedConf.dataMin      = scanned.dataMin;
+        if (scanned.dataMax    != null) resolvedConf.dataMax      = scanned.dataMax;
+        if (scanned.noDataValue!= null) resolvedConf.noDataValue  = scanned.noDataValue;
+        if (scanned.projection != null && !resolvedConf.tiffProjection)
+          resolvedConf.tiffProjection = scanned.projection;
+
+        // Ensure the GeoTIFF's native CRS is registered with proj4/OL so it
+        // can be reprojected to the map's CRS (same step that drag-drop does).
+        if (resolvedConf.tiffProjection) {
+          const registered = await tryRegisterProjection(
+            resolvedConf.tiffProjection,
+            resolvedConf.tiffProj4,    // server-supplied proj4 string (avoids epsg.io fetch)
+          );
+          if (!registered) {
+            console.warn(`[GeoTIFF] Could not register CRS ${resolvedConf.tiffProjection} — layer may not reproject correctly`);
+          }
+        }
+
+        if (window.__APP_DEBUG__ || import.meta.env.DEV) {
+          console.debug(`=== LAYER DEBUG — ${resolvedConf.name} (GeoTIFF, URL) ===`);
+          console.debug('  bands:', scanned.bands, '| min:', scanned.dataMin, '| max:', scanned.dataMax);
+          console.debug('  projection:', scanned.projection, '| nodata:', scanned.noDataValue);
+          console.debug('  extent:', scanned.extent, '| tiled:', scanned.isTiled);
+        }
+
+        // Non-COG (strip-based) GeoTIFFs can't be served reliably via HTTP
+        // range requests — tile fetches fail with AggregateError and leave gaps.
+        // Pre-download the entire file as a Blob so geotiff.js uses Blob.slice()
+        // for random access instead of range requests.
+        if (scanned.isTiled === false) {
+          try {
+            layerStore.setLayerProgress(layerId, 85, 'Downloading raster…');
+            const resp = await fetch(resolvedConf.url);
+            if (resp.ok) {
+              resolvedConf.file = await resp.blob();
+              // Clear the URL so createGeoTIFFLayerConfig picks the blob path.
+              resolvedConf.url  = undefined;
+            }
+          } catch (_blobErr) {
+            // Non-fatal — fall through to URL-based loading as a last resort.
+            console.warn(`[GeoTIFF] Could not pre-download non-COG file for ${resolvedConf.name}, falling back to range requests`);
+          }
+        }
+      }
+    } catch (_) {
+      // Non-fatal — proceed with whatever metadata is available.
+    }
+
+    const layerConfig = createGeoTIFFLayerConfig(resolvedConf, map, zIndex, layerId);
+    const resolvedMetadata = {
+      bands:          resolvedConf.bandCount       ?? null,
+      dataMin:        resolvedConf.dataMin         ?? null,
+      dataMax:        resolvedConf.dataMax         ?? null,
+      noDataValue:    resolvedConf.noDataValue     ?? null,
+      extent:         resolvedConf.extent          ?? null,
+      tiffProjection: resolvedConf.tiffProjection  ?? null,
+      file:           null,
+    };
+
+    // Patch the store entry that was pre-created as a placeholder.
+    const storeEntry = layerStore.getLayerById(layerId);
+    if (storeEntry) {
+      storeEntry.layerInstance = markRaw(layerConfig.layerInstance);
+      storeEntry.metadata = resolvedMetadata;
+    }
+
+    map.addLayer(layerConfig.layerInstance);
+    layerStore.setLayerStatus(layerId, LAYER_STATUS.READY);
+    layerStore.updateLayerZIndexes();
+
+    const src = layerConfig.layerInstance.getSource?.();
+    if (src) {
+      src.once('error', () => {
+        const proj = resolvedConf.tiffProjection ?? 'unknown CRS';
+        layerStore.setLayerError(
+          layerId,
+          `Could not display GeoTIFF — the file's CRS (${proj}) cannot be reprojected to the map's projection. Re-project the file with GDAL/QGIS first.`,
+        );
+      });
+    }
+  };
+
   const processLayer = async (layerConf, category) => {
     const layerId = layerConf._layerId || generateUUID();
     const zIndex = category === LAYER_CATEGORY.BACKGROUND
@@ -212,7 +334,36 @@ export function useLayerManager(map) {
       case "wmts":
         layerConfig = createWMTSLayerConfig(layerConf, map, zIndex, layerId);
         break;
-      case "geotiff":
+      case "geotiff": {
+        // For server-loaded GeoTIFFs served by URL (no local blob), always run
+        // the async worker scan to extract data range, nodata and CRS — even
+        // when bandCount is already known from the config.  Without the scan,
+        // single-band rasters render flat-black because OL normalises against
+        // the full type range (0-65535) rather than the actual value range.
+        if (layerConf.url && !layerConf.file) {
+          layerStore.addLayer({
+            layerId,
+            name:         layerConf.name,
+            layerInstance: null,
+            type:         'geotiff',
+            geometryType: GEOMETRY_TYPE.RASTER,
+            category,
+            visible:      layerConf.visible,
+            isUserAdded:  layerConf.isUserAdded ?? false,
+            attribution:  layerConf.attribution ?? null,
+            url:          layerConf.url,
+            metadata: {
+              bands: null, dataMin: null, dataMax: null, noDataValue: null,
+              extent: null, tiffProjection: layerConf.tiffProjection ?? null, file: null,
+            },
+          });
+          layerStore.setLayerStatus(layerId, LAYER_STATUS.LOADING_DETAILS);
+          // Fire-and-forget: finalization happens inside _scanAndApplyGeoTIFF.
+          _scanAndApplyGeoTIFF(layerId, layerConf, category, zIndex);
+          return;
+        }
+        // Drag-dropped files (or config layers with pre-scanned metadata) are
+        // created synchronously with the full metadata already present.
         layerConfig = createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId);
         layerConfig.metadata = {
           bands:           layerConf.bandCount       ?? null,
@@ -224,6 +375,7 @@ export function useLayerManager(map) {
           file:            layerConf.file            ?? null,
         };
         break;
+      }
       case "geojson":
         layerConfig = createGeoJSONLayerConfig(layerConf, layerId);
         break;
@@ -250,6 +402,11 @@ export function useLayerManager(map) {
       // GeoTIFF: listen for OL source errors (e.g. "No transform available")
       // so the layer is marked as errored instead of silently failing.
       if (layerConf.type === 'geotiff') {
+        if (window.__APP_DEBUG__ || import.meta.env.DEV) {
+          console.debug(`=== LAYER DEBUG — ${layerConf.name} (GeoTIFF, blob) ===`);
+          console.debug('  bands:', layerConf.bandCount, '| min:', layerConf.dataMin, '| max:', layerConf.dataMax);
+          console.debug('  projection:', layerConf.tiffProjection, '| nodata:', layerConf.noDataValue);
+        }
         const src = layerConfig.layerInstance.getSource?.();
         if (src) {
           src.once('error', () => {

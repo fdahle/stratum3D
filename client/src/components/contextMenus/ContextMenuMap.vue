@@ -7,10 +7,31 @@
       :style="{ top: `${y}px`, left: `${x}px` }"
       @click.stop
     >
-      <ul>
+      <!-- Normal menu -->
+      <ul v-if="!pinLabelMode">
         <li @click="handleCopyCoordinates">📋 Copy Coordinates</li>
         <li @click="handleInspectPoint">🔍 Inspect Point</li>
+        <li class="menu-separator"></li>
+        <li @click="enterPinLabelMode">📌 Place Pin…</li>
       </ul>
+
+      <!-- Pin label input -->
+      <div v-else class="pin-label-form">
+        <div class="pin-label-title">📌 New Pin</div>
+        <input
+          ref="pinLabelInputRef"
+          v-model="pinLabelValue"
+          class="pin-label-input"
+          placeholder="Label (e.g. GCP #3)"
+          maxlength="80"
+          @keydown.enter="confirmPin"
+          @keydown.escape="close"
+        />
+        <div class="pin-label-actions">
+          <button class="pin-btn pin-btn-primary" @click="confirmPin">Add</button>
+          <button class="pin-btn pin-btn-secondary" @click="close">Cancel</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -74,11 +95,12 @@
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { ref, nextTick } from "vue";
 import { storeToRefs } from "pinia";
 import { logger } from "../../utils/logger";
 import { useMapStore } from "../../stores/map/mapStore";
 import { useLayerStore } from "../../stores/map/layerStore";
+import { usePinStore } from "../../stores/map/pinStore";
 import { LAYER_STATUS, LAYER_CATEGORY } from "../../constants/layerConstants";
 
 const mapStore = useMapStore();
@@ -98,6 +120,24 @@ const inspectResults = ref([]);
 
 const emit = defineEmits(["action"]);
 
+const pinStore = usePinStore();
+const pinLabelMode = ref(false);
+const pinLabelValue = ref('');
+const pinLabelInputRef = ref(null);
+
+const enterPinLabelMode = () => {
+  pinLabelMode.value = true;
+  pinLabelValue.value = '';
+  nextTick(() => pinLabelInputRef.value?.focus());
+};
+
+const confirmPin = () => {
+  if (coordinate.value) {
+    pinStore.addPin([...coordinate.value], pinLabelValue.value);
+  }
+  close();
+};
+
 const open = (event, coord) => {
   const mouseEvent = event.originalEvent || event;
   x.value = mouseEvent.clientX;
@@ -113,6 +153,8 @@ const open = (event, coord) => {
 
 const close = () => {
   visible.value = false;
+  pinLabelMode.value = false;
+  pinLabelValue.value = '';
 };
 
 // ---- Copy Coordinates ----
@@ -296,6 +338,79 @@ li:last-child { border-bottom: none; }
 
 li:hover { background: #f0f0f0; }
 .theme-dark li:hover { background: #3a3a3a; }
+
+.menu-separator {
+  padding: 0;
+  height: 1px;
+  background: #e8e8e8;
+  cursor: default;
+  pointer-events: none;
+}
+.menu-separator:hover { background: #e8e8e8; }
+.theme-dark .menu-separator { background: #444; }
+.theme-dark .menu-separator:hover { background: #444; }
+
+/* ---- Place Pin inline form ---- */
+.pin-label-form {
+  padding: 10px 12px 8px;
+  min-width: 190px;
+}
+
+.pin-label-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #444;
+  margin-bottom: 6px;
+}
+
+.theme-dark .pin-label-title { color: #ccc; }
+
+.pin-label-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 7px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: "Segoe UI", sans-serif;
+  outline: none;
+  margin-bottom: 7px;
+}
+.pin-label-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
+.theme-dark .pin-label-input {
+  background: #1e1e1e;
+  border-color: #555;
+  color: #e0e0e0;
+}
+
+.pin-label-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.pin-btn {
+  flex: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: "Segoe UI", sans-serif;
+}
+.pin-btn-primary {
+  background: #3b82f6;
+  color: #fff;
+  border-color: #2563eb;
+}
+.pin-btn-primary:hover { background: #2563eb; }
+.pin-btn-secondary {
+  background: #f3f4f6;
+  color: #333;
+  border-color: #d1d5db;
+}
+.pin-btn-secondary:hover { background: #e5e7eb; }
+.theme-dark .pin-btn-secondary { background: #3a3a3a; color: #ccc; border-color: #555; }
+.theme-dark .pin-btn-secondary:hover { background: #444; }
 
 /* ---- Inspection Modal ---- */
 .pi-backdrop {

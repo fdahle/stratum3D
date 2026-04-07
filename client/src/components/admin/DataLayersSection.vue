@@ -315,9 +315,22 @@
           <!-- GeoTIFF extras -->
           <template v-if="layer.fileType === 'geotiff'">
             <div class="edit-row">
+              <div class="edit-field">
+                <label>Opacity <span class="edit-field-hint">(0 = transparent, 1 = opaque)</span></label>
+                <input v-model.number="editDraft.opacity" type="number" min="0" max="1" step="0.05" placeholder="1" />
+              </div>
+              <div class="edit-field">
+                <label>NoData value <span class="edit-field-hint">(pixel value treated as transparent)</span></label>
+                <input v-model.number="editDraft.noDataValue" type="number" placeholder="e.g. -9999" />
+              </div>
+            </div>
+            <div class="edit-row">
               <div class="edit-field edit-field-grow">
-                <label>Attribution</label>
-                <input v-model="editDraft.attribution" type="text" placeholder="© Source" />
+                <label class="checkbox-label">
+                  <input type="checkbox" v-model="editDraft.normalize" />
+                  Normalize pixel values
+                  <span class="edit-field-hint"> — maps the data range to 0–1 for correct rendering of DEMs and single-band rasters</span>
+                </label>
               </div>
             </div>
           </template>
@@ -501,6 +514,18 @@ function metaToEntry(meta) {
   const extras = ['color', 'stroke_color', 'fill_color', 'attribution', 'tileSize', 'search_fields'];
   for (const k of extras) {
     if (lc[k] != null) entry[k] = lc[k];
+  }
+  // GeoTIFF-specific metadata: source projection, band count, data range, nodata.
+  // tiffProjection falls back to cogOptions.sourceCrs (set during upload) so that
+  // the client can set up correct reprojection even when not explicitly overridden.
+  if (meta.fileType === 'geotiff') {
+    const tiffExtras = ['tiffProjection', 'bandCount', 'dataMin', 'dataMax', 'noDataValue', 'opacity', 'normalize'];
+    for (const k of tiffExtras) {
+      if (lc[k] != null) entry[k] = lc[k];
+    }
+    if (entry.tiffProjection == null && meta.cogOptions?.sourceCrs) {
+      entry.tiffProjection = meta.cogOptions.sourceCrs;
+    }
   }
   return entry;
 }
@@ -765,7 +790,9 @@ function toggleEdit(layer) {
     stroke_color: lc.stroke_color ?? '',
     fill_color:   lc.fill_color   ?? '',
     // GeoTIFF extras
-    attribution:  lc.attribution  ?? '',
+    opacity:      lc.opacity      ?? null,
+    noDataValue:  lc.noDataValue  ?? null,
+    normalize:    lc.normalize    ?? true,
   };
   searchFieldsStr.value = (lc.search_fields ?? []).join(', ');
   editingId.value = layer.id;
@@ -1080,6 +1107,7 @@ input:checked + .slider::before { transform: translateX(16px); }
 .edit-footer { display: flex; align-items: center; gap: 0.5rem; }
 .edit-footer-spacer { flex: 1; }
 .edit-field-hint { font-size: 0.75rem; color: var(--admin-muted, #888); font-weight: 400; }
+.checkbox-label { display: flex; align-items: baseline; gap: 0.35rem; cursor: pointer; font-size: 0.82rem; }
 
 /* Data head preview */
 .data-preview-section { border-top: 1px solid var(--admin-border, #e8e8e8); margin-top: 0.6rem; padding-top: 0.5rem; }

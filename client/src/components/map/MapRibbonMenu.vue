@@ -142,6 +142,20 @@
           </div>
           <span class="group-label">Search</span>
         </div>
+        <div class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <button
+              class="ribbon-btn"
+              :class="{ active: isPinsOpen }"
+              @click="$emit('toggle-pins')"
+              title="Manage map pins"
+            >
+              <span class="btn-icon" v-html="ICON_PIN"></span>
+              <span class="btn-label">Pins{{ pinCount ? ` (${pinCount})` : '' }}</span>
+            </button>
+          </div>
+          <span class="group-label">Annotate</span>
+        </div>
       </div>
       <!-- Contextual Layer Tab -->
       <div v-if="activeTab === 'layer' && selectedLayer" class="ribbon-panel">
@@ -271,6 +285,7 @@ import { ref, computed, watch, inject } from 'vue';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useMapStore } from '@/stores/map/mapStore';
 import { useLayerStore } from '@/stores/map/layerStore';
+import { usePinStore } from '@/stores/map/pinStore';
 import { LAYER_STATUS } from '@/constants/layerConstants.js';
 import { ICON_FIT, ICON_DISTANCE, ICON_AREA, ICON_ELEVATION, ICON_3D, ICON_SHARE, ICON_INFO, ICON_CLOSE } from '@/constants/icons.js';
 import LayerInfoModal from '../modals/LayerInfoModal.vue';
@@ -280,13 +295,16 @@ const props = defineProps({
   isMeasuringDistance: { type: Boolean, default: false },
   isMeasuringArea:     { type: Boolean, default: false },
   isElevationOpen:     { type: Boolean, default: false },
+  isPinsOpen:          { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['add-files', 'measure-distance', 'measure-area', 'elevation-profile', 'share-scene', 'extended-search']);
+const emit = defineEmits(['add-files', 'measure-distance', 'measure-area', 'elevation-profile', 'share-scene', 'extended-search', 'toggle-pins']);
 
 const settingsStore = useSettingsStore();
 const mapStore = useMapStore();
 const layerStore = useLayerStore();
+const pinStore = usePinStore();
+const pinCount = computed(() => pinStore.pins.length);
 const layerManager = inject('layerManager');
 const appConfig = inject('config');
 const allowDownload = computed(() => appConfig?.value?.ui?.map_download !== false);
@@ -341,6 +359,7 @@ const ICON_COLOR_PALETTE = `<svg viewBox="0 0 24 24" width="18" height="18" fill
 
 // ---- Icons ----
 const ICON_ADD_LAYER = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/><circle cx="19" cy="5" r="4" fill="#28a745" stroke="none"/><path d="M17 5h4M19 3v4" stroke="white" stroke-width="1.8"/></svg>`;
+const ICON_PIN       = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg>`;
 const ICON_ZOOM_IN   = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>`;
 const ICON_ZOOM_OUT  = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>`;
 const ICON_SEARCH_ADVANCED = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/><line x1="11" y1="8" x2="11" y2="14"/><circle cx="17" cy="6" r="3" fill="#3b82f6" stroke="none"/><path d="M16 6h2M17 5v2" stroke="white" stroke-width="1.4"/></svg>`;

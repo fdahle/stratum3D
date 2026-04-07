@@ -5,12 +5,14 @@
       :is-measuring-distance="isMeasurementModalVisible && activeMeasurementType === 'distance'"
       :is-measuring-area="isMeasurementModalVisible && activeMeasurementType === 'area'"
       :is-elevation-open="isElevationModalVisible"
+      :is-pins-open="isPinsOpen"
       @add-files="handleRibbonFiles"
       @measure-distance="onMeasureDistance"
       @measure-area="onMeasureArea"
       @elevation-profile="onElevationProfile"
       @share-scene="isShareSceneOpen = true"
       @extended-search="isExtendedSearchOpen = true"
+      @toggle-pins="isPinsOpen = !isPinsOpen"
     />
 
     <div
@@ -44,6 +46,7 @@
       <div class="map-area">
       <MapWidget />
       <SearchBar />
+      <PinPanel :is-open="isPinsOpen" @close="isPinsOpen = false" />
       <div
         class="bottom-left-control"
         :class="{ 'has-info-bar': settingsStore.showInfoBar }"
@@ -153,6 +156,7 @@ import ShareSceneModal from "../components/modals/ShareSceneModal.vue";
 import ExtendedSearchModal from "../components/modals/ExtendedSearchModal.vue";
 import SettingsModal from "../components/modals/SettingsModal.vue";
 import CsvColumnPickerModal from "../components/modals/CsvColumnPickerModal.vue";
+import PinPanel from "../components/map/PinPanel.vue";
 import { useSettingsStore } from "../stores/settingsStore";
 import { tryRegisterProjection } from "../utils/crs";
 // Re-setup the local state
@@ -163,6 +167,7 @@ const isSettingsOpen = ref(false);
 const isLayerPanelOpen = ref(false);
 const isShareSceneOpen = ref(false);
 const isExtendedSearchOpen = ref(false);
+const isPinsOpen = ref(false);
 
 // Layer panel resize
 const LP_MIN = 180, LP_MAX = 480, LP_DEFAULT = 280;

@@ -22,7 +22,7 @@ import config, { isDevelopment, isProduction } from './src/config.js';
 import logger from './src/logger.js';
 import { listLayers, readLayerMeta, writeLayerMeta, deleteLayer, metaToConfigLayer, validateLayerId } from './src/layerStore.js';
 import { jobQueue } from './src/jobQueue.js';
-import { processUploadBatch, addSubFile, addSubFileBatch, classifyExt, relinkGeojson } from './processors/uploadProcessor.js';
+import { processUploadBatch, addSubFile, addSubFileBatch, classifyExt, relinkGeojson, applyCsvLink } from './processors/uploadProcessor.js';
 import { convertToCog }   from './processors/geotiffProcessor.js';
 
 const app = express();
@@ -159,11 +159,16 @@ const authRateLimit = rateLimit({
 });
 
 // General rate limit for public data endpoints — prevents abuse / DoS.
+// GeoTIFF files served from /data are fetched via many HTTP range requests
+// (one per internal tile / overview level), so the limit must be high enough
+// to accommodate a full COG read session without throttling.
 const dataRateLimit = rateLimit({
   windowMs: 60_000,       // 1 minute window
-  max: 300,               // 300 requests per minute per IP
+  max: 2000,              // 2000 requests per minute per IP (COG range reads are chatty)
   standardHeaders: true,
   legacyHeaders: false,
+  // Skip the limiter entirely for range requests — they are file reads, not API calls.
+  skip: (req) => !!(req.headers.range),
   message: { error: 'Too many requests, please try again later.' },
 });
 
@@ -424,10 +429,58 @@ app.patch('/admin/layers/:id', requireAdminAuth, async (req, res) => {
   try {
     validateLayerId(req.params.id);
     const meta = await readLayerMeta(layersDir, req.params.id);
-    const { displayName, visible, order } = req.body ?? {};
-    if (displayName != null) meta.layerConfig.displayName = String(displayName);
-    if (visible    != null) meta.layerConfig.visible      = Boolean(visible);
-    if (order      != null) meta.layerConfig.order        = Number(order);
+    const { displayName, visible, order, opacity, noDataValue, normalize, color, stroke_color, fill_color, attribution, search_fields, csvLink } = req.body ?? {};
+    if (displayName  != null) meta.layerConfig.displayName  = String(displayName);
+    if (visible      != null) meta.layerConfig.visible      = Boolean(visible);
+    if (order        != null) meta.layerConfig.order        = Number(order);
+    // GeoTIFF-specific fields
+    if (opacity      != null) meta.layerConfig.opacity      = Number(opacity);
+    if (noDataValue  != null) meta.layerConfig.noDataValue  = Number(noDataValue);
+    if (normalize    != null) meta.layerConfig.normalize    = Boolean(normalize);
+    // GeoJSON / shared fields
+    if (color        != null) meta.layerConfig.color        = String(color);
+    if (stroke_color != null) meta.layerConfig.stroke_color = String(stroke_color);
+    if (fill_color   != null) meta.layerConfig.fill_color   = String(fill_color);
+    if (attribution  != null) meta.layerConfig.attribution  = String(attribution);
+    if (Array.isArray(search_fields)) meta.layerConfig.search_fields = search_fields.map(String);
+    // CSV attribute join
+    if ('csvLink' in (req.body ?? {})) {
+      const oldJoinedCols = meta.layerConfig.csvLink?.joinedColumns ?? [];
+      if (csvLink === null) {
+        // Clear the link and strip previously joined columns from features
+        if (oldJoinedCols.length > 0 && meta.fileType === 'geojson') {
+          try {
+            const ext         = meta.extension || '.geojson';
+            const geojsonPath = path.join(layersDir, req.params.id, `${req.params.id}${ext}`);
+            const raw         = await fs.readFile(geojsonPath, 'utf8');
+            const geojson     = JSON.parse(raw);
+            const colsToRemove = new Set(oldJoinedCols);
+            geojson.features  = geojson.features.map((f) => {
+              for (const col of colsToRemove) delete f.properties?.[col];
+              return f;
+            });
+            await fs.writeFile(geojsonPath, JSON.stringify(geojson), 'utf8');
+          } catch { /* best-effort — meta still cleared */ }
+        }
+        meta.layerConfig.csvLink = null;
+      } else if (csvLink && typeof csvLink === 'object') {
+        const { subFileId, csvJoinColumn, featureJoinProperty } = csvLink;
+        if (typeof subFileId !== 'string' || !subFileId ||
+            typeof csvJoinColumn !== 'string' || !csvJoinColumn ||
+            typeof featureJoinProperty !== 'string' || !featureJoinProperty) {
+          return res.status(400).json({ error: 'csvLink requires non-empty subFileId, csvJoinColumn, and featureJoinProperty.' });
+        }
+        if (meta.fileType !== 'geojson') {
+          return res.status(400).json({ error: 'CSV linking is only supported for GeoJSON layers.' });
+        }
+        const joinedColumns = await applyCsvLink(
+          req.params.id, layersDir,
+          { subFileId, csvJoinColumn, featureJoinProperty },
+          oldJoinedCols,
+        );
+        meta.layerConfig.csvLink = { subFileId, csvJoinColumn, featureJoinProperty, joinedColumns };
+      }
+    }
     await writeLayerMeta(layersDir, req.params.id, meta);
     res.json(meta);
   } catch (err) {
@@ -809,7 +862,7 @@ app.get('/admin/layers/:id/original', requireAdminAuth, async (req, res) => {
 // Compression is intentionally disabled for /data: gzip encoding destroys the
 // byte offsets that HTTP range requests rely on, breaking geotiff.js tile reads
 // (it issues Range: bytes= requests to stream individual tiles from COG files).
-app.use('/data', dataRateLimit, (req, res, next) => {
+app.use('/data', (req, res, next) => {
   res.set('Cache-Control', isDevelopment ? 'no-store' : 'public, max-age=86400');
   // Tell clients (and geotiff.js) that we support byte-range requests.
   res.set('Accept-Ranges', 'bytes');

@@ -362,12 +362,14 @@ export const useLayerStore = defineStore("layers", () => {
     // Find indices in the full layers array
     const currentFullIndex = layers.value.findIndex(l => l._layerId === layerId);
     
-    // Count base layers (they come before overlays)
-    const baseLayerCount = layers.value.filter(l => l.category === LAYER_CATEGORY.BASE).length;
+    // Count all non-overlay layers (background + base) that precede overlays in the array.
+    // Using only BASE would miss BACKGROUND layers (e.g. OSM tile background), causing
+    // the insertion index to be off by the number of background layers.
+    const nonOverlayCount = layers.value.filter(l => l.category !== LAYER_CATEGORY.OVERLAY).length;
     
     // Calculate the target insertion index in the full layers array
     // targetOverlayIndex is where we want to insert in the overlay-only array
-    let targetFullIndex = baseLayerCount + clampedIndex;
+    let targetFullIndex = nonOverlayCount + clampedIndex;
     
     // Remove from current position
     const [movedLayer] = layers.value.splice(currentFullIndex, 1);
