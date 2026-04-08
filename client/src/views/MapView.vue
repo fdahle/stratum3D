@@ -458,11 +458,11 @@ const startMeasureMode = (type) => {
   map.addInteraction(draw);
 };
 
-// Close all active tools (measurements, elevation, extended search, pins)
+// Close all active tools (measurements, elevation, pins)
+// Extended search is a non-blocking overlay and is intentionally excluded.
 const closeAllTools = () => {
   if (isMeasurementModalVisible.value) closeMeasurementModal();
   if (isElevationModalVisible.value) closeElevationModal();
-  if (isExtendedSearchOpen.value) isExtendedSearchOpen.value = false;
   if (isPinsOpen.value) isPinsOpen.value = false;
 };
 
@@ -585,12 +585,7 @@ const onElevationProfile = () => {
 };
 
 const onExtendedSearch = () => {
-  if (isExtendedSearchOpen.value) {
-    isExtendedSearchOpen.value = false;
-  } else {
-    closeAllTools();
-    isExtendedSearchOpen.value = true;
-  }
+  isExtendedSearchOpen.value = !isExtendedSearchOpen.value;
 };
 
 const onTogglePins = () => {

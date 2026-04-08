@@ -133,19 +133,6 @@
           <div class="ribbon-group-buttons">
             <button
               class="ribbon-btn"
-              @click="$emit('extended-search')"
-              title="Search through all attributes of a layer"
-            >
-              <span class="btn-icon" v-html="ICON_SEARCH_ADVANCED"></span>
-              <span class="btn-label">Ext. Search</span>
-            </button>
-          </div>
-          <span class="group-label">Search</span>
-        </div>
-        <div class="ribbon-group">
-          <div class="ribbon-group-buttons">
-            <button
-              class="ribbon-btn"
               :class="{ active: isPinsOpen }"
               @click="$emit('toggle-pins')"
               title="Manage map pins"
@@ -155,6 +142,19 @@
             </button>
           </div>
           <span class="group-label">Annotate</span>
+        </div>
+        <div class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <button
+              class="ribbon-btn"
+              @click="$emit('extended-search')"
+              title="Search through all attributes of a layer"
+            >
+              <span class="btn-icon" v-html="ICON_SEARCH_ADVANCED"></span>
+              <span class="btn-label">Ext. Search</span>
+            </button>
+          </div>
+          <span class="group-label">Search</span>
         </div>
       </div>
       <!-- Contextual Layer Tab -->

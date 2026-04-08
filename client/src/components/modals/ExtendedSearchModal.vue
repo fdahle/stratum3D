@@ -130,7 +130,7 @@ import { ICON_CLOSE } from '@/constants/icons.js';
 
 const ICON_SEARCH    = `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
 const ICON_SEARCH_SM = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
-const ICON_ZOOM      = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>`;
+const ICON_ZOOM      = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>`;
 
 const PAGE_SIZE = 50;
 
@@ -151,9 +151,10 @@ const sortAsc           = ref(true);
 const hideSystemAttrs   = ref(true);
 
 // Only overlay layers that are fully loaded (have an OL source with features)
+// GeoTIFFs are excluded — they have no attribute data to search.
 const searchableLayers = computed(() =>
   layerStore.layers.filter(
-    l => l.category === 'overlay' && l.layerInstance && typeof l.layerInstance.getSource === 'function'
+    l => l.category === 'overlay' && l.type !== 'geotiff' && l.layerInstance && typeof l.layerInstance.getSource === 'function'
   )
 );
 

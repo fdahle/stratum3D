@@ -84,13 +84,14 @@ const startDrag = (e) => {
   const panel = panelRef.value;
   if (!panel) return;
   const rect = panel.getBoundingClientRect();
+  const parentRect = (panel.offsetParent || document.documentElement).getBoundingClientRect();
   const offsetX = e.clientX - rect.left;
   const offsetY = e.clientY - rect.top;
 
   const onMove = (me) => {
     dragPos.value = {
-      top: me.clientY - offsetY,
-      left: me.clientX - offsetX,
+      top: me.clientY - parentRect.top - offsetY,
+      left: me.clientX - parentRect.left - offsetX,
     };
   };
   const onUp = () => {

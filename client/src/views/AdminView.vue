@@ -327,66 +327,20 @@
           </div>
         </section>
 
-        <!-- ── 8. Danger Zone ────────────────────────────────────── -->
-        <section class="admin-section danger-zone">
-          <div class="section-header-simple">
-            <h2 class="section-title danger-title">Danger Zone</h2>
-            <p class="section-desc">Irreversible actions — use with care.</p>
-          </div>
-          <div class="fields-stack">
-            <div class="danger-row">
-              <div class="danger-row-text">
-                <strong>Reset configuration</strong>
-                <span>Deletes the config file <em>and</em> the admin password. On next visit you can set a fresh password and reconfigure everything from scratch.</span>
-              </div>
-              <div v-if="!resetConfirming" class="danger-row-action">
-                <button
-                  class="btn-danger"
-                  :disabled="!hasExistingConfig"
-                  :title="!hasExistingConfig ? 'No configuration exists yet' : undefined"
-                  @click="resetConfirming = true"
-                >Reset Config…</button>
-              </div>
-              <div v-else class="danger-row-action danger-confirm">
-                <span class="danger-confirm-label">Are you sure?</span>
-                <button class="btn-danger" :disabled="isResetting" @click="resetConfig">
-                  <span v-if="isResetting">Resetting…</span>
-                  <span v-else>Yes, delete it</span>
-                </button>
-                <button class="btn-secondary" @click="resetConfirming = false">Cancel</button>
-              </div>
-            </div>
-
-            <hr class="danger-divider" />
-
-            <div class="danger-row">
-              <div class="danger-row-text">
-                <strong>Delete all uploaded files</strong>
-                <span>Permanently removes all GeoTIFFs, GeoJSON shapes, 3D models and point clouds from the server. Layer URLs referencing these files will break.</span>
-              </div>
-              <div v-if="!deleteFilesConfirming" class="danger-row-action">
-                <button class="btn-danger" @click="deleteFilesConfirming = true">Delete All Files…</button>
-              </div>
-              <div v-else class="danger-row-action danger-confirm">
-                <span class="danger-confirm-label">Are you sure?</span>
-                <button class="btn-danger" :disabled="isDeletingFiles" @click="deleteAllFiles">
-                  <span v-if="isDeletingFiles">Deleting…</span>
-                  <span v-else>Yes, delete all</span>
-                </button>
-                <button class="btn-secondary" @click="deleteFilesConfirming = false">Cancel</button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- ── 9. Developer ─────────────────────────────────────── -->
-        <!-- Security -->
+        <!-- ── 8. Security ───────────────────────────────────────── -->
         <section class="admin-section">
-          <div class="section-header-simple">
-            <h2 class="section-title">Security</h2>
-            <p class="section-desc">Change the admin password.</p>
+          <div class="section-header-simple section-header-collapsible" @click="securityCollapsed = !securityCollapsed">
+            <div>
+              <h2 class="section-title">Security</h2>
+              <p class="section-desc">Change the admin password.</p>
+            </div>
+            <button class="section-collapse-btn" :title="securityCollapsed ? 'Expand' : 'Collapse'">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" :style="{ transform: securityCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
           </div>
-          <div class="fields-stack">
+          <div v-if="!securityCollapsed" class="fields-stack">
             <div class="field-row-2">
               <div class="field-group">
                 <label>New Password</label>
@@ -406,12 +360,20 @@
           </div>
         </section>
 
-        <!-- Developer -->
+        <!-- ── 9. Developer ─────────────────────────────────────── -->
         <section v-if="!isFirstRun" class="admin-section">
-          <div class="section-header-simple">
-            <h2 class="section-title">Developer</h2>
-            <p class="section-desc">Inspect the YAML that will be written when you save.</p>
+          <div class="section-header-simple section-header-collapsible" @click="developerCollapsed = !developerCollapsed">
+            <div>
+              <h2 class="section-title">Developer</h2>
+              <p class="section-desc">Inspect the YAML that will be written when you save.</p>
+            </div>
+            <button class="section-collapse-btn" :title="developerCollapsed ? 'Expand' : 'Collapse'">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" :style="{ transform: developerCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
           </div>
+          <template v-if="!developerCollapsed">
           <details class="collapsible yaml-collapsible">
             <summary>View config YAML</summary>
             <div class="collapsible-body yaml-collapsible-body">
@@ -486,6 +448,66 @@
               <p v-if="limitSaveError" class="dev-field-error">{{ limitSaveError }}</p>
             </div>
           </div>
+          </template>
+        </section>
+
+        <!-- ── 10. Danger Zone ───────────────────────────────────── -->
+        <section class="admin-section danger-zone">
+          <div class="section-header-simple section-header-collapsible" @click="dangerCollapsed = !dangerCollapsed">
+            <div>
+              <h2 class="section-title danger-title">Danger Zone</h2>
+              <p class="section-desc">Irreversible actions — use with care.</p>
+            </div>
+            <button class="section-collapse-btn" :title="dangerCollapsed ? 'Expand' : 'Collapse'">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" :style="{ transform: dangerCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+          </div>
+          <div v-if="!dangerCollapsed" class="fields-stack">
+            <div class="danger-row">
+              <div class="danger-row-text">
+                <strong>Reset configuration</strong>
+                <span>Deletes the config file <em>and</em> the admin password. On next visit you can set a fresh password and reconfigure everything from scratch.</span>
+              </div>
+              <div v-if="!resetConfirming" class="danger-row-action">
+                <button
+                  class="btn-danger"
+                  :disabled="!hasExistingConfig"
+                  :title="!hasExistingConfig ? 'No configuration exists yet' : undefined"
+                  @click="resetConfirming = true"
+                >Reset Config…</button>
+              </div>
+              <div v-else class="danger-row-action danger-confirm">
+                <span class="danger-confirm-label">Are you sure?</span>
+                <button class="btn-danger" :disabled="isResetting" @click="resetConfig">
+                  <span v-if="isResetting">Resetting…</span>
+                  <span v-else>Yes, delete it</span>
+                </button>
+                <button class="btn-secondary" @click="resetConfirming = false">Cancel</button>
+              </div>
+            </div>
+
+            <hr class="danger-divider" />
+
+            <div class="danger-row">
+              <div class="danger-row-text">
+                <strong>Delete all uploaded files</strong>
+                <span>Permanently removes all GeoTIFFs, GeoJSON shapes, 3D models and point clouds from the server. Layer URLs referencing these files will break.</span>
+              </div>
+              <div v-if="!deleteFilesConfirming" class="danger-row-action">
+                <button class="btn-danger" @click="deleteFilesConfirming = true">Delete All Files…</button>
+              </div>
+              <div v-else class="danger-row-action danger-confirm">
+                <span class="danger-confirm-label">Are you sure?</span>
+                <button class="btn-danger" :disabled="isDeletingFiles" @click="deleteAllFiles">
+                  <span v-if="isDeletingFiles">Deleting…</span>
+                  <span v-else>Yes, delete all</span>
+                </button>
+                <button class="btn-secondary" @click="deleteFilesConfirming = false">Cancel</button>
+              </div>
+            </div>
+          </div>
         </section>
       </div>
 
@@ -533,6 +555,11 @@ const route = useRoute();
 const router = useRouter();
 const isFirstRun = ref(false);          // true when no password is set yet
 const hasExistingConfig = ref(false);   // true once a config has been loaded or saved
+
+// Collapse state for the bottom three sections
+const securityCollapsed  = ref(false);
+const developerCollapsed = ref(false);
+const dangerCollapsed    = ref(false);
 const isAuthenticated  = ref(false);
 const isLoading        = ref(false);
 const isSaving         = ref(false);
@@ -1348,6 +1375,26 @@ onMounted(async () => {
   padding: 1.25rem;
 }
 .section-header-simple { margin-bottom: 1rem; }
+.section-header-collapsible {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+.section-header-collapsible:hover .section-collapse-btn { color: #374151; }
+.section-collapse-btn {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  cursor: pointer;
+  color: #6b7280;
+  flex-shrink: 0;
+  margin-top: 2px;
+  line-height: 1;
+  border-radius: 4px;
+}
+.section-collapse-btn:hover { background: #f3f4f6; }
 .section-title { margin: 0 0 0.2rem; font-size: 1rem; font-weight: 600; }
 .section-desc  { margin: 0; font-size: 0.8rem; color: var(--admin-muted, #777); }
 

@@ -120,6 +120,9 @@
             <template v-else-if="layer.optimized">
               <span class="status-text status-ok">✓ Optimized</span>
             </template>
+            <template v-else-if="layer.fileType === 'geojson' && layer.processingLog?.some(s => s.includes('Simplified'))">
+              <span class="status-text status-ok">✓ Simplified</span>
+            </template>
           </div>
 
           <!-- Card action buttons -->
