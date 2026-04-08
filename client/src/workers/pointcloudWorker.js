@@ -63,10 +63,19 @@ self.onmessage = async ({ data: { arrayBuffer, fileName, maxPoints } }) => {
       getB = view.getter('Blue');
     }
 
+    // Intensity is present in all LAS point formats
+    const getIntensity = view.getter('Intensity');
+
+    // Classification (lower 5 bits of the classification byte)
+    let getClassification = null;
+    try { getClassification = view.getter('Classification'); } catch { /* not available in this format */ }
+
     const step = pointCount > maxPoints ? Math.ceil(pointCount / maxPoints) : 1;
     const allocCount = Math.ceil(pointCount / step);
-    const positions = new Float32Array(allocCount * 3);
-    const colors    = new Float32Array(allocCount * 3);
+    const positions       = new Float32Array(allocCount * 3);
+    const colors          = new Float32Array(allocCount * 3);
+    const intensities     = new Float32Array(allocCount);
+    const classifications = new Uint8Array(allocCount);
 
     const CHUNK = 200_000;
     let sIdx = 0;
@@ -84,6 +93,8 @@ self.onmessage = async ({ data: { arrayBuffer, fileName, maxPoints } }) => {
         } else {
           colors[sIdx * 3] = colors[sIdx * 3 + 1] = colors[sIdx * 3 + 2] = 0.7;
         }
+        intensities[sIdx] = getIntensity(i) / 65535;
+        classifications[sIdx] = getClassification ? (getClassification(i) & 0x1F) : 0;
         sIdx++;
       }
       self.postMessage({
@@ -98,10 +109,12 @@ self.onmessage = async ({ data: { arrayBuffer, fileName, maxPoints } }) => {
     // Slice exact-sized transferable buffers (zero-copy transfer to main thread)
     const posBuffer = positions.buffer.slice(0, sIdx * 12);
     const colBuffer = colors.buffer.slice(0, sIdx * 12);
+    const intBuffer = intensities.buffer.slice(0, sIdx * 4);
+    const clsBuffer = classifications.buffer.slice(0, sIdx);
 
     self.postMessage(
-      { type: 'result', posBuffer, colBuffer, totalPoints: pointCount, sampledPoints: sIdx, step },
-      [posBuffer, colBuffer],
+      { type: 'result', posBuffer, colBuffer, intBuffer, clsBuffer, totalPoints: pointCount, sampledPoints: sIdx, step },
+      [posBuffer, colBuffer, intBuffer, clsBuffer],
     );
   } catch (err) {
     self.postMessage({ type: 'error', message: err?.message ?? String(err) });

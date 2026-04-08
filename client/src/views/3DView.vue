@@ -28,6 +28,10 @@
       @ribbon-layer-pointsize="onRibbonLayerPointSize"
       @vertical-exaggeration="onVerticalExaggeration"
       @pick-materials="triggerMtlFilePicker"
+      @toggle-bookmarks="onToggleBookmarks"
+      @toggle-pick-mode="onTogglePickMode"
+      @ribbon-color-mode="onRibbonColorMode"
+      :is-bookmarks-open="isBookmarksOpen"
     />
 
     <!-- Body: Layer panel + Canvas -->
@@ -133,6 +137,19 @@
       @undo-point="undoLastPoint"
       @cancel-measurement="cancelCurrentMeasurement"
     />
+
+    <!-- XYZ Coordinate Picker Modal -->
+    <CoordPickerModal
+      :is-visible="isCoordPickerOpen"
+      @close="onCloseCoordPicker"
+    />
+
+    <!-- Scene Bookmarks Modal -->
+    <BookmarksModal
+      :is-visible="isBookmarksOpen"
+      @close="isBookmarksOpen = false"
+      @apply-bookmark="onApplyBookmark"
+    />
   </div>
 </template>
 
@@ -145,10 +162,14 @@ import Viewer3DCanvas from '@/components/viewer3D/Canvas.vue';
 import RibbonMenu from '@/components/viewer3D/RibbonMenu.vue';
 import LayerManager from '@/components/viewer3D/LayerManager.vue';
 import MeasurementModal from '@/components/modals/MeasurementModal.vue';
+import CoordPickerModal from '@/components/modals/CoordPickerModal.vue';
+import BookmarksModal from '@/components/modals/BookmarksModal.vue';
 
 const canvasRef = ref(null);
 const layerManagerRef = ref(null);
 const selectedLayer3D = ref(null);
+const isCoordPickerOpen = ref(false);
+const isBookmarksOpen = ref(false);
 
 // Drag-and-drop state
 const isDragOver = ref(false);
@@ -643,6 +664,30 @@ const onRibbonLayerVisibility = ({ layer, visible }) => {
 const onRibbonLayerPointSize = ({ layer, size }) => {
   if (!layer) return;
   layerManagerRef.value?.setPointSizeById(layer.id, size);
+};
+
+const onApplyBookmark = (bm) => {
+  canvasRef.value?.applyBookmark(bm);
+};
+
+const onTogglePickMode = () => {
+  viewer3DStore.togglePickMode();
+  isCoordPickerOpen.value = viewer3DStore.pickMode;
+};
+
+const onCloseCoordPicker = () => {
+  isCoordPickerOpen.value = false;
+  if (viewer3DStore.pickMode) viewer3DStore.togglePickMode();
+};
+
+const onToggleBookmarks = () => {
+  isBookmarksOpen.value = !isBookmarksOpen.value;
+};
+
+const onRibbonColorMode = ({ layer, mode }) => {
+  if (!layer) return;
+  if (layer.object) layer.object.userData.colorMode = mode;
+  canvasRef.value?.applyColorMode(layer.id, mode);
 };
 
 const onVerticalExaggeration = ({ layer, factor }) => {

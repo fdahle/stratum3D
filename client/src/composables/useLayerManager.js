@@ -24,6 +24,7 @@ import {
   LAYER_STATUS,
   GEOMETRY_TYPE,
   SUBCATEGORY_COLORS,
+  DEFAULT_COLOR,
 } from "../constants/layerConstants";
 
 // OpenLayers Imports

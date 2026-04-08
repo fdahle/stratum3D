@@ -106,6 +106,7 @@ const {
   showBoundingBox,
   showNormals,
   loadedModels,
+  pickMode,
 } = storeToRefs(viewer3DStore);
 const {
   setScene,
@@ -116,10 +117,12 @@ const {
   storeInitialCamera,
   resetCamera,
   addMeasurementPoint,
+  setPickedCoord,
   cleanup,
 } = viewer3DStore;
 
 let animationFrameId = null;
+let bookmarkTween = null;
 const raycaster = new THREE.Raycaster();
 
 // Cancellation support
@@ -204,6 +207,17 @@ const initViewer = () => {
   // Animation loop
   const animate = () => {
     animationFrameId = requestAnimationFrame(animate);
+
+    // Bookmark camera tween (cubic ease-out lerp)
+    if (bookmarkTween) {
+      bookmarkTween.t += 1;
+      const alpha = Math.min(1, bookmarkTween.t / bookmarkTween.duration);
+      const ease = 1 - Math.pow(1 - alpha, 3);
+      newCamera.position.lerpVectors(bookmarkTween.startPos, bookmarkTween.endPos, ease);
+      newControls.target.lerpVectors(bookmarkTween.startTarget, bookmarkTween.endTarget, ease);
+      if (alpha >= 1) bookmarkTween = null;
+    }
+
     newControls.update();
     newRenderer.render(newScene, newCamera);
   };
@@ -899,6 +913,8 @@ const loadLASFile = async (file) => {
         } else if (data.type === 'result') {
           if (!loadingCancelled.value) {
             const positions = new Float32Array(data.posBuffer);
+            // Keep a clean copy of the original RGB values for color-mode restore
+            const rgbCopy   = data.colBuffer.slice(0);
             const colors    = new Float32Array(data.colBuffer);
             const geometry  = new THREE.BufferGeometry();
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -909,9 +925,12 @@ const loadLASFile = async (file) => {
             });
             const pointCloud = new THREE.Points(geometry, material);
             pointCloud.rotation.x = -Math.PI / 2;
-            pointCloud.userData.type          = 'pointcloud';
-            pointCloud.userData.totalPoints   = data.totalPoints;
-            pointCloud.userData.sampledPoints = data.sampledPoints;
+            pointCloud.userData.type                 = 'pointcloud';
+            pointCloud.userData.totalPoints          = data.totalPoints;
+            pointCloud.userData.sampledPoints        = data.sampledPoints;
+            pointCloud.userData.rgbBuffer            = rgbCopy;
+            pointCloud.userData.intensityBuffer      = data.intBuffer ?? null;
+            pointCloud.userData.classificationBuffer = data.clsBuffer ?? null;
 
             scene.value.add(pointCloud);
             adjustCameraToModel();
@@ -1766,6 +1785,12 @@ const removeLayer = (layerId) => {
 
 // Raycasting for measurements
 const onCanvasClick = (event) => {
+  // XYZ coordinate picker takes priority
+  if (pickMode.value) {
+    handlePickClick(event);
+    return;
+  }
+
   // Use the new measurement handler if active
   if (currentMeasurementMode) {
     handleMeasurementClick(event);
@@ -1798,6 +1823,32 @@ const onCanvasClick = (event) => {
     const point = intersects[0].point;
     addMeasurementPoint(point);
     addMeasurementMarker(point);
+  }
+};
+
+const handlePickClick = (event) => {
+  if (!scene.value || !camera.value || !controls.value) return;
+  const dx = event.clientX - mouseDownPosition.x;
+  const dy = event.clientY - mouseDownPosition.y;
+  if (Math.sqrt(dx * dx + dy * dy) > 5) return;
+
+  const rect = viewerRef.value.getBoundingClientRect();
+  mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(mouse, camera.value);
+
+  const camDist = camera.value.position.distanceTo(controls.value.target);
+  raycaster.params.Points = { threshold: Math.max(0.5, camDist * 0.005) };
+
+  const intersects = raycaster.intersectObjects(scene.value.children, true)
+    .filter(h => !h.object.name?.startsWith('normalsHelper_') &&
+                 h.object.name !== 'gridHelper' &&
+                 h.object.name !== 'axesHelper' &&
+                 h.object.name !== 'boxHelper');
+
+  if (intersects.length > 0) {
+    const p = intersects[0].point;
+    setPickedCoord({ x: p.x, y: p.y, z: p.z });
   }
 };
 
@@ -2475,6 +2526,104 @@ watch(theme, (newTheme) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Scene Bookmarks
+// ---------------------------------------------------------------------------
+const applyBookmark = (bm) => {
+  if (!camera.value || !controls.value) return;
+  bookmarkTween = {
+    startPos:    camera.value.position.clone(),
+    startTarget: controls.value.target.clone(),
+    endPos:    new THREE.Vector3(bm.position.x, bm.position.y, bm.position.z),
+    endTarget: new THREE.Vector3(bm.target.x,   bm.target.y,   bm.target.z),
+    t:        0,
+    duration: 60,
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Point Cloud Coloring Modes
+// ---------------------------------------------------------------------------
+const CLASSIFICATION_LUT = [
+  [0.50, 0.50, 0.50], // 0  Never classified
+  [0.60, 0.60, 0.60], // 1  Unassigned
+  [0.54, 0.27, 0.07], // 2  Ground
+  [0.56, 0.93, 0.56], // 3  Low Vegetation
+  [0.13, 0.55, 0.13], // 4  Medium Vegetation
+  [0.00, 0.39, 0.00], // 5  High Vegetation
+  [0.50, 0.50, 0.50], // 6  Building
+  [1.00, 0.00, 0.00], // 7  Low Point / Noise
+  [0.67, 0.67, 0.67], // 8  Reserved
+  [0.12, 0.56, 1.00], // 9  Water
+  [1.00, 0.84, 0.00], // 10 Rail
+  [0.82, 0.71, 0.55], // 11 Road Surface
+  [0.67, 0.67, 0.67], // 12 Reserved
+  [1.00, 0.55, 0.00], // 13 Wire Guard
+  [1.00, 0.55, 0.00], // 14 Wire Conductor
+  [0.50, 0.00, 0.50], // 15 Transmission Tower
+  [1.00, 0.55, 0.00], // 16 Wire Connector
+  [0.82, 0.71, 0.55], // 17 Bridge Deck
+  [1.00, 0.00, 0.00], // 18 High Noise
+];
+
+const applyColorMode = (layerId, mode) => {
+  if (!scene.value) return;
+
+  let target = null;
+  scene.value.traverse((obj) => { if (obj.uuid === layerId) target = obj; });
+  if (!target) return;
+
+  target.traverse((obj) => {
+    if (!obj.isPoints) return;
+    const geo = obj.geometry;
+    const colorAttr = geo.attributes.color;
+    if (!colorAttr) return;
+
+    const colors = colorAttr.array;
+    const n = colorAttr.count;
+    const { rgbBuffer, intensityBuffer, classificationBuffer } = obj.userData;
+
+    if (mode === 'rgb') {
+      if (rgbBuffer) {
+        const src = new Float32Array(rgbBuffer);
+        for (let i = 0; i < n * 3; i++) colors[i] = src[i];
+      }
+    } else if (mode === 'elevation') {
+      const posArr = geo.attributes.position.array;
+      let minZ = Infinity, maxZ = -Infinity;
+      for (let i = 0; i < n; i++) {
+        const z = posArr[i * 3 + 1]; // Y-up in Three.js
+        if (z < minZ) minZ = z;
+        if (z > maxZ) maxZ = z;
+      }
+      const range = maxZ - minZ || 1;
+      for (let i = 0; i < n; i++) {
+        const t = Math.max(0, Math.min(1, (posArr[i * 3 + 1] - minZ) / range));
+        const { r, g, b } = demElevationColor(t);
+        colors[i * 3] = r; colors[i * 3 + 1] = g; colors[i * 3 + 2] = b;
+      }
+    } else if (mode === 'intensity') {
+      if (intensityBuffer) {
+        const src = new Float32Array(intensityBuffer);
+        for (let i = 0; i < n; i++) {
+          const v = src[i];
+          colors[i * 3] = v; colors[i * 3 + 1] = v; colors[i * 3 + 2] = v;
+        }
+      }
+    } else if (mode === 'classification') {
+      if (classificationBuffer) {
+        const src = new Uint8Array(classificationBuffer);
+        for (let i = 0; i < n; i++) {
+          const lut = CLASSIFICATION_LUT[Math.min(18, src[i])] ?? CLASSIFICATION_LUT[0];
+          colors[i * 3] = lut[0]; colors[i * 3 + 1] = lut[1]; colors[i * 3 + 2] = lut[2];
+        }
+      }
+    }
+
+    colorAttr.needsUpdate = true;
+  });
+};
+
 // Expose methods for parent component
 defineExpose({
   cancelLoading,
@@ -2500,6 +2649,8 @@ defineExpose({
   zoomToLayer,
   applyVerticalExaggeration,
   processDroppedFiles,
+  applyBookmark,
+  applyColorMode,
 });
 </script>
 
@@ -2509,5 +2660,6 @@ defineExpose({
   width: 100%;
   height: 100%;
 }
+
 
 </style>

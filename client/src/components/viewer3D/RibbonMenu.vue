@@ -124,6 +124,17 @@
           </div>
           <span class="group-label">Navigate</span>
         </div>
+
+        <!-- Bookmarks -->
+        <div class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <button @click="emit('toggle-bookmarks')" class="ribbon-btn" :class="{ active: isBookmarksOpen }" title="Open scene bookmarks panel">
+              <span class="btn-icon" v-html="ICON_BOOKMARK_ADD"></span>
+              <span class="btn-label">Bookmarks</span>
+            </button>
+          </div>
+          <span class="group-label">Bookmarks</span>
+        </div>
       </div>
 
       <!-- Tools Tab -->
@@ -140,6 +151,15 @@
             </button>
           </div>
           <span class="group-label">Measure</span>
+        </div>
+        <div class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <button @click="emit('toggle-pick-mode')" class="ribbon-btn" :class="{ active: pickMode }" title="Click any surface to read its XYZ coordinates">
+              <span class="btn-icon" v-html="ICON_PICK_XYZ"></span>
+              <span class="btn-label">Pick XYZ</span>
+            </button>
+          </div>
+          <span class="group-label">Inspect</span>
         </div>
       </div>
 
@@ -194,6 +214,21 @@
           </div>
           <span class="group-label">Appearance</span>
         </div>
+        <!-- Color Mode – pointcloud layers only -->
+        <div v-if="selectedLayer.type === 'pointcloud'" class="ribbon-group">
+          <div class="ribbon-group-buttons">
+            <div class="ctx-color-mode">
+              <select :value="localColorMode" class="ctx-select" title="Point cloud color mode" @change="onColorModeChange">
+                <option value="rgb">RGB</option>
+                <option value="elevation">Elevation</option>
+                <option value="intensity">Intensity</option>
+                <option value="classification">Classification</option>
+              </select>
+            </div>
+          </div>
+          <span class="group-label">Color Mode</span>
+        </div>
+
         <!-- Point Size – pointcloud layers only -->
         <div v-if="selectedLayer.type === 'pointcloud'" class="ribbon-group">
           <div class="ribbon-group-buttons">
@@ -316,7 +351,9 @@ import {
   ICON_VIEW_LEFT,
   ICON_EYE,
   ICON_EYE_OFF,
-  ICON_INFO
+  ICON_INFO,
+  ICON_PICK_XYZ,
+  ICON_BOOKMARK_ADD,
 } from '@/constants/icons.js';
 
 const props = defineProps({
@@ -335,7 +372,11 @@ const props = defineProps({
   hasPendingMtl: {
     type: Boolean,
     default: false
-  }
+  },
+  isBookmarksOpen: {
+    type: Boolean,
+    default: false
+  },
 });
 
 const emit = defineEmits([
@@ -366,10 +407,13 @@ const emit = defineEmits([
   'ribbon-layer-pointsize',
   'vertical-exaggeration',
   'pick-materials',
+  'toggle-bookmarks',
+  'toggle-pick-mode',
+  'ribbon-color-mode',
 ]);
 
 const viewer3DStore = useViewer3DStore();
-const { showGrid, showAxes, showWireframe, showBoundingBox, showNormals } = storeToRefs(viewer3DStore);
+const { showGrid, showAxes, showWireframe, showBoundingBox, showNormals, pickMode } = storeToRefs(viewer3DStore);
 const { toggleWireframe, toggleBoundingBox, toggleGrid, toggleAxes, toggleNormals } = viewer3DStore;
 
 const appConfig = inject('config');
@@ -445,6 +489,20 @@ const toggleSelectedVisibility = () => {
   if (!props.selectedLayer) return;
   const visible = !props.selectedLayer.visible;
   emit('ribbon-layer-visibility', { layer: props.selectedLayer, visible });
+};
+
+// Color mode for point cloud layers
+const localColorMode = ref('rgb');
+watch(() => props.selectedLayer, (layer) => {
+  if (layer?.type === 'pointcloud') {
+    localColorMode.value = layer.object?.userData?.colorMode ?? 'rgb';
+  }
+}, { immediate: true });
+
+const onColorModeChange = (e) => {
+  const mode = e.target.value;
+  localColorMode.value = mode;
+  emit('ribbon-color-mode', { layer: props.selectedLayer, mode });
 };
 
 // Contextual icons
@@ -893,5 +951,36 @@ const handleDEMFile = (event) => {
   color: #eee;
   background: rgba(245, 158, 11, 0.15);
   border-color: rgba(245, 158, 11, 0.4);
+}
+
+/* Color mode select */
+.ctx-color-mode {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  height: 100%;
+}
+
+.ctx-select {
+  font-size: 11px;
+  padding: 3px 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: white;
+  color: #333;
+  cursor: pointer;
+  outline: none;
+}
+
+.ctx-select:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.theme-dark .ctx-select {
+  background: #3a3a3a;
+  border-color: #555;
+  color: #e0e0e0;
 }
 </style>

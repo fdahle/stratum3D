@@ -27,6 +27,41 @@ export const useViewer3DStore = defineStore('viewer3d', () => {
   const measurements = ref([]);
   const measurementPoints = ref([]);
 
+  // Coordinate picker
+  const pickMode = ref(false);
+  const pickedCoord = ref(null);
+
+  const togglePickMode = () => {
+    pickMode.value = !pickMode.value;
+    if (!pickMode.value) pickedCoord.value = null;
+  };
+
+  const setPickedCoord = (coord) => {
+    pickedCoord.value = coord;
+  };
+
+  // Scene bookmarks – persisted to localStorage
+  const _BOOKMARK_KEY = 'viewer3d_bookmarks';
+  const bookmarks = ref([]);
+  try {
+    const _stored = localStorage.getItem(_BOOKMARK_KEY);
+    if (_stored) bookmarks.value = JSON.parse(_stored);
+  } catch { /* ignore */ }
+
+  const addBookmark = (name, position, target) => {
+    bookmarks.value.push({
+      name,
+      position: { x: position.x, y: position.y, z: position.z },
+      target:   { x: target.x,   y: target.y,   z: target.z   },
+    });
+    try { localStorage.setItem(_BOOKMARK_KEY, JSON.stringify(bookmarks.value)); } catch { /* ignore */ }
+  };
+
+  const removeBookmark = (index) => {
+    bookmarks.value.splice(index, 1);
+    try { localStorage.setItem(_BOOKMARK_KEY, JSON.stringify(bookmarks.value)); } catch { /* ignore */ }
+  };
+
   // Scene management
   const setScene = (newScene) => {
     scene.value = newScene;
@@ -239,6 +274,17 @@ export const useViewer3DStore = defineStore('viewer3d', () => {
     cancelMeasurement,
     clearMeasurements,
     removeMeasurement,
+
+    // Coordinate picker
+    pickMode,
+    pickedCoord,
+    togglePickMode,
+    setPickedCoord,
+
+    // Bookmarks
+    bookmarks,
+    addBookmark,
+    removeBookmark,
 
     // Cleanup
     cleanup,
