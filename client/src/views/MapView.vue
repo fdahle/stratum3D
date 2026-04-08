@@ -11,8 +11,8 @@
       @measure-area="onMeasureArea"
       @elevation-profile="onElevationProfile"
       @share-scene="isShareSceneOpen = true"
-      @extended-search="isExtendedSearchOpen = true"
-      @toggle-pins="isPinsOpen = !isPinsOpen"
+      @extended-search="onExtendedSearch"
+      @toggle-pins="onTogglePins"
     />
 
     <div
@@ -44,7 +44,7 @@
       ></div>
 
       <div class="map-area">
-      <MapWidget />
+      <MapWidget :is-pins-open="isPinsOpen" />
       <SearchBar />
       <PinPanel :is-open="isPinsOpen" @close="isPinsOpen = false" />
       <div
@@ -458,16 +458,20 @@ const startMeasureMode = (type) => {
   map.addInteraction(draw);
 };
 
+// Close all active tools (measurements, elevation, extended search, pins)
+const closeAllTools = () => {
+  if (isMeasurementModalVisible.value) closeMeasurementModal();
+  if (isElevationModalVisible.value) closeElevationModal();
+  if (isExtendedSearchOpen.value) isExtendedSearchOpen.value = false;
+  if (isPinsOpen.value) isPinsOpen.value = false;
+};
+
 const onMeasureDistance = () => {
   if (isMeasurementModalVisible.value && activeMeasurementType.value === 'distance') {
     closeMeasurementModal();
   } else {
+    closeAllTools();
     layerManagerRef.value?.setSelectionActive(false);
-    if (isMeasurementModalVisible.value) {
-      if (measureDraw) measureDraw.abortDrawing();
-      measurementPointsCount.value = 0;
-      currentMeasurementValue.value = null;
-    }
     activeMeasurementType.value = 'distance';
     isMeasurementModalVisible.value = true;
     startMeasureMode('distance');
@@ -478,12 +482,8 @@ const onMeasureArea = () => {
   if (isMeasurementModalVisible.value && activeMeasurementType.value === 'area') {
     closeMeasurementModal();
   } else {
+    closeAllTools();
     layerManagerRef.value?.setSelectionActive(false);
-    if (isMeasurementModalVisible.value) {
-      if (measureDraw) measureDraw.abortDrawing();
-      measurementPointsCount.value = 0;
-      currentMeasurementValue.value = null;
-    }
     activeMeasurementType.value = 'area';
     isMeasurementModalVisible.value = true;
     startMeasureMode('area');
@@ -578,8 +578,27 @@ const onElevationProfile = () => {
   if (isElevationModalVisible.value) {
     closeElevationModal();
   } else {
+    closeAllTools();
     layerManagerRef.value?.setSelectionActive(false);
     isElevationModalVisible.value = true;
+  }
+};
+
+const onExtendedSearch = () => {
+  if (isExtendedSearchOpen.value) {
+    isExtendedSearchOpen.value = false;
+  } else {
+    closeAllTools();
+    isExtendedSearchOpen.value = true;
+  }
+};
+
+const onTogglePins = () => {
+  if (isPinsOpen.value) {
+    isPinsOpen.value = false;
+  } else {
+    closeAllTools();
+    isPinsOpen.value = true;
   }
 };
 

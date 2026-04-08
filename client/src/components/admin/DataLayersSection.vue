@@ -165,6 +165,17 @@
                 <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/>
               </svg>
             </button>
+            <!-- Debug: open debug modal (devMode only) -->
+            <button
+              v-if="props.devMode"
+              class="action-btn action-btn-debug"
+              title="Debug — view config &amp; meta JSON"
+              @click="openDebugModal(layer)"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+              </svg>
+            </button>
             <button
               class="action-btn"
               :class="{ 'action-btn-active': editingId === layer.id }"
@@ -224,6 +235,9 @@
 
         <!-- ─── Inline edit panel ───────────────────────────── -->
         <div v-if="editingId === layer.id" class="lc-edit-panel">
+
+          <!-- ── General ── -->
+          <div class="edit-section-heading">General</div>
           <div class="edit-row">
             <div class="edit-field edit-field-grow">
               <label>Display name</label>
@@ -241,9 +255,33 @@
               </div>
             </div>
           </div>
+          <!-- CRS / EPSG -->
+          <div class="edit-row">
+            <div class="edit-field edit-field-grow">
+              <label>
+                {{ layer.fileType === 'geotiff' ? 'Projection (EPSG)' : 'Source CRS (EPSG)' }}
+                <span v-if="layer.sourceCrs" class="edit-field-hint"> — detected: {{ layer.sourceCrs }}</span>
+              </label>
+              <input
+                v-model="editDraft.crsOverride"
+                type="text"
+                :placeholder="layer.sourceCrs || (layer.fileType === 'geotiff' ? 'e.g. EPSG:4326' : 'e.g. EPSG:4326')"
+              />
+              <span class="edit-field-hint" style="display:block;margin-top:2px">
+                <template v-if="layer.fileType === 'geotiff'">Overrides the projection used for rendering. Leave empty to keep the auto-detected value.</template>
+                <template v-else>Coordinate reference system of the original data (informational). Leave empty to keep the detected value.</template>
+              </span>
+            </div>
+            <div v-if="layer.targetCrs" class="edit-field">
+              <label>Stored as</label>
+              <input type="text" :value="layer.targetCrs" disabled style="opacity:0.6;cursor:default" />
+            </div>
+          </div>
 
-          <!-- GeoJSON extras -->
+          <!-- ── Style ── -->
+          <!-- GeoJSON style -->
           <template v-if="layer.fileType === 'geojson'">
+            <div class="edit-section-heading">Style</div>
             <div class="edit-row">
               <div class="edit-field">
                 <label>Badge color</label>
@@ -274,6 +312,35 @@
                 </div>
               </div>
             </div>
+          </template>
+
+          <!-- GeoTIFF style -->
+          <template v-if="layer.fileType === 'geotiff'">
+            <div class="edit-section-heading">Style</div>
+            <div class="edit-row">
+              <div class="edit-field">
+                <label>Opacity <span class="edit-field-hint">(0 = transparent, 1 = opaque)</span></label>
+                <input v-model.number="editDraft.opacity" type="number" min="0" max="1" step="0.05" placeholder="1" />
+              </div>
+              <div class="edit-field">
+                <label>NoData value <span class="edit-field-hint">(pixel value treated as transparent)</span></label>
+                <input v-model.number="editDraft.noDataValue" type="number" placeholder="e.g. -9999" />
+              </div>
+            </div>
+            <div class="edit-row">
+              <div class="edit-field edit-field-grow">
+                <label class="checkbox-label">
+                  <input type="checkbox" v-model="editDraft.normalize" />
+                  Normalize pixel values
+                  <span class="edit-field-hint"> — maps the data range to 0–1 for correct rendering of DEMs and single-band rasters</span>
+                </label>
+              </div>
+            </div>
+          </template>
+
+          <!-- ── Data ── (GeoJSON only) -->
+          <template v-if="layer.fileType === 'geojson'">
+            <div class="edit-section-heading">Data</div>
             <div class="edit-row">
               <div class="edit-field edit-field-grow">
                 <label>Search fields <span class="edit-field-hint">(comma-separated attribute names)</span></label>
@@ -311,43 +378,6 @@
               </div>
             </div>
           </template>
-
-          <!-- GeoTIFF extras -->
-          <template v-if="layer.fileType === 'geotiff'">
-            <div class="edit-row">
-              <div class="edit-field">
-                <label>Opacity <span class="edit-field-hint">(0 = transparent, 1 = opaque)</span></label>
-                <input v-model.number="editDraft.opacity" type="number" min="0" max="1" step="0.05" placeholder="1" />
-              </div>
-              <div class="edit-field">
-                <label>NoData value <span class="edit-field-hint">(pixel value treated as transparent)</span></label>
-                <input v-model.number="editDraft.noDataValue" type="number" placeholder="e.g. -9999" />
-              </div>
-            </div>
-            <div class="edit-row">
-              <div class="edit-field edit-field-grow">
-                <label class="checkbox-label">
-                  <input type="checkbox" v-model="editDraft.normalize" />
-                  Normalize pixel values
-                  <span class="edit-field-hint"> — maps the data range to 0–1 for correct rendering of DEMs and single-band rasters</span>
-                </label>
-              </div>
-            </div>
-          </template>
-
-          <!-- Config preview (developer mode only) -->
-          <div v-if="props.devMode" class="edit-preview">
-            <button class="edit-preview-toggle" @click="previewOpen = !previewOpen">
-              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" :style="{ transform: previewOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }">
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-              {{ previewOpen ? 'Hide' : 'Show' }} config preview
-            </button>
-            <pre v-if="previewOpen" class="edit-preview-body">{{ JSON.stringify(
-              Object.fromEntries(Object.entries({ ...editDraft, search_fields: searchFieldsStr.split(',').map(s => s.trim()).filter(Boolean) }).filter(([, v]) => v !== '' && v != null && !(Array.isArray(v) && !v.length))),
-              null, 2
-            ) }}</pre>
-          </div>
 
           <!-- Edit panel footer -->
           <div class="edit-footer">
@@ -396,6 +426,29 @@
       @saved="fetchLayers"
     />
 
+    <!-- Debug modal -->
+    <Transition name="fade">
+      <div v-if="debugModalLayer" class="dbl-overlay" @click.self="debugModalLayer = null">
+        <div class="dbl-modal">
+          <header class="dbl-header">
+            <span class="dbl-title">Debug — {{ debugModalLayer.layerConfig?.displayName || debugModalLayer.originalName }}</span>
+            <button class="dbl-close" title="Close" @click="debugModalLayer = null">
+              <svg viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+                <line x1="1" y1="1" x2="13" y2="13" /><line x1="13" y1="1" x2="1" y2="13" />
+              </svg>
+            </button>
+          </header>
+          <div class="dbl-tabs">
+            <button :class="['dbl-tab', debugModalTab === 'config' && 'dbl-tab-active']" @click="debugModalTab = 'config'">Config Preview</button>
+            <button :class="['dbl-tab', debugModalTab === 'meta' && 'dbl-tab-active']" @click="debugModalTab = 'meta'">Meta JSON</button>
+          </div>
+          <div class="dbl-body">
+            <pre class="dbl-pre">{{ JSON.stringify(debugModalTab === 'config' ? debugModalLayer.layerConfig : debugModalLayer, null, 2) }}</pre>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
   </section>
 </template>
 
@@ -427,7 +480,8 @@ const editDraft       = ref({});
 const editSaving      = ref(false);
 const editError       = ref('');
 const searchFieldsStr = ref('');
-const previewOpen     = ref(false);
+const debugModalLayer = ref(null);
+const debugModalTab   = ref('config');
 const dataPreviewOpen    = ref(false);
 const dataPreview        = ref(null);   // { columns, rows, total }
 const dataPreviewLoading = ref(false);
@@ -465,6 +519,8 @@ onMounted(async () => {
 onUnmounted(() => {
   stopPolling();
 });
+
+defineExpose({ fetchLayers });
 
 // ── API helpers ─────────────────────────────────────────────────
 function authHeaders(extra = {}) {
@@ -699,6 +755,11 @@ function openLinkDataModal(layer) {
   linkDataModal.value = { open: true, layerId: layer.id };
 }
 
+function openDebugModal(layer) {
+  debugModalLayer.value = layer;
+  debugModalTab.value = 'config';
+}
+
 // ── Companion file upload (for existing model/pointcloud layers) ─
 function openCompanionPicker(layer) {
   companionTargetLayerId.value = layer.id;
@@ -776,7 +837,6 @@ function toggleEdit(layer) {
     return;
   }
   deleteConfirmId.value = null;
-  previewOpen.value = false;
   dataPreviewOpen.value = false;
   dataPreview.value = null;
   dataPreviewError.value = '';
@@ -793,6 +853,10 @@ function toggleEdit(layer) {
     opacity:      lc.opacity      ?? null,
     noDataValue:  lc.noDataValue  ?? null,
     normalize:    lc.normalize    ?? true,
+    // CRS override (editable; stored as tiffProjection for GeoTIFF, sourceCrs for others)
+    crsOverride:  layer.fileType === 'geotiff'
+      ? (lc.tiffProjection ?? layer.sourceCrs ?? '')
+      : (lc.sourceCrs      ?? layer.sourceCrs ?? ''),
   };
   searchFieldsStr.value = (lc.search_fields ?? []).join(', ');
   editingId.value = layer.id;
@@ -803,7 +867,6 @@ function cancelEdit() {
   editingId.value = null;
   editError.value = '';
   searchFieldsStr.value = '';
-  previewOpen.value = false;
   dataPreviewOpen.value = false;
   dataPreview.value = null;
   dataPreviewError.value = '';
@@ -838,9 +901,17 @@ async function saveEdit(id) {
       .split(',').map(s => s.trim()).filter(Boolean);
     // Strip empty strings before sending
     const patch = Object.fromEntries(
-      Object.entries(editDraft.value).filter(([, v]) => v !== '' && v != null)
+      Object.entries(editDraft.value).filter(([k, v]) => k !== 'crsOverride' && v !== '' && v != null)
     );
     patch.search_fields = parsedSearchFields;
+    // CRS override — map to the right server field per layer type
+    const layer = layers.value.find(l => l.id === id);
+    const crsVal = editDraft.value.crsOverride?.trim() || null;
+    if (layer?.fileType === 'geotiff') {
+      patch.tiffProjection = crsVal;   // null clears the override
+    } else if (crsVal) {
+      patch.sourceCrs = crsVal;
+    }
     const res = await fetch(getApiUrl(`/admin/layers/${id}`), {
       method: 'PATCH',
       headers: authHeaders({ 'Content-Type': 'application/json' }),
@@ -1007,6 +1078,51 @@ async function saveEdit(id) {
 .action-btn-link3d:hover:not(:disabled) { background: rgba(124,58,237,0.08); border-color: rgba(124,58,237,0.5); color: #7c3aed; }
 .action-btn-linkdata { color: #059669; border-color: rgba(5,150,105,0.3); }
 .action-btn-linkdata:hover:not(:disabled) { background: rgba(5,150,105,0.08); border-color: rgba(5,150,105,0.5); color: #059669; }
+.action-btn-debug { color: #d97706; border-color: rgba(217,119,6,0.3); }
+.action-btn-debug:hover:not(:disabled) { background: rgba(217,119,6,0.08); border-color: rgba(217,119,6,0.5); color: #d97706; }
+
+/* ── Debug modal ─────────────────────────────────────────────── */
+.dbl-overlay {
+  position: fixed; inset: 0; z-index: 1200;
+  background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center;
+}
+.dbl-modal {
+  background: var(--admin-surface, #fff); border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18); width: min(640px, 92vw);
+  display: flex; flex-direction: column; max-height: 80vh; overflow: hidden;
+}
+.dbl-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.85rem 1rem 0.75rem; border-bottom: 1px solid var(--admin-border, #e8e8e8);
+}
+.dbl-title { font-size: 0.9rem; font-weight: 600; color: var(--admin-text, #1a1a1a); }
+.dbl-close {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 5px; border: none;
+  background: transparent; cursor: pointer; color: var(--admin-muted, #888);
+  transition: background 0.12s, color 0.12s;
+}
+.dbl-close:hover { background: var(--admin-bg, #f3f4f6); color: var(--admin-text, #1a1a1a); }
+.dbl-tabs {
+  display: flex; gap: 0; border-bottom: 1px solid var(--admin-border, #e8e8e8);
+  padding: 0 0.75rem;
+}
+.dbl-tab {
+  padding: 0.55rem 0.85rem; font-size: 0.8rem; font-weight: 500;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  cursor: pointer; color: var(--admin-muted, #888); margin-bottom: -1px;
+  transition: color 0.12s, border-color 0.12s;
+}
+.dbl-tab:hover { color: var(--admin-text, #1a1a1a); }
+.dbl-tab-active { color: #3b82f6; border-bottom-color: #3b82f6; }
+.dbl-body { flex: 1; overflow: auto; padding: 0.75rem; }
+.dbl-pre {
+  margin: 0; padding: 0.75rem; border-radius: 5px;
+  background: var(--admin-bg, #f3f4f6); border: 1px solid var(--admin-border, #e0e0e0);
+  font-size: 0.78rem; line-height: 1.55; color: var(--admin-text, #333);
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  white-space: pre; overflow-x: auto;
+}
 
 /* ── Sub-files strip ────────────────────────────────────────── */
 .lc-subfile-uploading {
@@ -1098,6 +1214,15 @@ async function saveEdit(id) {
 input:checked + .slider { background: #3b82f6; }
 input:checked + .slider::before { transform: translateX(16px); }
 
+/* Edit section headings */
+.edit-section-heading {
+  font-size: 0.72rem; font-weight: 600; letter-spacing: 0.05em;
+  text-transform: uppercase; color: var(--admin-muted, #888);
+  border-top: 1px solid var(--admin-border, #e8e8e8);
+  margin-top: 0.75rem; padding-top: 0.6rem; margin-bottom: 0.1rem;
+}
+.lc-edit-panel > .edit-section-heading:first-child { border-top: none; margin-top: 0; }
+
 /* Color row */
 .color-row { display: flex; gap: 0.4rem; align-items: center; }
 .color-swatch { width: 28px; height: 28px; padding: 1px; border-radius: 4px; border: 1px solid var(--admin-border, #e0e0e0); background:none; cursor:pointer; }
@@ -1183,4 +1308,7 @@ input:checked + .slider::before { transform: translateX(16px); }
   text-decoration: none; display: inline-flex; align-items: center;
 }
 .btn-secondary-sm:hover { background: var(--admin-bg, #f3f4f6); color: var(--admin-text, #1a1a1a); }
+
+.fade-enter-active, .fade-leave-active { transition: opacity 0.15s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>

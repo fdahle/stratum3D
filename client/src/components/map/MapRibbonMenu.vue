@@ -435,17 +435,20 @@ const showLayerInfo = () => {
   rows.push({ key: 'Name', value: layer.name });
   rows.push({ key: 'Type', value: TYPE_LABELS[layer.type] || layer.type });
   if (layer.geometryType) rows.push({ key: 'Geometry', value: GEOM_LABELS[layer.geometryType] || layer.geometryType });
-  if (layer.url)  rows.push({ key: 'URL', value: layer.url });
   if (layer.color) rows.push({ key: 'Color', value: layer.color });
   if (layer.crsCompatible !== null) rows.push({ key: 'CRS match', value: layer.crsCompatible ? 'Yes' : 'No' });
-  if (layer.category) rows.push({ key: 'Category', value: layer.category });
+
+  // Layer CRS — always shown, even when not detected
+  const layerCrs = layer.metadata?.tiffProjection ?? layer.metadata?.sourceCrs ?? layer.sourceCrs ?? null;
+  rows.push({ key: 'Layer CRS', value: layerCrs ?? '—' });
+
   if (layer.layerInstance) {
     const source = layer.layerInstance.getSource?.();
     if (source?.getFeatures) rows.push({ key: 'Features', value: source.getFeatures().length.toLocaleString() });
-    const map = mapStore.getMap();
-    if (map && source) {
+    // Vector source extent from OL (not used for geotiff — see below)
+    if (layer.type !== 'geotiff') {
       try {
-        const ext = source.getExtent?.();
+        const ext = source?.getExtent?.();
         if (ext && ext[0] !== Infinity) {
           rows.push({ key: 'Min X', value: ext[0].toFixed(2) });
           rows.push({ key: 'Min Y', value: ext[1].toFixed(2) });
@@ -453,12 +456,20 @@ const showLayerInfo = () => {
           rows.push({ key: 'Max Y', value: ext[3].toFixed(2) });
         }
       } catch (_) {}
-      try {
-        const proj = map.getView().getProjection();
-        if (proj) rows.push({ key: 'Map CRS', value: proj.getCode() });
-      } catch (_) {}
     }
   }
+  // GeoTIFF extent is set by the worker and doesn't require a live layerInstance
+  if (layer.type === 'geotiff' && layer.metadata?.extent) {
+    const [minX, minY, maxX, maxY] = layer.metadata.extent;
+    rows.push({ key: 'Min X', value: minX.toFixed(4) });
+    rows.push({ key: 'Min Y', value: minY.toFixed(4) });
+    rows.push({ key: 'Max X', value: maxX.toFixed(4) });
+    rows.push({ key: 'Max Y', value: maxY.toFixed(4) });
+  }
+
+  // URL placed last
+  if (layer.url) rows.push({ key: 'URL', value: layer.url });
+
   infoModalTitle.value = layer.name;
   infoModalRows.value  = rows;
   infoModalVisible.value = true;

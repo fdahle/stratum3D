@@ -13,10 +13,19 @@
         <div class="lim-body">
           <table class="lim-table">
             <tbody>
-              <tr v-for="row in rows" :key="row.key">
-                <td class="lim-key">{{ row.key }}</td>
-                <td class="lim-value">{{ row.value }}</td>
-              </tr>
+              <template v-for="(row, i) in rows" :key="row.key">
+                <!-- Visual separator before URL row -->
+                <tr v-if="row.key === 'URL' && i > 0" class="lim-separator-row">
+                  <td colspan="2"><hr class="lim-separator" /></td>
+                </tr>
+                <tr>
+                  <td class="lim-key">{{ row.key }}</td>
+                  <td class="lim-value">
+                    <a v-if="row.key === 'URL'" :href="row.value" target="_blank" rel="noopener noreferrer" class="lim-url">{{ row.value }}</a>
+                    <span v-else>{{ row.value }}</span>
+                  </td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </div>
@@ -26,9 +35,10 @@
 </template>
 
 <script setup>
+import { watch, onUnmounted } from 'vue';
 import { ICON_INFO, ICON_CLOSE } from '@/constants/icons.js';
 
-defineProps({
+const props = defineProps({
   isVisible: { type: Boolean, default: false },
   title:     { type: String, default: 'Layer Info' },
   rows:      { type: Array, default: () => [] },
@@ -36,6 +46,15 @@ defineProps({
 
 const emit = defineEmits(['close']);
 const close = () => emit('close');
+
+const handleEsc = (e) => { if (e.key === 'Escape') close(); };
+
+watch(() => props.isVisible, (val) => {
+  if (val) document.addEventListener('keydown', handleEsc);
+  else document.removeEventListener('keydown', handleEsc);
+});
+
+onUnmounted(() => document.removeEventListener('keydown', handleEsc));
 </script>
 
 <style scoped>
@@ -142,4 +161,16 @@ const close = () => emit('close');
 .theme-dark .lim-value {
   color: #e0e0e0;
 }
+
+.lim-url {
+  color: #3b82f6;
+  text-decoration: none;
+  word-break: break-all;
+}
+.lim-url:hover { text-decoration: underline; }
+.theme-dark .lim-url { color: #60a5fa; }
+
+.lim-separator-row td { padding: 0 16px; }
+.lim-separator { border: none; border-top: 1px solid #e5e7eb; margin: 4px 0; }
+.theme-dark .lim-separator { border-top-color: #444; }
 </style>

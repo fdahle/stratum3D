@@ -246,6 +246,7 @@
 
         <!-- ── 5 + 6. Data Layers (upload + manage) ─────────────── -->
         <DataLayersSection
+          ref="dataLayersSectionRef"
           :auth-header="currentAuthHeader"
           :dev-mode="layerDevMode"
           @update:layers="draft.data_layers = $event"
@@ -428,8 +429,8 @@
               </svg>
             </div>
             <div class="perm-card-body">
-              <span class="perm-card-title">Layer Config Preview</span>
-              <span class="perm-card-desc">Show layer config preview in edit panel</span>
+              <span class="perm-card-title">Layer Debug Mode</span>
+              <span class="perm-card-desc">Show debug button on each layer card to inspect config &amp; meta JSON</span>
             </div>
             <div class="perm-toggle-wrap">
               <input id="dev-layer-preview" v-model="layerDevMode" type="checkbox" class="perm-toggle-input" />
@@ -552,6 +553,7 @@ const loadError        = ref('');
 const saveSuccess      = ref(false);
 const validationError  = ref('');
 const passwordFieldRef = ref(null);
+const dataLayersSectionRef = ref(null);
 const loadedCrs             = ref(null);  // CRS from the last saved config
 const crsChangeSaveConfirming = ref(false); // waiting for user to ack CRS change before saving
 
@@ -562,7 +564,8 @@ function getStoredPassword()  { return _storedPassword.value; }
 function clearStoredPassword() { _storedPassword.value = ''; }
 
 const osmBackground = ref(true);  // separate from basemaps — MapWidget injects the right tile per CRS
-const layerDevMode  = ref(false); // developer mode: shows config preview in layer edit panels
+const layerDevMode  = ref(localStorage.getItem('admin:layerDevMode') === 'true'); // developer mode: shows debug button on layer cards
+watch(layerDevMode, (v) => localStorage.setItem('admin:layerDevMode', String(v)));
 
 // ── Storage info ───────────────────────────────────────────────
 const storageInfo        = ref(null);
@@ -1065,6 +1068,7 @@ async function deleteAllFiles() {
     ));
     draft.value.data_layers     = [];
     deleteFilesConfirming.value = false;
+    dataLayersSectionRef.value?.fetchLayers();
   } catch (err) {
     validationError.value = err.message;
     deleteFilesConfirming.value = false;

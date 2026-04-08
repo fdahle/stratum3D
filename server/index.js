@@ -443,6 +443,12 @@ app.patch('/admin/layers/:id', requireAdminAuth, async (req, res) => {
     if (fill_color   != null) meta.layerConfig.fill_color   = String(fill_color);
     if (attribution  != null) meta.layerConfig.attribution  = String(attribution);
     if (Array.isArray(search_fields)) meta.layerConfig.search_fields = search_fields.map(String);
+    // CRS override (any layer type)
+    const { sourceCrs, tiffProjection } = req.body ?? {};
+    if (sourceCrs != null) meta.layerConfig.sourceCrs = String(sourceCrs);
+    if ('tiffProjection' in (req.body ?? {}) && meta.fileType === 'geotiff') {
+      meta.layerConfig.tiffProjection = tiffProjection ? String(tiffProjection) : null;
+    }
     // CSV attribute join
     if ('csvLink' in (req.body ?? {})) {
       const oldJoinedCols = meta.layerConfig.csvLink?.joinedColumns ?? [];

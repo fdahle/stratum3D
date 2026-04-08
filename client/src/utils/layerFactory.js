@@ -249,6 +249,10 @@ export function createGeoTIFFLayerConfig(layerConf, map, zIndex, layerId) {
       }
     ],
     normalize: layerConf.normalize !== undefined ? layerConf.normalize : true,
+    // Explicitly declare the source CRS so OL can reproject to the map's CRS.
+    // Without this, OL tries to read the CRS from GeoKeys which can fail for
+    // projections not natively known to OL (e.g. EPSG:3031).
+    ...(layerConf.tiffProjection ? { projection: layerConf.tiffProjection } : {}),
   };
 
   // Add optional overviews for better performance with large GeoTIFFs

@@ -3,7 +3,7 @@
     <div id="map" ref="mapContainer" @contextmenu="handleMapContextMenu"></div>
     
     <!-- Map Context Menu -->
-    <ContextMenuMap ref="mapContextMenuRef" />
+    <ContextMenuMap ref="mapContextMenuRef" :is-pins-open="props.isPinsOpen" />
 
     <!-- Scale bar rendered here so Vue scoped CSS applies cleanly -->
     <div ref="scalebarRef" class="scalebar-anchor" :style="{ bottom: showInfoBar ? '36px' : '8px' }"></div>
@@ -59,6 +59,10 @@ import { useLayerManager } from "../../composables/useLayerManager";
 import { usePinStore } from "../../stores/map/pinStore";
 import { getMapPinIcon } from "../../constants/icons";
 import ContextMenuMap from "../contextMenus/ContextMenuMap.vue";
+
+const props = defineProps({
+  isPinsOpen: { type: Boolean, default: false },
+});
 
 const configRef = inject("config");
 const config = configRef.value;

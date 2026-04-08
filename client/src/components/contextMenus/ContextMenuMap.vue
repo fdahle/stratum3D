@@ -11,8 +11,10 @@
       <ul v-if="!pinLabelMode">
         <li @click="handleCopyCoordinates">📋 Copy Coordinates</li>
         <li @click="handleInspectPoint">🔍 Inspect Point</li>
-        <li class="menu-separator"></li>
-        <li @click="enterPinLabelMode">📌 Place Pin…</li>
+        <template v-if="props.isPinsOpen">
+          <li class="menu-separator"></li>
+          <li @click="enterPinLabelMode">📌 Place Pin…</li>
+        </template>
       </ul>
 
       <!-- Pin label input -->
@@ -117,6 +119,10 @@ const olPixel = ref(null); // [px, py] in map viewport pixels
 const inspectVisible = ref(false);
 const isInspecting = ref(false);
 const inspectResults = ref([]);
+
+const props = defineProps({
+  isPinsOpen: { type: Boolean, default: false },
+});
 
 const emit = defineEmits(["action"]);
 

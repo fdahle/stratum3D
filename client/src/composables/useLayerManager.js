@@ -234,6 +234,7 @@ export function useLayerManager(map) {
         if (scanned.dataMin    != null) resolvedConf.dataMin      = scanned.dataMin;
         if (scanned.dataMax    != null) resolvedConf.dataMax      = scanned.dataMax;
         if (scanned.noDataValue!= null) resolvedConf.noDataValue  = scanned.noDataValue;
+        if (scanned.extent     != null) resolvedConf.extent       = scanned.extent;
         if (scanned.projection != null && !resolvedConf.tiffProjection)
           resolvedConf.tiffProjection = scanned.projection;
 

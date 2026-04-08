@@ -1,13 +1,13 @@
 <template>
   <Transition name="pin-panel-slide">
-    <div v-if="isOpen" class="pin-panel">
-      <div class="pin-panel-header">
+    <div v-if="isOpen" class="pin-panel" :style="panelStyle" ref="panelRef">
+      <div class="pin-panel-header" @mousedown="startDrag">
         <span class="pin-panel-title">📌 Pins <span class="pin-count">({{ pins.length }})</span></span>
         <button class="pin-panel-close" @click="$emit('close')" title="Close">✕</button>
       </div>
 
       <div v-if="pins.length === 0" class="pin-panel-empty">
-        Right-click the map and choose<br><strong>Place Pin…</strong> to add a pin.
+        Right-click the map and choose<br><strong>Place Pin…</strong> to add a pin.<br><small>(available while this panel is open)</small>
       </div>
 
       <ul v-else class="pin-list">
@@ -51,13 +51,55 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue';
+import { ref, nextTick, computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { usePinStore } from '@/stores/map/pinStore';
 import { useMapStore } from '@/stores/map/mapStore';
 
-defineProps({ isOpen: { type: Boolean, default: false } });
+const props = defineProps({ isOpen: { type: Boolean, default: false } });
 defineEmits(['close']);
+
+// ---- Dragging ----
+const panelRef = ref(null);
+const dragPos = ref(null); // { top, left } or null for default position
+
+const panelStyle = computed(() => {
+  if (!dragPos.value) return {};
+  return {
+    top: dragPos.value.top + 'px',
+    left: dragPos.value.left + 'px',
+    right: 'auto',
+  };
+});
+
+// Reset position when panel is re-opened
+watch(() => props.isOpen, (open) => {
+  if (open) dragPos.value = null;
+});
+
+const startDrag = (e) => {
+  // Don't drag when clicking the close button
+  if (e.target.closest('.pin-panel-close')) return;
+  e.preventDefault();
+  const panel = panelRef.value;
+  if (!panel) return;
+  const rect = panel.getBoundingClientRect();
+  const offsetX = e.clientX - rect.left;
+  const offsetY = e.clientY - rect.top;
+
+  const onMove = (me) => {
+    dragPos.value = {
+      top: me.clientY - offsetY,
+      left: me.clientX - offsetX,
+    };
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+};
 
 const ICON_FLY   = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>`;
 const ICON_TRASH = `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>`;
@@ -123,6 +165,8 @@ const zoomToPin = (pin) => {
   background: #f8f9fa;
   border-bottom: 1px solid #e9ecef;
   flex-shrink: 0;
+  cursor: move;
+  user-select: none;
 }
 
 .pin-panel-title {
