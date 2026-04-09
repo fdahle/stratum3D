@@ -1,4 +1,8 @@
-# hist_map
+> [!WARNING]
+> **This project is currently under heavy development.**
+> Expect frequent breaking changes, bugs, and incomplete documentation.
+
+# Stratum3D
 
 A web-based geospatial visualization system with 3D model and point cloud support, designed for historical map data and geographical features.
 
@@ -298,7 +302,7 @@ See [docs/preprocessing.md](docs/preprocessing.md) for optimization details.
 
 ## License
 
-[Your License Here]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Acknowledgments
 
