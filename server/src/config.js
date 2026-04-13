@@ -11,7 +11,7 @@ export const config = {
 
   // CORS configuration
   corsOrigins: process.env.CORS_ORIGINS
-    ? process.env.CORS_ORIGINS.split(',')
+    ? process.env.CORS_ORIGINS.split(',').map(o => o.trim()).filter(Boolean)
     : [
         'http://localhost:8080',
         'http://localhost:5173',

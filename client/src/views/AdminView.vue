@@ -448,6 +448,28 @@
               <p v-if="limitSaveError" class="dev-field-error">{{ limitSaveError }}</p>
             </div>
           </div>
+
+          <!-- System libraries -->
+          <div v-if="systemLibs" class="dev-card" style="margin-top: 1rem;">
+            <div class="dev-card-header">
+              <span class="dev-card-title">System Libraries</span>
+            </div>
+            <div v-for="lib in systemLibs" :key="lib.name" class="dev-stat-row">
+              <span class="dev-stat-label">{{ lib.name }}</span>
+              <span class="dev-stat-value" style="display: flex; align-items: center; gap: 0.4rem;">
+                <svg v-if="lib.available" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-success, #4ade80); flex-shrink: 0;">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                <svg v-else viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--color-danger, #f87171); flex-shrink: 0;">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+                <span :style="{ color: lib.available ? 'var(--color-success, #4ade80)' : 'var(--color-danger, #f87171)' }">
+                  {{ lib.available ? 'Installed' : 'Not installed' }}
+                </span>
+                <span class="dev-stat-muted">— {{ lib.description }}</span>
+              </span>
+            </div>
+          </div>
           </template>
         </section>
 
@@ -593,6 +615,18 @@ function clearStoredPassword() { _storedPassword.value = ''; }
 const osmBackground = ref(true);  // separate from basemaps — MapWidget injects the right tile per CRS
 const layerDevMode  = ref(localStorage.getItem('admin:layerDevMode') === 'true'); // developer mode: shows debug button on layer cards
 watch(layerDevMode, (v) => localStorage.setItem('admin:layerDevMode', String(v)));
+
+// ── System libraries ───────────────────────────────────────────
+const systemLibs = ref(null);
+
+async function fetchSystemLibs() {
+  try {
+    const res = await fetch(getApiUrl('/admin/system-libraries'), {
+      headers: { Authorization: buildAuthHeader(getStoredPassword()) },
+    });
+    if (res.ok) systemLibs.value = await res.json();
+  } catch { /* non-critical, ignore */ }
+}
 
 // ── Storage info ───────────────────────────────────────────────
 const storageInfo        = ref(null);
@@ -900,6 +934,7 @@ async function createPassword() {
     isAuthenticated.value   = true;
     resetSessionTimer();
     fetchStorage();
+    fetchSystemLibs();
   } catch (err) {
     loginError.value = err.message;
   } finally {
@@ -923,6 +958,7 @@ async function attemptLogin() {
     isAuthenticated.value   = true;
     resetSessionTimer();
     fetchStorage();
+    fetchSystemLibs();
   } catch (err) {
     loginError.value = err.message;
     password.value   = '';

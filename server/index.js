@@ -23,7 +23,8 @@ import logger from './src/logger.js';
 import { listLayers, readLayerMeta, writeLayerMeta, deleteLayer, metaToConfigLayer, validateLayerId } from './src/layerStore.js';
 import { jobQueue } from './src/jobQueue.js';
 import { processUploadBatch, addSubFile, addSubFileBatch, classifyExt, relinkGeojson, applyCsvLink } from './processors/uploadProcessor.js';
-import { convertToCog }   from './processors/geotiffProcessor.js';
+import { convertToCog, isGdalAvailable } from './processors/geotiffProcessor.js';
+import { isPdalAvailable } from './processors/pointcloudProcessor.js';
 
 const app = express();
 
@@ -42,7 +43,7 @@ let runtimeAdminPassword = null;
 try {
   const stored = (await fs.readFile(credentialsFilePath, 'utf8').catch(() => null))?.trim();
   if (stored) runtimeAdminPassword = stored;
-} catch { /* ignore */ }
+} catch (err) { logger.warn('Could not load stored credentials:', err.message); }
 
 // Load persisted settings overrides (e.g. uploadLimitMb changed via admin UI)
 try {
@@ -53,7 +54,7 @@ try {
       config.uploadLimitMb = saved.uploadLimitMb;
     }
   }
-} catch { /* ignore malformed settings */ }
+} catch (err) { logger.warn('Ignoring malformed settings file:', err.message); }
 
 function getAdminPassword() { return runtimeAdminPassword; }
 
@@ -386,6 +387,15 @@ app.get('/admin/storage', requireAdminAuth, async (req, res) => {
   res.json({ usedBytes, uploadLimitMb: config.uploadLimitMb, diskFreeBytes, diskTotalBytes });
 });
 
+// System library availability check
+app.get('/admin/system-libraries', requireAdminAuth, async (_req, res) => {
+  const [gdal, pdal] = await Promise.all([isGdalAvailable(), isPdalAvailable()]);
+  res.json([
+    { name: 'GDAL', description: 'GeoTIFF → COG conversion & CRS detection', available: gdal },
+    { name: 'PDAL', description: 'Point cloud → COPC conversion',            available: pdal },
+  ]);
+});
+
 // Update server settings (upload limit)
 app.patch('/admin/settings', requireAdminAuth, express.json(), async (req, res) => {
   const { uploadLimitMb } = req.body ?? {};
@@ -525,7 +535,7 @@ app.get('/admin/layers/:id/preview', requireAdminAuth, async (req, res) => {
     res.json({ columns, rows, total: geojson.features?.length ?? 0 });
   } catch (err) {
     if (err.message?.includes('not found')) return res.status(404).json({ error: err.message });
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: isDevelopment ? err.message : 'Internal Server Error' });
   }
 });
 
@@ -554,7 +564,7 @@ app.post('/admin/layers/:id/subfiles', requireAdminAuth, runSubfileMiddleware, a
     res.json(result);
   } catch (err) {
     if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: isDevelopment ? err.message : 'Internal Server Error' });
   }
 });
 
@@ -569,7 +579,7 @@ app.post('/admin/layers/:id/subfiles/batch', requireAdminAuth, runUploadMiddlewa
     res.json(result);
   } catch (err) {
     if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: isDevelopment ? err.message : 'Internal Server Error' });
   }
 });
 
@@ -846,7 +856,7 @@ app.post('/admin/relink', requireAdminAuth, async (req, res) => {
     res.json(result);
   } catch (err) {
     logger.error('Re-link error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: isDevelopment ? err.message : 'Internal Server Error' });
   }
 });
 
@@ -856,11 +866,14 @@ app.get('/admin/layers/:id/original', requireAdminAuth, async (req, res) => {
     validateLayerId(req.params.id);
     const meta = await readLayerMeta(layersDir, req.params.id);
     if (!meta.originalBackup) return res.status(404).json({ error: 'No original backup for this layer.' });
+        if (!/^[a-zA-Z0-9._-]+$/.test(meta.originalBackup)) {
+      return res.status(500).json({ error: 'Invalid backup filename in layer metadata.' });
+    }
     const backupPath = path.join(layersDir, req.params.id, meta.originalBackup);
     res.download(backupPath, meta.originalName);
   } catch (err) {
     if (err.message.includes('not found')) return res.status(404).json({ error: err.message });
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: isDevelopment ? err.message : 'Internal Server Error' });
   }
 });
 

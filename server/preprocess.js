@@ -14,6 +14,21 @@ import {
 } from "./src/utils.js";
 import { processAllModels } from "./processors/modelProcessor.js";
 import { processAllPointClouds } from "./processors/pointcloudProcessor.js";
+import { execFile } from "child_process";
+import { promisify } from "util";
+ 
+const execFileAsync = promisify(execFile);
+ 
+// Whitelists for GDAL config values sourced from preprocess_config.json
+const ALLOWED_RESAMPLING_METHODS = new Set([
+  "near", "bilinear", "cubic", "cubicspline", "lanczos", "average",
+  "rms", "mode", "max", "min", "med", "q1", "q3", "sum",
+]);
+const ALLOWED_COMPRESSIONS = new Set([
+  "NONE", "DEFLATE", "LZW", "PACKBITS", "JPEG", "ZSTD",
+  "WEBP", "LERC", "LERC_DEFLATE", "LERC_ZSTD",
+]);
+
 
 // Define input/output directories
 const INPUT_DIR = path.resolve("../input");
@@ -300,6 +315,22 @@ const processGeoTIFFs = async () => {
 
   console.log(`  Found ${files.length} GeoTIFF(s) to process`);
 
+  // Check GDAL availability once for the whole batch
+  let gdalAvailable = false;
+  try {
+    await execFileAsync("gdalinfo", ["--version"]);
+    gdalAvailable = true;
+  } catch {
+    gdalAvailable = false;
+  }
+ 
+  if (!gdalAvailable) {
+    console.log("  ⚠ GDAL not found. Installing GDAL is recommended for optimization.");
+    console.log("    macOS: brew install gdal");
+    console.log("    Ubuntu: sudo apt-get install gdal-bin");
+    console.log("    Windows: https://gdal.org/download.html");
+  }
+
   for (const file of files) {
     const inputPath = path.join(GEOTIFFS_INPUT_DIR, file);
     const outputName = file.replace(/\.tiff?$/, ".tif");
@@ -309,39 +340,22 @@ const processGeoTIFFs = async () => {
 
     const config = PREPROCESS_CONFIG.geotiffs;
 
-    // Check if GDAL is available
-    const { execSync } = await import("child_process");
-    let gdalAvailable = false;
-    try {
-      execSync("gdalinfo --version", { stdio: "ignore" });
-      gdalAvailable = true;
-    } catch (e) {
-      gdalAvailable = false;
-    }
-
     if (!gdalAvailable) {
-      console.log("  ⚠ GDAL not found. Installing GDAL is recommended for optimization.");
-      console.log("    macOS: brew install gdal");
-      console.log("    Ubuntu: sudo apt-get install gdal-bin");
-      console.log("    Windows: https://gdal.org/download.html");
       console.log("  → Copying file as-is...");
       fs.copyFileSync(inputPath, outputPath);
       console.log(`  ✔ Copied: ${outputName}`);
       continue;
     }
 
-    // Build GDAL command for optimization
-    const args = [];
-
     // Check if already Cloud Optimized
     let isCOG = false;
     try {
-      const info = execSync(`gdalinfo "${inputPath}"`, { encoding: "utf-8" });
+      const { stdout: info } = await execFileAsync("gdalinfo", [inputPath]);
       if (info.includes("LAYOUT=COG")) {
         isCOG = true;
         console.log("  → Already Cloud Optimized (COG)");
       }
-    } catch (e) {
+    } catch {
       console.error("  ! Failed to read GeoTIFF info");
     }
 
@@ -356,41 +370,54 @@ const processGeoTIFFs = async () => {
     console.log("  → Optimizing GeoTIFF...");
 
     try {
-      // Base command
-      let cmd = `gdalwarp "${inputPath}" "${outputPath}"`;
+      // Build gdalwarp args array — never interpolate config values into a shell string
+      const gdalwarpArgs = [inputPath, outputPath];
 
       // Add CRS reprojection if specified
       if (config.targetCrs) {
-        const targetEpsg = config.targetCrs.replace("EPSG:", "");
-        cmd += ` -t_srs EPSG:${targetEpsg}`;
-        console.log(`    - Reprojecting to ${config.targetCrs}`);
+        const epsgMatch = String(config.targetCrs).match(/^EPSG:(\d+)$/i);
+        if (!epsgMatch) throw new Error(`Invalid targetCrs format: ${config.targetCrs}`);
+        gdalwarpArgs.push("-t_srs", `EPSG:${epsgMatch[1]}`);
+        console.log(`    - Reprojecting to EPSG:${epsgMatch[1]}`);
       }
 
       // Add resampling method
       if (config.resampling?.method) {
-        cmd += ` -r ${config.resampling.method}`;
+        const method = String(config.resampling.method).toLowerCase();
+        if (!ALLOWED_RESAMPLING_METHODS.has(method)) {
+          throw new Error(`Invalid resampling method: ${config.resampling.method}`);
+        }
+        gdalwarpArgs.push("-r", method);
       }
 
-      // Add resolution if specified
-      if (config.resampling?.resolution) {
-        cmd += ` -tr ${config.resampling.resolution} ${config.resampling.resolution}`;
+      // Add resolution if specified (must be a positive finite number)
+      if (config.resampling?.resolution != null) {
+        const res = parseFloat(config.resampling.resolution);
+        if (!Number.isFinite(res) || res <= 0) {
+          throw new Error(`Invalid resolution value: ${config.resampling.resolution}`);
+        }
+        gdalwarpArgs.push("-tr", String(res), String(res));
       }
 
       // Cloud Optimize
       if (config.optimization?.createCOG) {
-        cmd += ` -co TILED=YES`;
-        cmd += ` -co COPY_SRC_OVERVIEWS=YES`;
-        cmd += ` -co COMPRESS=${config.optimization.compression || "DEFLATE"}`;
+        const compression = String(config.optimization.compression || "DEFLATE").toUpperCase();
+        if (!ALLOWED_COMPRESSIONS.has(compression)) {
+          throw new Error(`Invalid compression type: ${config.optimization.compression}`);
+        }
+        gdalwarpArgs.push("-co", "TILED=YES");
+        gdalwarpArgs.push("-co", "COPY_SRC_OVERVIEWS=YES");
+        gdalwarpArgs.push("-co", `COMPRESS=${compression}`);
         console.log(`    - Creating Cloud Optimized GeoTIFF (COG)`);
       }
 
       // Add overviews
       if (config.optimization?.overviews) {
-        cmd += ` -co OVERVIEW_RESAMPLING=BILINEAR`;
+        gdalwarpArgs.push("-co", "OVERVIEW_RESAMPLING=BILINEAR");
         console.log(`    - Adding internal overviews`);
       }
 
-      execSync(cmd, { stdio: "inherit" });
+      await execFileAsync("gdalwarp", gdalwarpArgs);
       console.log(`  ✔ Optimized: ${outputName}`);
     } catch (error) {
       console.error(`  ✗ Failed to process ${file}:`, error.message);

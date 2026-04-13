@@ -11,6 +11,7 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { randomUUID } from 'crypto';
 import fs            from 'fs/promises';
 import path          from 'path';
 import { fromArrayBuffer } from 'geotiff';
@@ -66,7 +67,7 @@ export async function convertToCog(inputPath, options = {}) {
 
   const dir      = path.dirname(inputPath);
   const basename = path.basename(inputPath);
-  const tmpPath  = path.join(dir, `__cog_tmp_${Date.now()}_${basename}`);
+  const tmpPath  = path.join(dir, `__cog_tmp_${randomUUID()}_${basename}`);
 
   const compressionUpper = (compression || 'lzw').toUpperCase();
   const args = [
