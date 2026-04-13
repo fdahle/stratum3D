@@ -11,7 +11,6 @@ A web-based geospatial visualization system with 3D model and point cloud suppor
 - 📍 **Interactive 2D Maps** - OpenLayers-based mapping with custom CRS support
 - 🗻 **3D Viewer** - Three.js-based 3D visualization of models and point clouds
 - 📊 **Multi-format Support** - GeoJSON, 3D models (.obj, .ply), point clouds (.laz, .ply), GeoTIFFs
-- ⚡ **Optimized Pipeline** - Automatic preprocessing and optimization for web delivery
 - 🐳 **Docker Ready** - Complete containerized setup with all dependencies
 - 🛠️ **Flexible Configuration** - YAML-based map config with per-feature 3D data links
 
@@ -23,7 +22,7 @@ The easiest way to get started - no need to install GDAL, PDAL, or other depende
 
 ```bash
 # Start the application
-docker-compose up
+docker compose up
 
 # Access at:
 # - Frontend: http://localhost:8080
@@ -32,20 +31,16 @@ docker-compose up
 
 For development with hot-reload:
 ```bash
-docker-compose --profile dev up server client-dev
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 # Frontend dev server: http://localhost:5173
 ```
 
-See [docs/docker.md](docs/docker.md) for complete Docker documentation.
+See [DOCKER.md](DOCKER.md) for complete Docker documentation.
 
 ### Manual Setup
 
 #### Prerequisites
 - Node.js 18+
-- Optional: GDAL (for GeoTIFF processing)
-- Optional: PDAL (for point cloud processing)
-- Optional: MeshLab or Blender (for 3D model optimization)
-
 #### Installation
 
 ```bash
@@ -62,128 +57,129 @@ cd server && npm start      # Port 3000
 
 ```
 hist_map/
-├── input/              # Raw source data (GeoJSON, models, point clouds)
+├── docker-compose.yml          # Base Docker configuration
+├── docker-compose.dev.yml      # Development overrides
+├── docker-compose.prod.yml     # Production overrides
+├── .env.example                # Root environment variable template
 ├── server/
-│   ├── data/          # Processed & optimized data (served to client)
-│   ├── preprocess.js  # Data preprocessing pipeline
-│   └── index.js       # Express API server
-├── client/            # Vue.js frontend application
-│   └── public/
-│       └── config.yaml # Map configuration
-├── docs/              # Documentation
-└── examples/          # Example configurations
+│   ├── index.js                # Express API server
+│   ├── reset.js                # Reset/cleanup utility
+│   ├── src/                    # Core server modules
+│   │   ├── config.js           # Environment-based configuration
+│   │   ├── jobQueue.js         # Async job queue for processing
+│   │   ├── layerStore.js       # UUID-based layer registry
+│   │   ├── logger.js           # Structured logging
+│   │   └── utils.js            # Shared utilities
+│   ├── processors/             # Format-specific processing logic
+│   │   ├── geotiffProcessor.js
+│   │   ├── modelProcessor.js
+│   │   ├── pointcloudProcessor.js
+│   │   ├── shapeProcessor.js
+│   │   └── uploadProcessor.js
+│   └── data/                   # Served data directory
+│       ├── config.yaml         # Map configuration
+│       └── layers/             # Uploaded layers (UUID-based)
+│           └── {uuid}/         # One folder per layer
+└── client/                     # Vue.js frontend application
+    ├── src/
+    │   ├── App.vue
+    │   ├── main.js
+    │   ├── components/
+    │   │   ├── admin/          # Admin UI components
+    │   │   ├── contextMenus/   # Right-click context menus
+    │   │   ├── map/            # 2D map components
+    │   │   ├── modals/         # Dialog modals (incl. admin/)
+    │   │   ├── ui/             # Generic UI primitives
+    │   │   └── viewer3D/       # 3D viewer components
+    │   ├── composables/        # Reusable Vue composables
+    │   ├── constants/          # App-wide constants and config schema
+    │   ├── router/             # Vue Router configuration
+    │   ├── stores/             # Pinia state stores
+    │   │   ├── map/            # Map state (layers, pins, selection)
+    │   │   └── viewer3D/       # 3D viewer state
+    │   ├── utils/              # Frontend utilities
+    │   ├── views/              # Top-level views (MapView, 3DView, AdminView)
+    │   └── workers/            # Web Workers (GeoTIFF, layer, point cloud)
+    └── public/
+        └── wasm/               # WASM binaries (laz-perf)
 ```
-
-See [docs/architecture.md](docs/architecture.md) for detailed structure explanation.
 
 ## Configuration
 
 ### Map Configuration
 
-Edit `client/public/config.yaml` to configure your map:
+Edit `server/data/config.yaml` to configure your map:
 
 ```yaml
+website:
+  title: My Map Viewer
+
 view:
-  center: [51.505, -0.09]
-  zoom: 13
+  center: [0, -75]
+  zoom: 3
+  minZoom: 0
+  maxZoom: 14
 
-crs: "EPSG3857"
+crs: "EPSG:3031"
 
-base_layers:
-  - name: "OpenStreetMap"
-    type: "tile"
-    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+osm_background: true
+basemaps: []
+
+data_layers:
+  - name: "My GeoJSON Layer"
+    url: "http://localhost:3000/data/layers/{uuid}/{uuid}.geojson"
+    type: geojson
     visible: true
+    order: 0
 
-overlay_layers:
-  - name: "My Data"
-    type: "geojson"
-    url: "http://localhost:3000/data/shapes/mydata.geojson"
+  - name: "My Raster Layer"
+    url: "http://localhost:3000/data/layers/{uuid}/{uuid}.tif"
+    type: geotiff
     visible: true
+    order: 1
+    tiffProjection: "EPSG:3031"
+    bandCount: 1
+
+ui:
+  map_download: true
+  map_upload: true
+  viewer_download: true
+  viewer_upload: true
 ```
 
-See `examples/config_london.yaml` for a complete example.
-
-### Data Source Configuration
-
-Edit `input/input_config.json` to configure data sources and 3D model links:
-
-```json
-{
-  "shapes/myfile.geojson": {
-    "metadata": {
-      "has3DModels": true,
-      "3DModels": [
-        { "linkTemplate": "{model_name}.obj" }
-      ]
-    }
-  }
-}
-```
-
-See [docs/3d-data-config.md](docs/3d-data-config.md) for detailed 3D data configuration.
-
-### Preprocessing Configuration
-
-Edit `server/preprocess_config.json` to configure data optimization:
-
-```json
-{
-  "models3D": {
-    "decimation": {
-      "targetVertices": 1000000
-    }
-  },
-  "pointclouds": {
-    "thinning": {
-      "maxPoints": 10000000
-    }
-  }
-}
-```
-
-See [docs/preprocessing.md](docs/preprocessing.md) for complete preprocessing documentation.
+Layers are typically added and managed through the Admin interface rather than by editing this file manually.
 
 ## Workflow
 
 ### 1. Add Your Data
 
-Place raw data files in the `input/` folder:
+Navigate to the Admin view in the app and upload files directly. Supported formats:
+- GeoJSON / Shapefiles → vector layers
+- GeoTIFF (`.tif`) → raster layers
+- 3D models (`.obj` + `.mtl`, `.ply`)
+- Point clouds (`.las`, `.laz`, `.ply`)
+- CSV files → attribute join for GeoJSON layers
 
-```bash
-input/
-├── shapes/         # GeoJSON, Shapefiles
-├── models/         # 3D models (.obj, .mtl, textures)
-├── pointclouds/    # Point clouds (.las, .laz, .ply)
-├── geotiffs/       # Raster imagery (.tif)
-└── attributes/     # CSV files for attribute joining
-```
+Each upload is assigned a unique UUID and stored under `server/data/layers/{uuid}/`.
 
-### 2. Run Preprocessing
+### 2. Configure Your Map
 
-```bash
-# Docker
-docker-compose exec server npm run preprocess
+Edit `server/data/config.yaml` to set the view and CRS.
+Layers uploaded via the Admin interface are registered automatically.
 
-# Manual
-cd server && npm run preprocess
-```
-
-This will:
-- Optimize and reproject GeoJSON
-- Decimate large 3D models
-- Convert point clouds to COPC format
-- Create Cloud-Optimized GeoTIFFs
-
-### 3. Configure Your Map
-
-Edit `client/public/config.yaml` to reference your processed data.
-
-### 4. View Your Map
+### 3. View Your Map
 
 Open http://localhost:8080 (Docker) or http://localhost:5173 (dev) to see your map.
 
 ## Key Features
+
+### Admin Interface
+
+The Admin view allows you to manage data layers without touching config files:
+- Upload and configure new layers (GeoJSON, GeoTIFF, 3D models, point clouds)
+- Link sub-files (CSV attributes, MTL materials, textures)
+- Edit layer metadata and display settings
+- Remove layers and associated files
 
 ### 3D Viewer
 
@@ -194,16 +190,12 @@ The 3D viewer supports:
 - Interactive tools (wireframe, bounding box, measurements)
 - QGIS-style ribbon menu
 
-See [docs/3d-viewer.md](docs/3d-viewer.md) for complete 3D viewer documentation.
+### Layer Store
 
-### Automatic File Naming
-
-The system automatically prevents file name conflicts by prefixing files with unique feature IDs:
-- `model.obj` → `a3f5b2c8_model.obj`
-- Multiple features can have files with the same base name
-- All references (MTL, textures) automatically updated
-
-See [docs/architecture.md](docs/architecture.md#file-naming-system) for details.
+Each uploaded layer is stored in its own UUID directory under `server/data/layers/`:
+- `{uuid}.{ext}` — main data file
+- `{uuid}.meta.json` — metadata sidecar
+- Sub-files (CSV, MTL, textures, linked models/point clouds) stored alongside
 
 ### Supported Formats
 
@@ -226,11 +218,7 @@ See [docs/architecture.md](docs/architecture.md#file-naming-system) for details.
 
 ## Documentation
 
-- [Docker Setup](docs/docker.md) - Complete Docker usage guide
-- [Project Architecture](docs/architecture.md) - Folder structure and file naming
-- [Preprocessing](docs/preprocessing.md) - Data optimization pipeline
-- [3D Viewer](docs/3d-viewer.md) - 3D visualization features
-- [3D Data Configuration](docs/3d-data-config.md) - Linking 3D models to features
+- [Docker Setup](DOCKER.md) - Complete Docker usage guide
 
 ## Development
 
@@ -239,17 +227,17 @@ See [docs/architecture.md](docs/architecture.md#file-naming-system) for details.
 ```bash
 # Client (Vue.js with hot-reload)
 cd client
-npm run dev
+npm run dev       # Port 5173
 
-# Server (Express with auto-restart)
+# Server (Express)
 cd server
-npm run dev
+npm start         # Port 3000
 ```
 
 ### Build for Production
 
 ```bash
-# Client
+# Build client
 cd client
 npm run build
 
@@ -258,39 +246,42 @@ cd server
 npm start
 ```
 
+### Linting & Formatting
+
+```bash
+cd client
+npm run lint       # ESLint
+npm run format     # Prettier
+```
+
 ### Docker Development
 
 ```bash
-# Start with development profile
-docker-compose --profile dev up
+# Development (hot-reload)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 
-# Rebuild after changes
-docker-compose up --build
+# Production
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up
+
+# Rebuild after dependency changes
+docker compose up --build
 ```
 
 ## Troubleshooting
 
 ### Port Already in Use
-Change ports in `docker-compose.yml` or `.env` file.
+Change ports in `docker-compose.yml` or the root `.env` file (copy `.env.example` as a starting point).
 
 ### 3D Models Not Loading
-1. Check that preprocessing completed successfully
-2. Verify URLs in processed GeoJSON files
+1. Check that preprocessing completed or the upload succeeded
+2. Verify the layer UUID directory exists under `server/data/layers/`
 3. Check browser console for errors
 
-### Point Clouds Not Showing
-LAZ/LAS files must be preprocessed to COPC format. Run:
-```bash
-npm run preprocess
-```
+### Admin Password
+On first run a setup wizard will prompt you to set an admin password. To reset it, delete `server/data/.credentials` and restart the server.
 
 ### Large Files
-For files larger than 100MB, preprocessing is recommended:
-- 3D models: Decimated to ~1M vertices
-- Point clouds: Thinned and converted to COPC
-- GeoTIFFs: Converted to COG format
-
-See [docs/preprocessing.md](docs/preprocessing.md) for optimization details.
+For very large files, upload and processing are handled automatically by the Admin interface. Processing options (decimation, COPC conversion, COG creation) can be configured before uploading.
 
 ## Contributing
 
