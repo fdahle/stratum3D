@@ -365,7 +365,7 @@
           <div class="section-header-simple section-header-collapsible" @click="developerCollapsed = !developerCollapsed">
             <div>
               <h2 class="section-title">Developer</h2>
-              <p class="section-desc">Inspect the YAML that will be written when you save.</p>
+              <p class="section-desc">Developer tools and settings.</p>
             </div>
             <button class="section-collapse-btn" :title="developerCollapsed ? 'Expand' : 'Collapse'">
               <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" :style="{ transform: developerCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }">
