@@ -25,6 +25,11 @@ function persistedRef(key, defaultValue) {
 export const useSettingsStore = defineStore("settings", () => {
   // 1. STATE (auto-persisted to localStorage)
   const showInfoBar = persistedRef("settings_showInfoBar", true);
+
+  // Runtime flag — fetched from /admin/setup-status on app start.
+  // true until the server explicitly says otherwise.
+  const adminEnabled = ref(true);
+  const setAdminEnabled = (val) => { adminEnabled.value = val; };
   const selectionColor = persistedRef("settings_selectionColor", "#FFFF00");
   const theme = persistedRef("settings_theme", "dark");
   const showArrowButtons = persistedRef("settings_showArrowButtons", false);
@@ -50,5 +55,7 @@ export const useSettingsStore = defineStore("settings", () => {
     toggleArrowButtons,
     showMapRibbon,
     toggleMapRibbon,
+    adminEnabled,
+    setAdminEnabled,
   };
 });

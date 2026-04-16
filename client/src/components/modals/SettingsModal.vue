@@ -109,7 +109,7 @@
               <span v-html="ICON_INFO"></span>
               <span>About</span>
             </button>
-            <button class="btn-secondary" @click="goToAdmin" title="Open Admin Panel">
+            <button v-if="adminEnabled" class="btn-secondary" @click="goToAdmin" title="Open Admin Panel">
               <span v-html="ICON_SETTINGS"></span>
               <span>Admin</span>
             </button>
@@ -157,7 +157,7 @@ const goToAdmin = () => {
 };
 
 // Extract State (Must use storeToRefs to keep it reactive!)
-const { showInfoBar, showArrowButtons, showMapRibbon, theme } = storeToRefs(settingsStore);
+const { showInfoBar, showArrowButtons, showMapRibbon, theme, adminEnabled } = storeToRefs(settingsStore);
 const { toggleInfoBar, toggleArrowButtons, toggleMapRibbon, toggleTheme } = settingsStore;
 </script>
 

@@ -34,6 +34,8 @@ export const config = {
 
   // Admin — password is stored in data/.credentials (set via first-run wizard)
   // No hardcoded password: on first visit the user chooses one.
+  // Set ADMIN_ENABLED=false to strip all /admin/* routes from the server entirely.
+  adminEnabled: process.env.ADMIN_ENABLED !== 'false',
 };
 
 export const isDevelopment = config.nodeEnv === 'development';

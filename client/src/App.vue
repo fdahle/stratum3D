@@ -40,7 +40,7 @@ const isAdminRoute = computed(() => route.path.startsWith('/admin'));
 
 // Theme management
 const settingsStore = useSettingsStore();
-const { theme } = storeToRefs(settingsStore);
+const { theme, adminEnabled } = storeToRefs(settingsStore);
 
 // Apply theme to document body
 watch(theme, (newTheme) => {
@@ -69,12 +69,21 @@ onMounted(async () => {
   if (import.meta.env.DEV) {
     enableDevMode();
   }
-  
+
+  // Fetch admin status first so the router guard and UI are ready before config loads
+  try {
+    const statusRes = await fetch(getApiUrl('/admin/setup-status'));
+    if (statusRes.ok) {
+      const s = await statusRes.json();
+      settingsStore.setAdminEnabled(s.adminEnabled !== false);
+    }
+  } catch { /* server unreachable — leave adminEnabled as true (safe default) */ }
+
   try {
     const res = await fetch(getApiUrl('/config'));
     if (res.status === 404) {
-      // No config yet — send to admin to set up (but don't redirect if already there)
-      if (!route.path.startsWith('/admin')) {
+      // No config yet — send to admin to set up, but only if admin is enabled
+      if (adminEnabled.value && !route.path.startsWith('/admin')) {
         window.location.replace('/admin');
       }
       return;

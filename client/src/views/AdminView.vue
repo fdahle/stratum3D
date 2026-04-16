@@ -428,24 +428,12 @@
               <span class="dev-stat-value">{{ formatBytes(storageInfo.usedBytes) }}</span>
             </div>
 
-            <!-- Upload limit editor -->
-            <div class="dev-field-group" style="margin-top: 0.65rem;">
-              <label class="dev-field-label">Max upload size per file (MB)</label>
-              <div class="dev-field-row">
-                <input
-                  v-model="editUploadLimitMb"
-                  type="number"
-                  min="1"
-                  max="50000"
-                  class="input-narrow"
-                  style="width: 110px;"
-                />
-                <button class="btn-secondary btn-sm" :disabled="limitSaving" @click="saveUploadLimit">
-                  {{ limitSaving ? 'Saving…' : 'Apply' }}
-                </button>
-                <span v-if="limitSaveOk" class="dev-field-ok">Saved</span>
-              </div>
-              <p v-if="limitSaveError" class="dev-field-error">{{ limitSaveError }}</p>
+            <div
+              class="dev-stat-row"
+              style="margin-top: 0.65rem;"
+            >
+              <span class="dev-stat-label">Max upload size per file</span>
+              <span class="dev-stat-value">{{ storageInfo.uploadLimitMb }} MB <span class="dev-stat-hint">(set via UPLOAD_LIMIT_MB in .env)</span></span>
             </div>
           </div>
 
@@ -629,15 +617,7 @@ async function fetchSystemLibs() {
 }
 
 // ── Storage info ───────────────────────────────────────────────
-const storageInfo        = ref(null);
-const editUploadLimitMb  = ref('');
-const limitSaving        = ref(false);
-const limitSaveError     = ref('');
-const limitSaveOk        = ref(false);
-
-watch(storageInfo, (info) => {
-  if (info) editUploadLimitMb.value = String(info.uploadLimitMb);
-});
+const storageInfo = ref(null);
 
 async function fetchStorage() {
   try {
@@ -648,34 +628,6 @@ async function fetchStorage() {
   } catch { /* non-critical, ignore */ }
 }
 
-async function saveUploadLimit() {
-  limitSaveError.value = '';
-  limitSaveOk.value    = false;
-  const parsed = parseInt(editUploadLimitMb.value, 10);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 50000) {
-    limitSaveError.value = 'Enter a value between 1 and 50 000 MB.';
-    return;
-  }
-  limitSaving.value = true;
-  try {
-    const res = await fetch(getApiUrl('/admin/settings'), {
-      method: 'PATCH',
-      headers: { Authorization: buildAuthHeader(getStoredPassword()), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uploadLimitMb: parsed }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `Server error ${res.status}`);
-    }
-    await fetchStorage();
-    limitSaveOk.value = true;
-    setTimeout(() => { limitSaveOk.value = false; }, 2500);
-  } catch (err) {
-    limitSaveError.value = err.message;
-  } finally {
-    limitSaving.value = false;
-  }
-}
 function formatBytes(b) {
   if (b == null) return '—';
   if (b < 1024) return b + ' B';
@@ -1175,6 +1127,10 @@ onMounted(async () => {
     const res = await fetch(getApiUrl('/admin/setup-status'));
     if (res.ok) {
       const s = await res.json();
+      if (s.adminEnabled === false) {
+        router.replace('/');
+        return;
+      }
       isFirstRun.value = !s.hasPassword;
     }
   } catch { /* ignore, fall through to login form */ }

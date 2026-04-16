@@ -36,7 +36,6 @@ const __dirname = path.dirname(__filename);
 // Stored in data/.credentials (plain text, 0o600). Set via the first-run wizard.
 // Reset by deleting the file (e.g. via the Danger Zone "Reset Config" action).
 const credentialsFilePath = path.join(__dirname, config.dataPath, '.credentials');
-const settingsFilePath    = path.join(__dirname, config.dataPath, 'settings.json');
 
 // runtimeAdminPassword stores the bcrypt hash of the admin password.
 let runtimeAdminPassword = null;
@@ -44,17 +43,6 @@ try {
   const stored = (await fs.readFile(credentialsFilePath, 'utf8').catch(() => null))?.trim();
   if (stored) runtimeAdminPassword = stored;
 } catch (err) { logger.warn('Could not load stored credentials:', err.message); }
-
-// Load persisted settings overrides (e.g. uploadLimitMb changed via admin UI)
-try {
-  const raw = (await fs.readFile(settingsFilePath, 'utf8').catch(() => null));
-  if (raw) {
-    const saved = JSON.parse(raw);
-    if (typeof saved.uploadLimitMb === 'number' && saved.uploadLimitMb > 0) {
-      config.uploadLimitMb = saved.uploadLimitMb;
-    }
-  }
-} catch (err) { logger.warn('Ignoring malformed settings file:', err.message); }
 
 function getAdminPassword() { return runtimeAdminPassword; }
 
@@ -173,12 +161,22 @@ const dataRateLimit = rateLimit({
   message: { error: 'Too many requests, please try again later.' },
 });
 
+// ── Admin disabled guard ───────────────────────────────────────────────────────
+// When ADMIN_ENABLED=false all /admin/* routes return 404 — the panel does not
+// exist at the network level. setup-status is kept alive so the client can
+// discover the flag and adapt its UI without making guesses.
+if (!config.adminEnabled) {
+  app.get('/admin/setup-status', (_req, res) => res.json({ adminEnabled: false }));
+  app.use('/admin', (_req, res) => res.status(404).json({ error: 'Not found.' }));
+  logger.info('Admin panel disabled (ADMIN_ENABLED=false) — all /admin/* routes removed.');
+}
+
 // Setup status — public, tells the client what first-run steps remain
 app.get('/admin/setup-status', async (req, res) => {
   const hasPassword = !!getAdminPassword();
   let hasConfig = false;
   try { await fs.access(configFilePath); hasConfig = true; } catch { /* no config */ }
-  res.json({ hasPassword, hasConfig });
+  res.json({ adminEnabled: true, hasPassword, hasConfig });
 });
 
 // Set admin password — usable during initial setup OR after a config reset (no .credentials file)
@@ -277,7 +275,6 @@ app.delete('/config', requireAdminAuth, async (req, res) => {
     if (err.code !== 'ENOENT') errors.push(`config: ${err.message}`);
   }
   // Clear .credentials so the next visitor can set a fresh password.
-  // If ADMIN_PASSWORD env var is set it remains as the master override.
   try {
     await fs.unlink(credentialsFilePath);
     runtimeAdminPassword = null;
@@ -294,7 +291,6 @@ const dataDir   = path.join(__dirname, config.dataPath);
 const layersDir = path.join(dataDir, 'layers');
 
 // ── Multer setup ──────────────────────────────────────────────────────────────
-// Limit is read dynamically so it updates immediately after PATCH /admin/settings.
 const ALLOWED_UPLOAD_EXTS = new Set(['.geojson', '.json', '.tif', '.tiff', '.obj', '.ply', '.stl',
   '.las', '.laz', '.mtl', '.jpg', '.jpeg', '.png', '.bmp', '.tga', '.webp', '.csv']);
 
@@ -394,22 +390,6 @@ app.get('/admin/system-libraries', requireAdminAuth, async (_req, res) => {
     { name: 'GDAL', description: 'GeoTIFF → COG conversion & CRS detection', available: gdal },
     { name: 'PDAL', description: 'Point cloud → COPC conversion',            available: pdal },
   ]);
-});
-
-// Update server settings (upload limit)
-app.patch('/admin/settings', requireAdminAuth, express.json(), async (req, res) => {
-  const { uploadLimitMb } = req.body ?? {};
-  const parsed = parseInt(uploadLimitMb, 10);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10000) {
-    return res.status(400).json({ error: 'uploadLimitMb must be an integer between 1 and 10000.' });
-  }
-  config.uploadLimitMb = parsed;
-  try {
-    await fs.writeFile(settingsFilePath, JSON.stringify({ uploadLimitMb: parsed }, null, 2), 'utf8');
-    res.json({ uploadLimitMb: parsed });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 });
 
 // List all layers (reads sidecar files)

@@ -1,6 +1,9 @@
 > [!WARNING]
 > **This project is currently under heavy development.**
 > Expect frequent breaking changes, bugs, and incomplete documentation.
+>
+> [!WARNING] 
+**Important — Vibe-Coding:** This repository serves as a primary test case to determine the practical limits and efficacy of "vibe-coding." We are exploring how far rapid, intuition-led prototyping can carry a project before traditional engineering rigor must take over. Some features and code are the result of rapid, exploratory prototyping and may be unstable or behave unexpectedly. Do not use this project with sensitive or private data (yet); exercise caution and validate all outputs before trusting them. A manual evaluation phase is scheduled for later this year to audit the codebase and transition the project toward production-ready standards.
 
 # Stratum3D
 
