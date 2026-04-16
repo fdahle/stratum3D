@@ -1,9 +1,9 @@
 > [!WARNING]
-> **This project is currently under heavy development.**
-> Expect frequent breaking changes, bugs, and incomplete documentation.
+> **This project is currently under heavy development and makes use of vibe-coding.**
+> Expect frequent breaking changes, bugs, and incomplete documentation. Read the [disclaimer](#disclaimer) below.
 >
 > [!WARNING] 
-**Important — Vibe-Coding:** This repository serves as a primary test case to determine the practical limits and efficacy of "vibe-coding." We are exploring how far rapid, intuition-led prototyping can carry a project before traditional engineering rigor must take over. Some features and code are the result of rapid, exploratory prototyping and may be unstable or behave unexpectedly. Do not use this project with sensitive or private data (yet); exercise caution and validate all outputs before trusting them. A manual evaluation phase is scheduled for later this year to audit the codebase and transition the project toward production-ready standards.
+**Important — Vibe-Coding:** This repository serves as a primary test case to determine the practical limits and efficacy of "vibe-coding." We are exploring how far rapid, intuition-led prototyping can carry a project before traditional engineering rigor must take over.. Some features and code are the result of rapid, exploratory prototyping and may be unstable or behave unexpectedly. Do not use this project with sensitive or private data (yet); exercise caution and validate all outputs before trusting them. A manual evaluation phase is scheduled for later this year to audit the codebase and transition the project toward production-ready standards.
 
 # Stratum3D
 
@@ -293,6 +293,12 @@ For very large files, upload and processing are handled automatically by the Adm
 3. Make your changes
 4. Test thoroughly (2D map, 3D viewer, preprocessing)
 5. Submit a pull request
+
+## Disclaimer
+
+This repository serves as a primary test case to determine the practical limits and efficacy of "vibe-coding." We are exploring how far rapid, intuition-led prototyping can carry a project before traditional engineering rigor must take over.
+
+Because features are the result of rapid exploration, they may behave unexpectedly. Do not use this with sensitive data. A manual evaluation and code audit phase is scheduled for later this year to transition Stratum3D toward production-ready standards.
 
 ## License
 
